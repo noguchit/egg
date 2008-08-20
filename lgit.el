@@ -113,7 +113,9 @@ Many Lgit faces inherit from this one by default."
 		 (const :tag "Hide Nothing" nil)
 		 (const :tag "Hide Everything" t)))
 
+;;;========================================================
 ;;; simple routines
+;;;========================================================
 
 (defun lgit-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
@@ -123,7 +125,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 	standard-output
       (apply 'call-process program nil t nil args))))
 
-(defun lgit-cmd-to-string (program &rest args)
+(defsubst lgit-cmd-to-string (program &rest args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
   (lgit-cmd-to-string-1 program args))
@@ -137,11 +139,11 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (substring str 0 -1)
 	str))))
 
-(defun lgit-git-to-lines (&rest args)
+(defsubst lgit-git-to-lines (&rest args)
   (split-string (substring (lgit-cmd-to-string-1 "git" args) 0 -1)
 		"\n"))
 
-(defun lgit-local-branches ()
+(defsubst lgit-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
   (lgit-git-to-lines "rev-parse" "--symbolic" "--branches"))
 
@@ -175,13 +177,13 @@ ARGS is a list of arguments to pass to PROGRAM."
       (if (string-match "\\`refs/heads/\\(.+\\)" ref)
 	  (match-string 1 ref)))))
 
-(defun lgit-current-sha1 ()
+(defsubst lgit-current-sha1 ()
   (lgit-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
 
-(defun lgit-HEAD ()
+(defsubst lgit-HEAD ()
   (cons (lgit-current-sha1) (lgit-current-branch)))
 
-(defun lgit-config-get (&rest keys)
+(defsubst lgit-config-get (&rest keys)
   (lgit-git-to-string "config"
 		      (mapconcat 'identity keys ".")))
 
@@ -194,5 +196,83 @@ ARGS is a list of arguments to pass to PROGRAM."
 	   nil)
 	  (t (error "Unexpected contents of boolean config %s"
 		    qual-name)))))
+
+(defsubst lgit-is-in-git (&optional dir)
+  (let ((default-directory (or dir default-directory)))
+    (= (call-process "git" nil nil nil "rev-parse" "--git-dir")
+       0)))
+
+(defsubst lgit-name-rev (rev)
+  (lgit-git-to-string "name-rev" "--always" "--name-only" rev))
+
+;;;========================================================
+;;; Async Git process
+;;;========================================================
+
+(defun lgit-async-do (exit-code func-args args)
+  "Run GIT asynchronously with ARGS.
+if EXIT code is an exit-code from GIT other than zero but considered
+success."
+  (let ((dir default-directory)
+	(buf (get-buffer-create "*lgit-process*"))
+	(inhibit-read-only inhibit-read-only)
+	(accepted-msg (and (integerp exit-code)
+			   (format "exited abnormally with code %d"
+				   exit-code)))
+	proc)
+    (setq proc (get-buffer-process buf))
+    (when (and (processp proc) 		;; is a process
+	       (not (eq (process-status proc) 'exit)) ;; not finised
+	       (= (process-exit-status proc) 0))      ;; still running
+      (error "LGIT: %s is already running!" (process-command proc)))
+    ;; should set mode-line here
+    (with-current-buffer buf
+      (setq inhibit-read-only t)
+      (setq default-directory dir)
+      ;;(erase-buffer)
+      (widen)
+      (goto-char (point-max))
+      (insert "LGIT-GIT-CMD:\n")
+      (insert (format "%S\n" args))
+      (insert "LGIT-GIT-OUTPUT:\n")
+      (setq proc (apply 'start-process "lgit-git" buf "git" args))
+      (when (and (consp func-args) (functionp (car func-args)))
+	(process-put proc :callback-func (car func-args))
+	(process-put proc :callback-args (cdr func-args)))
+      (when (stringp accepted-msg)
+	(process-put proc :accepted-msg accepted-msg)
+	(process-put proc :accepted-code exit-code))
+      (process-put proc :cmds (cons "git" args))
+      (set-process-sentinel proc #'lgit-process-sentinel))))
+
+(defun lgit-process-sentinel (proc msg)
+  (let ((exit-code (process-get proc :accepted-code))
+	(accepted-msg (process-get proc :accepted-msg))
+	(callback-func (process-get proc :callback-func))
+	(callback-args (process-get proc :callback-args))
+	(cmds (process-get proc :cmds)))
+    (cond ((string= msg "finished\n")
+	   (message "LGIT: git finished."))
+	  ((string= msg "killed\n")
+	   (message "LGIT: git was killed."))
+	  ((string-match accepted-msg msg)
+	   (message "LGIT: git exited with code: %d." exit-code))
+	  ((string-match "exited abnormally" msg)
+	   (message "LGIT: git failed."))
+	  (t (message "LGIT: git is weird!")))
+    ;; set mode-line here
+    (with-current-buffer (process-buffer proc)
+      (widen)
+      (goto-char (point-max))
+      (re-search-backward "^LGIT-GIT-CMD:" nil t)
+      (narrow-to-region (point) (point-max))
+      (if (functionp callback-func)
+	  (apply callback-func proc cmds callback-args)))
+  
+    ;; (lgit-revert-files)
+    ;; (magit-update-status (magit-find-status-buffer))
+    ))
+
+
 
 (provide 'lgit)
