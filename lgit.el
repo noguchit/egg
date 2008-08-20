@@ -225,20 +225,22 @@ ARGS is a list of arguments to pass to PROGRAM."
 					   config-as-string))
 		   "\\[" t))))
 
-(defsubst lgit-is-in-git (&optional dir)
-  (let ((default-directory (or dir default-directory)))
-    (= (call-process "git" nil nil nil "rev-parse" "--git-dir")
-       0)))
+(defsubst lgit-is-in-git ()
+  (= (call-process "git" nil nil nil "rev-parse" "--git-dir") 0))
+
+(defsubst lgit-is-dir-in-git (dir)
+  (let ((default-directory dir)) (lgit-is-in-git)))
 
 (defsubst lgit-name-rev (rev)
   (lgit-git-to-string "name-rev" "--always" "--name-only" rev))
 
-(defun lgit-read-git-dir (&optional dir)
-  (let ((default-directory (or dir default-directory)))
-    (setq dir (lgit-git-to-string "rev-parse" "--git-dir"))
-    (when (stringp dir)
-      (setq dir (expand-file-name dir)))
-    dir))
+(defun lgit-read-git-dir ()
+  (let ((dir (lgit-git-to-string "rev-parse" "--git-dir")))
+    (if (stringp dir) 
+	(expand-file-name dir))))
+
+(defsubst lgit-read-dir-git-dir (dir)
+  (let ((default-directory dir)) (lgit-read-git-dir)))
 
 (defvar lgit-git-dir nil)
 (defsubst lgit-git-dir ()
@@ -250,17 +252,17 @@ ARGS is a list of arguments to pass to PROGRAM."
   (with-current-buffer buffer
     (lgit-git-dir)))
 
-(defun lgit-HEAD (&optional dir)
-  (let* ((default-directory (or dir default-directory))
-	 (git-dir (lgit-git-dir)))
+(defun lgit-HEAD ()
+  (let* ((git-dir (lgit-git-dir))) 
     (if git-dir
 	(lgit-pick-file-contents (concat git-dir "/HEAD")
 				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2))))
 
 (defsubst lgit-current-branch ()
-  (if (lgit-git-dir)
-      (lgit-pick-file-contents (concat (lgit-git-dir) "/HEAD")
-			       "^ref: refs/heads/\\(.+\\)" 1)))
+  (let* ((git-dir (lgit-git-dir))) 
+    (if (stringp git-dir)
+	(lgit-pick-file-contents (concat git-dir "/HEAD")
+				 "^ref: refs/heads/\\(.+\\)" 1))))
 
 (defsubst lgit-current-sha1 ()
   (lgit-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
@@ -370,6 +372,78 @@ success."
 
 (defun lgit-async-callback-single-file (proc cmds))
 
+;;;========================================================
+;;; status buffer
+;;;========================================================
+(defun lgit-get-status-buffer-create ()
+  (let* ((git-dir (lgit-git-dir))
+	 (dir (file-name-directory git-dir))
+	 (dir-name (file-name-nondirectory (directory-file-name dir)))
+	 (buf-name (format "*%s@lgit:%s*" dir-name dir))
+	 (default-directory dir))
+    (get-buffer-create buf-name)))
+
+(defun lgit-safe-search (re limit &optional no)
+  (save-excursion
+    (save-match-data
+      (and (re-search-forward re limit t)
+	   (match-beginning (or no 0))))))
+
+(defun lgit-decorate-diff-header (no)
+  (put-text-property (match-beginning 0)
+		     (match-end 0)
+		     'display
+		     (propertize (match-string-no-properties no))
+		     'lgit-diff-file-header))
+
+(defun lgit-decorate-hunk-header (no)
+  (put-text-property (match-beginning no)
+		     (match-end no)
+		     'face
+		     'lgit-diff-hunk-header)
+  (put-text-property (match-end no)
+		     (match-end 0)
+		     'face
+		     'lgit-diff-none))
+
+(defun lgit-parse-diff-section (sect-type section beg end 
+					  &optional diff-src-prefix
+					  diff-dst-prefix)
+  (put-text-property beg end :sect-type sect-type)
+  (put-text-property beg end sect-type section)
+  (let ((a (or diff-src-prefix "a/"))
+	(b (or diff-dst-prefix "b/"))
+	sub-beg sub-end)
+  (save-excursion
+    (goto-char (1+ beg))
+    (while (re-search-forward 
+	      (concat "^\\(?:"
+		      "diff --git " a "\\(.+\\) " b "\\|" ;1 file
+		      "\\(@@ .+@@\\)\\|"		  ;2 hunk
+		      "index \\(.+\\)\\|"		  ;3 index
+		      "\\(-.+\\)\\|"			  ;4 del
+		      "\\(\\+.+\\)\\|"			  ;5 add
+		      "\\( .+\\)\\|"			  ;6 none
+		      "\\)")
+	      end t)
+      (setq sub-beg (match-beginning 0))
+      (cond ((match-beginning 1)	;; diff
+	     (setq sub-end (lgit-safe-search "^diff " end))
+	     (setq sub-end (if sub-end (1- sub-end) end))
+	     (lgit-decorate-diff-header 1)
+	     (lgit-parse-diff-section :diff sub-beg 
+				      sub-beg sub-end))
+	    ((match-beginning 2)	;; hunk
+	     (setq sub-end (lgit-safe-search "^\\(:?diff\\|@@\\)" end))
+	     (setq sub-end (if sub-end (1- sub-end) end))
+	     (lgit-decorate-hunk-header 2)
+	     (lgit-parse-diff-section :hunk sub-beg 
+				      sub-beg sub-end)))))))
+
+(defun lgit-do-insert-section (title level washer git-cmd args)
+  (let ((sect-pos (point)))
+    (when (stringp title)
+      (insert (propertize title 'face 'lgit-section-title) "\n"))))
 
 
 (provide 'lgit)
