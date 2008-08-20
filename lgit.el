@@ -420,14 +420,54 @@ success."
 		     'face
 		     'lgit-diff-none))
 
-(defun lgit-parse-diff-section (sect-type section beg end 
-					  &optional diff-src-prefix
-					  diff-dst-prefix)
+(defsubst lgit-delimit-section (sect-type section beg end)
   (put-text-property beg end :sect-type sect-type)
-  (put-text-property beg end sect-type section)
+  (put-text-property beg end sect-type section))
+
+(defun lgit-decorate-diff-sequence (beg end regexp
+					diff-re-no
+					hunk-re-no
+					index-re-no
+					del-re-no
+					add-re-no
+					none-re-no)
+  (let (sub-beg sub-end)
+    (goto-char (1+ beg))
+      (while (re-search-forward regexp end t)
+	(setq sub-beg (match-beginning 0))
+	(cond ((match-beginning del-re-no) ;; del
+	       (put-text-property (match-beginning 0) (match-end 0)
+				  'face 'lgit-diff-del))
+	      ((match-beginning add-re-no) ;; add
+	       (put-text-property (match-beginning 0) (match-end 0)
+				  'face 'lgit-diff-add))
+	      ((match-beginning none-re-no) ;; unchanged
+	       (put-text-property (match-beginning 0) (match-end 0)
+				  'face 'lgit-diff-none))
+	      ((match-beginning hunk-re-no) ;; hunk
+	       (setq sub-end (lgit-safe-search "^\\(:?diff\\|@@\\)" end))
+	       (setq sub-end (if sub-end (1- sub-end) end))
+	       (lgit-decorate-hunk-header hunk-re-no)
+	       (lgit-delimit-section :hunk sub-beg sub-beg sub-end))
+	      ((match-beginning diff-re-no) ;; diff
+	       (setq sub-end (lgit-safe-search "^diff " end))
+	       (setq sub-end (if sub-end (1- sub-end) end))
+	       (lgit-decorate-diff-header diff-re-no)
+	       (lgit-delimit-section :diff sub-beg sub-beg sub-end))
+	      ((match-beginning index-re-no) ;; index
+	       (lgit-decorate-diff-index-line index-re-no))
+	      
+	      );; cond
+	) ;; while
+    nil))
+
+(defun lgit-decorate-section (sect-type section beg end 
+					&optional diff-src-prefix
+					diff-dst-prefix)
   (let ((a (or diff-src-prefix "a/"))
 	(b (or diff-dst-prefix "b/"))
-	sub-beg sub-end re)
+	re)
+    (lgit-delimit-section sect-type section beg end)
     (setq re
 	  (concat "^\\(?:"
 		  "diff --git " a "\\(.+\\) " b ".+\\|" ;1 file
@@ -437,35 +477,7 @@ success."
 		  "\\(\\+.*\\)\\|"			;5 add
 		  "\\( .*\\)"				;6 none
 		  "\\)$"))
-    (goto-char (1+ beg))
-      (while (re-search-forward re end t)
-	(setq sub-beg (match-beginning 0))
-	(cond ((match-beginning 1) ;; diff
-	       (setq sub-end (lgit-safe-search "^diff " end))
-	       (setq sub-end (if sub-end (1- sub-end) end))
-	       (lgit-decorate-diff-header 1)
-	       (lgit-parse-diff-section :diff sub-beg 
-					sub-beg sub-end))
-	      ((match-beginning 2) ;; hunk
-	       (setq sub-end (lgit-safe-search "^\\(:?diff\\|@@\\)" end))
-	       (setq sub-end (if sub-end (1- sub-end) end))
-	       (lgit-decorate-hunk-header 2)
-	       (lgit-parse-diff-section :hunk sub-beg 
-					sub-beg sub-end))
-	      ((match-beginning 3) ;; index
-	       (lgit-decorate-diff-index-line 3))
-	      ((match-beginning 4) ;; del
-	       (put-text-property (match-beginning 0) (match-end 0)
-				  'face 'lgit-diff-del))
-	      ((match-beginning 5) ;; add
-	       (put-text-property (match-beginning 0) (match-end 0)
-				  'face 'lgit-diff-add))
-	      ((match-beginning 6) ;; unchanged
-	       (put-text-property (match-beginning 0) (match-end 0)
-				  'face 'lgit-diff-none))
-	      );; cond
-	) ;; while
-    nil))
+    (lgit-decorate-diff-sequence beg end re 1 2 3 4 5 6)))
 
 (defun lgit-do-insert-section (title level washer git-cmd args)
   (let ((sect-pos (point)))
