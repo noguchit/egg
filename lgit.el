@@ -24,6 +24,7 @@
 ;;;
 
 (require 'parse-time)
+(require 'autorevert)
 
 (defgroup lgit nil
   "Controlling Git from Emacs."
@@ -182,6 +183,32 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defsubst lgit-HEAD ()
   (cons (lgit-current-sha1) (lgit-current-branch)))
+
+(defun lgit-parse-config-buf ()
+  (unless auto-revert-mode
+    (revert-buffer t t)
+    (turn-on-auto-revert-mode))
+  (save-match-data
+    (mapcar 
+     (lambda (chunk) 
+       (let* ((parts (split-string chunk "[\t\n]+" t))
+	      (key (car parts))
+	      (info-list (cdr parts))
+	      type info)
+	 (when (string-match "\\`\\(\\S-+\\)\\(?: +\"\\(.+\\)\"\\)?\\'" key)
+	   (setq type (if (match-beginning 2)
+			 (cons (intern (match-string 1 key))
+			       (match-string 2 key)) 
+		       (intern (match-string 1 key)))))
+	 (setq info
+	       (mapcar (lambda (entry)
+			 (split-string entry "[ =]+" t))
+		       info-list))
+	 (cons type info)))
+     (split-string (subst-char-in-string ?\] ?\t
+					 (buffer-substring-no-properties 
+					  (point-min) (point-max)))
+		   "\\[" t))))
 
 (defsubst lgit-config-get (&rest keys)
   (lgit-git-to-string "config"
