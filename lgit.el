@@ -420,9 +420,14 @@ success."
 		     'face
 		     'lgit-diff-none))
 
-(defsubst lgit-delimit-section (sect-type section beg end)
+(defsubst lgit-delimit-section (sect-type section beg end 
+					  &optional mark-invisibility-p)
   (put-text-property beg end :sect-type sect-type)
-  (put-text-property beg end sect-type section))
+  (put-text-property beg end sect-type section)
+  (when mark-invisibility-p 
+    (let ((current-inv (get-text-property beg 'invisibility)))
+      (put-text-property beg (1- end) 'invisibility
+			 (cons beg current-inv)))))
 
 (defun lgit-decorate-diff-sequence (beg end regexp
 					diff-re-no
@@ -432,7 +437,7 @@ success."
 					add-re-no
 					none-re-no)
   (let (sub-beg sub-end)
-    (goto-char (1+ beg))
+    (goto-char beg)
       (while (re-search-forward regexp end t)
 	(setq sub-beg (match-beginning 0))
 	(cond ((match-beginning del-re-no) ;; del
@@ -445,15 +450,17 @@ success."
 	       (put-text-property (match-beginning 0) (match-end 0)
 				  'face 'lgit-diff-none))
 	      ((match-beginning hunk-re-no) ;; hunk
-	       (setq sub-end (lgit-safe-search "^\\(:?diff\\|@@\\)" end))
-	       (setq sub-end (if sub-end (1- sub-end) end))
+	       (setq sub-end (or (lgit-safe-search "^\\(:?diff\\|@@\\)"
+						   end)
+				 end))
 	       (lgit-decorate-hunk-header hunk-re-no)
-	       (lgit-delimit-section :hunk sub-beg sub-beg sub-end))
+	       (lgit-delimit-section :hunk (cons sub-beg sub-end)
+				     sub-beg sub-end t))
 	      ((match-beginning diff-re-no) ;; diff
-	       (setq sub-end (lgit-safe-search "^diff " end))
-	       (setq sub-end (if sub-end (1- sub-end) end))
+	       (setq sub-end (or (lgit-safe-search "^diff " end) end))
 	       (lgit-decorate-diff-header diff-re-no)
-	       (lgit-delimit-section :diff sub-beg sub-beg sub-end))
+	       (lgit-delimit-section :diff (cons sub-beg sub-end)
+				     sub-beg sub-end t))
 	      ((match-beginning index-re-no) ;; index
 	       (lgit-decorate-diff-index-line index-re-no))
 	      
