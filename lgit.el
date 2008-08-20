@@ -288,26 +288,21 @@ ARGS is a list of arguments to pass to PROGRAM."
   (and (lgit-git-dir)
        (cadr (assoc attr (lgit-config-section type name)))))
 
-(defun lgit-bool-config (&rest keys)
-  (let* ((qual-name (mapconcat 'identity keys "."))
-	 (flag (lgit-git-to-string "config" qual-name)))
+(defun lgit-bool-config (type attr &optional name)
+  (let ((flag (lgit-config-get type attr name)))
     (cond ((equal flag "true")
 	   t)
 	  ((equal flag "false")
 	   nil)
-	  (t (error "Unexpected contents of boolean config %s"
-		    qual-name)))))
-
+	  (t (error "Unexpected contents of boolean config %s of %s.%s"
+		    attr type name)))))
 
 
 ;;;========================================================
 ;;; hooks
 ;;;========================================================
 
-(defun lgit-find-file-hook ()
-  (let ((git-dir (lgit-git-dir)))
-    (when (stringp git-dir)
-      )))
+(add-hook 'find-file-hook 'lgit-git-dir)
 
 ;;;========================================================
 ;;; Async Git process
