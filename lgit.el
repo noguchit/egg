@@ -225,7 +225,6 @@ success."
 	       (not (eq (process-status proc) 'exit)) ;; not finised
 	       (= (process-exit-status proc) 0))      ;; still running
       (error "LGIT: %s is already running!" (process-command proc)))
-    ;; should set mode-line here
     (with-current-buffer buf
       (setq inhibit-read-only t)
       (setq default-directory dir)
@@ -236,6 +235,7 @@ success."
       (insert (format "%S\n" args))
       (insert "LGIT-GIT-OUTPUT:\n")
       (setq proc (apply 'start-process "lgit-git" buf "git" args))
+      (setq mode-line-process " git")
       (when (and (consp func-args) (functionp (car func-args)))
 	(process-put proc :callback-func (car func-args))
 	(process-put proc :callback-args (cdr func-args)))
@@ -260,18 +260,16 @@ success."
 	  ((string-match "exited abnormally" msg)
 	   (message "LGIT: git failed."))
 	  (t (message "LGIT: git is weird!")))
-    ;; set mode-line here
     (with-current-buffer (process-buffer proc)
+      (setq mode-line-process nil)
       (widen)
       (goto-char (point-max))
       (re-search-backward "^LGIT-GIT-CMD:" nil t)
       (narrow-to-region (point) (point-max))
       (if (functionp callback-func)
-	  (apply callback-func proc cmds callback-args)))
-  
-    ;; (lgit-revert-files)
-    ;; (magit-update-status (magit-find-status-buffer))
-    ))
+	  (apply callback-func proc cmds callback-args)))))
+
+(defun lgit-async-callback-single-file (proc cmds))
 
 
 
