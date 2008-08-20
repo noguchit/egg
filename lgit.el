@@ -121,10 +121,15 @@ Many Lgit faces inherit from this one by default."
 (defun lgit-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
-  (with-output-to-string
-    (with-current-buffer
-	standard-output
-      (apply 'call-process program nil t nil args))))
+  (let (str code)
+    (setq str 
+	  (with-output-to-string
+	    (with-current-buffer
+		standard-output
+	      (setq code (apply 'call-process program nil t nil args)))))
+    (if (= code 0)
+	str
+      nil)))
 
 (defsubst lgit-cmd-to-string (program &rest args)
   "Execute PROGRAM and return its output as a string.
@@ -172,22 +177,29 @@ ARGS is a list of arguments to pass to PROGRAM."
    (if (or lbranch rbranch)
        (format "%s%s%s" (or lbranch "") (if rbranch ":" "") (or rbranch ""))))
 
-(defun lgit-current-branch ()
-  (let ((ref (lgit-git-to-string "symbolic-ref" "-q" "HEAD")))
-    (save-match-data
-      (if (string-match "\\`refs/heads/\\(.+\\)" ref)
-	  (match-string 1 ref)))))
+(defun lgit-file-as-string-raw (file-name)
+  (with-temp-buffer
+    (insert-file-contents-literally file-name)
+    (buffer-string)))
 
-(defsubst lgit-current-sha1 ()
-  (lgit-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
+(defun lgit-pick-file-contents (file-name regexp &rest indices)
+  (with-temp-buffer
+    (insert-file-contents-literally file-name)
+    (goto-char (point-min))
+    (when (re-search-forward regexp nil t)
+      (if (null indices)
+	  (match-string-no-properties 0)
+	(dolist (idx indices)
+	  (if (match-beginning idx)
+	      (return (match-string-no-properties idx))))))))
 
-(defsubst lgit-HEAD ()
-  (cons (lgit-current-sha1) (lgit-current-branch)))
+(defun lgit-file-as-string (file-name)
+  (let ((str (lgit-file-as-string-raw file-name)))
+    (if (> (length str) 0)
+	(substring str 0 -1)
+      str)))
 
-(defun lgit-parse-config-buf ()
-  (unless auto-revert-mode
-    (revert-buffer t t)
-    (turn-on-auto-revert-mode))
+(defun lgit-parse-config-contents (config-as-string)
   (save-match-data
     (mapcar 
      (lambda (chunk) 
@@ -206,9 +218,53 @@ ARGS is a list of arguments to pass to PROGRAM."
 		       info-list))
 	 (cons type info)))
      (split-string (subst-char-in-string ?\] ?\t
-					 (buffer-substring-no-properties 
-					  (point-min) (point-max)))
+					 (progn
+					   (set-text-properties 0 (length config-as-string)
+								nil
+								config-as-string)
+					   config-as-string))
 		   "\\[" t))))
+
+(defsubst lgit-is-in-git (&optional dir)
+  (let ((default-directory (or dir default-directory)))
+    (= (call-process "git" nil nil nil "rev-parse" "--git-dir")
+       0)))
+
+(defsubst lgit-name-rev (rev)
+  (lgit-git-to-string "name-rev" "--always" "--name-only" rev))
+
+(defun lgit-read-git-dir (&optional dir)
+  (let ((default-directory (or dir default-directory)))
+    (setq dir (lgit-git-to-string "rev-parse" "--git-dir"))
+    (when (stringp dir)
+      (setq dir (expand-file-name dir)))
+    dir))
+
+(defvar lgit-git-dir nil)
+(defsubst lgit-git-dir ()
+  (if (stringp lgit-git-dir)
+      lgit-git-dir
+    (set (make-local-variable 'lgit-git-dir) (lgit-read-git-dir))))
+
+(defsubst lgit-buf-git-dir (buffer)
+  (with-current-buffer buffer
+    (lgit-git-dir)))
+
+(defun lgit-HEAD (&optional dir)
+  (let ((default-directory (or dir default-directory)))
+    (lgit-pick-file-contents (concat (lgit-git-dir) "/HEAD")
+			     "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2)))
+
+(defsubst lgit-current-branch ()
+  (lgit-pick-file-contents (concat (lgit-git-dir) "/HEAD")
+			   "^ref: refs/heads/\\(.+\\)" 1))
+
+(defsubst lgit-current-sha1 ()
+  (lgit-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
+
+(defsubst lgit-head ()
+  (cons (lgit-current-sha1) 
+	(or (lgit-current-branch) "(Detached HEAD)")))
 
 (defsubst lgit-config-get (&rest keys)
   (lgit-git-to-string "config"
@@ -224,13 +280,16 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (t (error "Unexpected contents of boolean config %s"
 		    qual-name)))))
 
-(defsubst lgit-is-in-git (&optional dir)
-  (let ((default-directory (or dir default-directory)))
-    (= (call-process "git" nil nil nil "rev-parse" "--git-dir")
-       0)))
 
-(defsubst lgit-name-rev (rev)
-  (lgit-git-to-string "name-rev" "--always" "--name-only" rev))
+
+;;;========================================================
+;;; hooks
+;;;========================================================
+
+(defun lgit-find-file-hook ()
+  (let ((git-dir (lgit-git-dir)))
+    (when (stringp git-dir)
+      )))
 
 ;;;========================================================
 ;;; Async Git process
