@@ -251,24 +251,42 @@ ARGS is a list of arguments to pass to PROGRAM."
     (lgit-git-dir)))
 
 (defun lgit-HEAD (&optional dir)
-  (let ((default-directory (or dir default-directory)))
-    (lgit-pick-file-contents (concat (lgit-git-dir) "/HEAD")
-			     "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2)))
+  (let* ((default-directory (or dir default-directory))
+	 (git-dir (lgit-git-dir)))
+    (if git-dir
+	(lgit-pick-file-contents (concat git-dir "/HEAD")
+				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2))))
 
 (defsubst lgit-current-branch ()
-  (lgit-pick-file-contents (concat (lgit-git-dir) "/HEAD")
-			   "^ref: refs/heads/\\(.+\\)" 1))
+  (if (lgit-git-dir)
+      (lgit-pick-file-contents (concat (lgit-git-dir) "/HEAD")
+			       "^ref: refs/heads/\\(.+\\)" 1)))
 
 (defsubst lgit-current-sha1 ()
   (lgit-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
 
 (defsubst lgit-head ()
-  (cons (lgit-current-sha1) 
-	(or (lgit-current-branch) "(Detached HEAD)")))
+  (if (lgit-git-dir)
+      (cons (lgit-current-sha1) 
+	    (or (lgit-current-branch) "(Detached HEAD)"))))
 
-(defsubst lgit-config-get (&rest keys)
-  (lgit-git-to-string "config"
-		      (mapconcat 'identity keys ".")))
+(defun lgit-config-section-raw (type &optional name)
+  (lgit-pick-file-contents (concat (lgit-git-dir) "/config")
+			   (concat "^"
+				   (if name (format "\\[%s \"%s\"\\]" type name)
+				     (format "\\[%s\\]" type))
+				   "\n"
+				   "\\(\\(:?\t.+\n\\)+\\)")
+			   1))
+
+(defsubst lgit-config-section (type &optional name)
+  (mapcar 
+   (lambda (line) (split-string line "[ =]+" t))
+   (split-string (lgit-config-section-raw type name) "[\t\n]+" t)))
+
+(defsubst lgit-config-get (type attr &optional name)
+  (and (lgit-git-dir)
+       (cadr (assoc attr (lgit-config-section type name)))))
 
 (defun lgit-bool-config (&rest keys)
   (let* ((qual-name (mapconcat 'identity keys "."))
