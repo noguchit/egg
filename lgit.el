@@ -352,13 +352,6 @@ success."
 ;;;========================================================
 ;;; status buffer
 ;;;========================================================
-(defun lgit-get-status-buffer-create ()
-  (let* ((git-dir (lgit-git-dir))
-	 (dir (file-name-directory git-dir))
-	 (dir-name (file-name-nondirectory (directory-file-name dir)))
-	 (buf-name (format "*%s@lgit:%s*" dir-name dir))
-	 (default-directory dir))
-    (get-buffer-create buf-name)))
 
 (defun list-tp ()
   (interactive)
@@ -500,8 +493,8 @@ success."
     (lgit-decorate-diff-section :section 'staged beg (point) 
 				"HEAD/" "INDEX/")))
 
-(defun lgit-update-status-buffer (&optional update-display-p)
-  (with-current-buffer (lgit-get-status-buffer-create) 
+(defun lgit-update-status-buffer (buffer &optional update-display-p)
+  (with-current-buffer buffer  
       (let ((inhibit-read-only t))
 	(erase-buffer)
 	(lgit-sb-insert-repo-section)
@@ -509,14 +502,68 @@ success."
 	(lgit-sb-insert-staged-section)
 	(when update-display-p
 	  (force-window-update (current-buffer)))
+	(goto-char (point-min))
 	(current-buffer))))
 
-(defun lgit-display-status-buffer (&optional update-p)
+(defun lgit-status-buffer-cmd-refresh ()
+  (interactive)
+  (lgit-update-status-buffer (current-buffer) t)
+  (goto-char (point-min)))
+
+(defun lgit-status-buffer-cmd-navigate-next ()
+  (interactive)
+  (goto-char (or (next-single-property-change (point) :navigation)
+		 (point))))
+
+(defun lgit-status-buffer-cmd-navigate-prev ()
+  (interactive)
+  (goto-char (previous-single-property-change (point) :navigation
+					      nil (point-min))))
+
+(defconst lgit-status-buffer-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "q") 'bury-buffer)
+    (define-key map (kbd "g") 'lgit-status-buffer-cmd-refresh)
+    (define-key map (kbd "SPC") 'lgit-status-buffer-cmd-navigate-next)
+    (define-key map (kbd "DEL") 'lgit-status-buffer-cmd-navigate-prev)
+    map))
+
+(defun lgit-status-buffer-mode ()
+  "Major mode to display the status buffer."
+  (kill-all-local-variables)
+  (setq buffer-read-only t)
+  (setq major-mode 'lgit-status-buffer-mode
+	mode-name "LGit:Status"
+	mode-line-process ""
+	truncate-lines t)
+  (use-local-map lgit-status-buffer-mode-map)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'lgit-status-buffer-mode-hook))
+
+(defun lgit-get-status-buffer-create (&optional init-p)
+  (let* ((git-dir (lgit-git-dir))
+	 (dir (file-name-directory git-dir))
+	 (dir-name (file-name-nondirectory (directory-file-name dir)))
+	 (buf-name (format "*%s@lgit:%s*" dir-name dir))
+	 (default-directory dir)
+	 (buf (get-buffer buf-name)))
+
+    (when (or (null (prog1 buf (setq buf (get-buffer-create buf-name))))
+	      init-p)
+      (with-current-buffer buf
+	(lgit-status-buffer-mode)))
+    buf))
+
+(defun lgit-display-status-buffer (&optional no-update-p)
   (interactive "P")
-  (let ((buf (if update-p
-		 (lgit-update-status-buffer t)
-	       (lgit-get-status-buffer-create))))
+  (let ((buf (lgit-get-status-buffer-create)))
+    (unless no-update-p
+      (lgit-update-status-buffer buf t))
     (display-buffer buf t)))
 
+
+;;;========================================================
+;;; action
+;;;========================================================
 
 (provide 'lgit)
