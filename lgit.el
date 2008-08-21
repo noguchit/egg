@@ -467,9 +467,7 @@ success."
 				   end))
 		 (lgit-decorate-hunk-header hunk-re-no)
 		 (lgit-delimit-section 
-		  :hunk (list (nth 2 (split-string 
-				      (match-string-no-properties hunk-re-no)
-				      "[ @,\+,-]+" t))
+		  :hunk (list (match-string-no-properties hunk-re-no) 
 			      sub-beg sub-end)
 		  sub-beg sub-end t hunk-map))
 		((match-beginning diff-re-no) ;; diff
@@ -511,11 +509,20 @@ success."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
-(defun lgit-hunk-section-visit-file (file line)
-  (interactive (list (car (get-text-property (point) :diff))
-		     (string-to-number (car (get-text-property (point) :hunk)))))
-  (find-file file)
-  (goto-line line))
+(defun lgit-hunk-section-visit-file (file hunk-header hunk-beg hunk-end)
+  (interactive (cons (car (get-text-property (point) :diff))
+		     (get-text-property (point) :hunk)))
+  (let ((limit (line-end-position))
+	(line (string-to-number (nth 2 (split-string hunk-header "[ @,\+,-]+" t))))
+	(adjust 0))
+    (save-excursion
+      (goto-char hunk-beg)
+      (forward-line 1)
+      (end-of-line)
+      (while (re-search-forward "^\\(:?\\+\\| \\).*" limit t)
+	(setq adjust (1+ adjust))))
+    (find-file file)
+    (goto-line (+ line adjust))))
 
 ;;;========================================================
 ;;; Status Buffer
