@@ -357,6 +357,7 @@ success."
 (defconst lgit-section-map 
   (let ((map (make-sparse-keymap "LGit:Section")))
     (define-key map (kbd "h") 'lgit-section-cmd-toggle-hide-show)
+    (define-key map (kbd "H") 'lgit-section-cmd-toggle-hide-show-children)
     map))
 
 (defconst lgit-diff-section-map 
@@ -538,14 +539,22 @@ success."
     (add-to-invisibility-spec (cons pos t)))
   (force-window-update (current-buffer)))
 
-(defun lgit-section-cmd-toggle-hide-show-children (pos)
-  (interactive (list (get-text-property (point) :navigation)))
-  (let* ((sect-type (get-text-property (point) :sect-type))
-	 (sect-info (get-text-property (point) sect-type))))
-  (if (assq pos buffer-invisibility-spec)
-      (remove-from-invisibility-spec (cons pos t))
-    (add-to-invisibility-spec (cons pos t)))
-  (force-window-update (current-buffer)))
+(defun lgit-section-cmd-toggle-hide-show-children (pos sect-type)
+  (interactive (list (get-text-property (point) :navigation)
+		     (get-text-property (point) :sect-type)))
+
+  (let ((end (next-single-property-change pos sect-type))
+	child
+	currently-hidden)
+    (setq child (next-single-property-change pos :navigation nil end))
+    (setq currently-hidden (and child
+				(assq child buffer-invisibility-spec)))
+    (setq child pos)
+    (while (< (setq child (next-single-property-change child :navigation nil end)) end)
+      (if currently-hidden
+	  (remove-from-invisibility-spec (cons child  t))
+	(add-to-invisibility-spec (cons child t))))
+    (force-window-update (current-buffer))))
 
 
 ;;;========================================================
