@@ -458,7 +458,7 @@ success."
 					none-re-no)
   (save-match-data
     (save-excursion
-      (let (sub-beg sub-end)
+      (let (sub-beg sub-end head-end)
 	(goto-char beg)
 	(while (re-search-forward regexp end t)
 	  (setq sub-beg (match-beginning 0))
@@ -472,8 +472,7 @@ success."
 		 (put-text-property (match-beginning 0) (match-end 0)
 				    'face 'lgit-diff-none))
 		((match-beginning hunk-re-no) ;; hunk
-		 (setq sub-end (or (lgit-safe-search "^\\(:?diff\\|@@\\)"
-						     end)
+		 (setq sub-end (or (lgit-safe-search "^\\(:?diff\\|@@\\)" end)
 				   end))
 		 (lgit-decorate-hunk-header hunk-re-no)
 		 (lgit-delimit-section 
@@ -482,10 +481,11 @@ success."
 		  sub-beg sub-end (match-end 0) hunk-map))
 		((match-beginning diff-re-no) ;; diff
 		 (setq sub-end (or (lgit-safe-search "^diff " end) end))
+		 (setq head-end (or (lgit-safe-search "^@@" end) end))
 		 (lgit-decorate-diff-header diff-re-no)
 		 (lgit-delimit-section
 		  :diff (list (match-string-no-properties diff-re-no)
-			      sub-beg sub-end)
+			      sub-beg sub-end head-end)
 		  sub-beg sub-end (match-end 0) diff-map))
 		((match-beginning index-re-no) ;; index
 		 (lgit-decorate-diff-index-line index-re-no))
@@ -556,6 +556,18 @@ success."
 	(add-to-invisibility-spec (cons child t))))
     (force-window-update (current-buffer))))
 
+(defun lgit-diff-section-patch-string (&optional pos)
+  (let ((diff-info (get-text-property (or pos (point)) :diff)))
+    (buffer-substring-no-properties (nth 1 diff-info)
+				    (nth 2 diff-info))))
+
+(defun lgit-hunk-section-patch-string (&optional pos)
+  (let ((diff-info (get-text-property (or pos (point)) :diff))
+	(hunk-info (get-text-property (or pos (point)) :hunk)))
+    (concat (buffer-substring-no-properties (nth 1 diff-info)
+					    (nth 3 diff-info))
+	    (buffer-substring-no-properties (nth 1 hunk-info)
+					    (nth 2 hunk-info)))))
 
 ;;;========================================================
 ;;; Status Buffer
@@ -688,9 +700,11 @@ success."
       (lgit-update-status-buffer buf t))
     (display-buffer buf t)))
 
-
 ;;;========================================================
 ;;; action
 ;;;========================================================
+
+(defun lgit-run)
+
 
 (provide 'lgit)
