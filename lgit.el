@@ -117,6 +117,10 @@ Many Lgit faces inherit from this one by default."
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
+(defsubst lgit-prepend (str prefix &rest other-properties)
+  (propertize str 'display 
+	      (apply 'propertize (concat prefix str) other-properties)))
+
 
 (defun lgit-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
@@ -198,32 +202,6 @@ ARGS is a list of arguments to pass to PROGRAM."
     (if (> (length str) 0)
 	(substring str 0 -1)
       str)))
-
-(defun lgit-parse-config-contents (config-as-string)
-  (save-match-data
-    (mapcar 
-     (lambda (chunk) 
-       (let* ((parts (split-string chunk "[\t\n]+" t))
-	      (key (car parts))
-	      (info-list (cdr parts))
-	      type info)
-	 (when (string-match "\\`\\(\\S-+\\)\\(?: +\"\\(.+\\)\"\\)?\\'" key)
-	   (setq type (if (match-beginning 2)
-			 (cons (intern (match-string 1 key))
-			       (match-string 2 key)) 
-		       (intern (match-string 1 key)))))
-	 (setq info
-	       (mapcar (lambda (entry)
-			 (split-string entry "[ =]+" t))
-		       info-list))
-	 (cons type info)))
-     (split-string (subst-char-in-string ?\] ?\t
-					 (progn
-					   (set-text-properties 0 (length config-as-string)
-								nil
-								config-as-string)
-					   config-as-string))
-		   "\\[" t))))
 
 (defsubst lgit-is-in-git ()
   (= (call-process "git" nil nil nil "rev-parse" "--git-dir") 0))
@@ -501,10 +479,6 @@ success."
 		(propertize (lgit-git-dir) 'face 'font-lock-reference-face)
 		"\n")
     (lgit-delimit-section :section 'repo beg (point))))
-
-(defsubst lgit-prepend (str prefix &rest other-properties)
-  (propertize str 'display 
-	      (apply 'propertize (concat prefix str) other-properties)))
 
 (defun lgit-sb-insert-unstaged-section ()
   (let ((beg (point)))
