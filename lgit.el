@@ -350,8 +350,44 @@ success."
 (defun lgit-async-callback-single-file (proc cmds))
 
 ;;;========================================================
-;;; status buffer
+;;; Diff/Hunk
 ;;;========================================================
+
+(defconst lgit-diff-section-map 
+  (let ((map (make-sparse-keymap "LGit:Diff")))
+    (define-key map (kbd "RET") 'lgit-diff-section-visit-file)
+    (define-key map (kbd "h") 'lgit-diff-section-toggle-hide-show)
+    map))
+
+(defconst lgit-staged-diff-section-map 
+  (let ((map (make-sparse-keymap "LGit:Diff")))
+    (set-keymap-parent map lgit-diff-section-map)
+    (define-key map (kbd "s") 'lgit-diff-section-unstage)
+    map))
+
+(defconst lgit-unstaged-diff-section-map 
+  (let ((map (make-sparse-keymap "LGit:Diff")))
+    (set-keymap-parent map lgit-diff-section-map)
+    (define-key map (kbd "s") 'lgit-diff-section-stage)
+    map))
+
+(defconst lgit-hunk-section-map 
+  (let ((map (make-sparse-keymap "LGit:Hunk")))
+    (define-key map (kbd "RET") 'lgit-hunk-section-visit-file)
+    (define-key map (kbd "h") 'lgit-hunk-section-toggle-hide-show)
+    map))
+
+(defconst lgit-staged-hunk-section-map 
+  (let ((map (make-sparse-keymap "LGit:Hunk")))
+    (set-keymap-parent map lgit-hunk-section-map)
+    (define-key map (kbd "s") 'lgit-hunk-section-unstage)
+    map))
+
+(defconst lgit-unstaged-hunk-section-map 
+  (let ((map (make-sparse-keymap "LGit:Hunk")))
+    (set-keymap-parent map lgit-hunk-section-map)
+    (define-key map (kbd "s") 'lgit-hunk-section-stage)
+    map))
 
 (defun list-tp ()
   (interactive)
@@ -391,16 +427,19 @@ success."
 		     'lgit-diff-none))
 
 (defsubst lgit-delimit-section (sect-type section beg end 
-					  &optional mark-invisibility-p)
+					  &optional mark-invisibility-p
+					  keymap)
   (put-text-property beg end :sect-type sect-type)
   (put-text-property beg end sect-type section)
   (put-text-property beg end :navigation beg)
+  (when (keymapp keymap)
+    (put-text-property beg end 'keymap keymap))
   (when mark-invisibility-p 
     (let ((current-inv (get-text-property beg 'invisibility)))
       (put-text-property beg (1- end) 'invisibility
 			 (cons beg current-inv)))))
 
-(defun lgit-decorate-diff-sequence (beg end regexp
+(defun lgit-decorate-diff-sequence (beg end diff-map hunk-map regexp
 					diff-re-no
 					hunk-re-no
 					index-re-no
@@ -427,13 +466,19 @@ success."
 						     end)
 				   end))
 		 (lgit-decorate-hunk-header hunk-re-no)
-		 (lgit-delimit-section :hunk (cons sub-beg sub-end)
-				       sub-beg sub-end t))
+		 (lgit-delimit-section 
+		  :hunk (list (nth 2 (split-string 
+				      (match-string-no-properties hunk-re-no)
+				      "[ @,\+,-]+" t))
+			      sub-beg sub-end)
+		  sub-beg sub-end t hunk-map))
 		((match-beginning diff-re-no) ;; diff
 		 (setq sub-end (or (lgit-safe-search "^diff " end) end))
 		 (lgit-decorate-diff-header diff-re-no)
-		 (lgit-delimit-section :diff (cons sub-beg sub-end)
-				       sub-beg sub-end t))
+		 (lgit-delimit-section
+		  :diff (list (match-string-no-properties diff-re-no)
+			      sub-beg sub-end)
+		  sub-beg sub-end t diff-map))
 		((match-beginning index-re-no) ;; index
 		 (lgit-decorate-diff-index-line index-re-no))
 	      
@@ -443,7 +488,8 @@ success."
 
 (defun lgit-decorate-diff-section (sect-type section beg end 
 					     &optional diff-src-prefix
-					     diff-dst-prefix)
+					     diff-dst-prefix
+					     diff-map hunk-map)
   (let ((a (or diff-src-prefix "a/"))
 	(b (or diff-dst-prefix "b/"))
 	re)
@@ -457,7 +503,23 @@ success."
 		  "\\(\\+.*\\)\\|"			;5 add
 		  "\\( .*\\)"				;6 none
 		  "\\)$"))
-    (lgit-decorate-diff-sequence beg end re 1 2 3 4 5 6)))
+    (lgit-decorate-diff-sequence beg end diff-map hunk-map
+				 re 1 2 3 4 5 6)))
+
+
+(defun lgit-diff-section-visit-file (file)
+  (interactive (list (car (get-text-property (point) :diff))))
+  (find-file file))
+
+(defun lgit-hunk-section-visit-file (file line)
+  (interactive (list (car (get-text-property (point) :diff))
+		     (string-to-number (car (get-text-property (point) :hunk)))))
+  (find-file file)
+  (goto-line line))
+
+;;;========================================================
+;;; Status Buffer
+;;;========================================================
 
 (defun lgit-sb-insert-repo-section ()
   (let ((head-info (lgit-head))
@@ -469,9 +531,21 @@ success."
 		"\n"
 		(propertize (car head-info) 'face 'font-lock-string-face)
 		"\n"
-		(propertize (lgit-git-dir) 'face 'font-lock-reference-face)
+		(propertize (lgit-git-dir) 'face 'font-lock-constant-face)
 		"\n")
+    (call-process "git" nil t nil
+		  "log" "--max-count=5"
+		  "--abbrev-commit" "--pretty=oneline")
     (lgit-delimit-section :section 'repo beg (point))))
+
+(defun lgit-sb-insert-untracked-section ()
+  (let ((beg (point)))
+    (insert (lgit-prepend "Untracked Files:" "\n\n" 
+			  'face 'lgit-section-title)
+	    "\n")
+    (call-process "git" nil t nil "ls-files" "--others" 
+		  "--exclude-standard")
+    (lgit-delimit-section :section 'untracked beg (point))))
 
 (defun lgit-sb-insert-unstaged-section ()
   (let ((beg (point)))
@@ -481,7 +555,9 @@ success."
     (call-process "git" nil t nil "diff" "--no-color"
 		  "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/")
     (lgit-decorate-diff-section :section 'unstaged beg (point)
-				"INDEX/" "WORKDIR/")))
+				"INDEX/" "WORKDIR/"
+				lgit-unstaged-diff-section-map
+				lgit-unstaged-hunk-section-map)))
 
 (defun lgit-sb-insert-staged-section ()
   (let ((beg (point)))
@@ -491,13 +567,16 @@ success."
     (call-process "git" nil t nil "diff" "--no-color" "--cached"
 		  "--src-prefix=HEAD/" "--dst-prefix=INDEX/")
     (lgit-decorate-diff-section :section 'staged beg (point) 
-				"HEAD/" "INDEX/")))
+				"HEAD/" "INDEX/"
+				lgit-staged-diff-section-map
+				lgit-staged-hunk-section-map)))
 
 (defun lgit-update-status-buffer (buffer &optional update-display-p)
   (with-current-buffer buffer  
       (let ((inhibit-read-only t))
 	(erase-buffer)
 	(lgit-sb-insert-repo-section)
+	(lgit-sb-insert-untracked-section)
 	(lgit-sb-insert-unstaged-section)
 	(lgit-sb-insert-staged-section)
 	(when update-display-p
@@ -521,11 +600,11 @@ success."
 					      nil (point-min))))
 
 (defconst lgit-status-buffer-mode-map
-  (let ((map (make-sparse-keymap)))
+  (let ((map (make-sparse-keymap "LGit:StatusBuffer")))
     (define-key map (kbd "q") 'bury-buffer)
     (define-key map (kbd "g") 'lgit-status-buffer-cmd-refresh)
-    (define-key map (kbd "SPC") 'lgit-status-buffer-cmd-navigate-next)
-    (define-key map (kbd "DEL") 'lgit-status-buffer-cmd-navigate-prev)
+    (define-key map (kbd "n") 'lgit-status-buffer-cmd-navigate-next)
+    (define-key map (kbd "p") 'lgit-status-buffer-cmd-navigate-prev)
     map))
 
 (defun lgit-status-buffer-mode ()
