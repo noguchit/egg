@@ -269,8 +269,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defsubst lgit-head ()
   (if (lgit-git-dir)
-      (cons (lgit-current-sha1) 
-	    (or (lgit-current-branch) "(Detached HEAD)"))))
+      (cons (lgit-current-sha1) (lgit-current-branch))))
 
 (defun lgit-config-section-raw (type &optional name)
   (lgit-pick-file-contents (concat (lgit-git-dir) "/config")
@@ -424,6 +423,7 @@ success."
 					  &optional mark-invisibility-p)
   (put-text-property beg end :sect-type sect-type)
   (put-text-property beg end sect-type section)
+  (put-text-property beg end :navigation beg)
   (when mark-invisibility-p 
     (let ((current-inv (get-text-property beg 'invisibility)))
       (put-text-property beg (1- end) 'invisibility
@@ -436,41 +436,43 @@ success."
 					del-re-no
 					add-re-no
 					none-re-no)
-  (let (sub-beg sub-end)
-    (goto-char beg)
-      (while (re-search-forward regexp end t)
-	(setq sub-beg (match-beginning 0))
-	(cond ((match-beginning del-re-no) ;; del
-	       (put-text-property (match-beginning 0) (match-end 0)
-				  'face 'lgit-diff-del))
-	      ((match-beginning add-re-no) ;; add
-	       (put-text-property (match-beginning 0) (match-end 0)
-				  'face 'lgit-diff-add))
-	      ((match-beginning none-re-no) ;; unchanged
-	       (put-text-property (match-beginning 0) (match-end 0)
-				  'face 'lgit-diff-none))
-	      ((match-beginning hunk-re-no) ;; hunk
-	       (setq sub-end (or (lgit-safe-search "^\\(:?diff\\|@@\\)"
-						   end)
-				 end))
-	       (lgit-decorate-hunk-header hunk-re-no)
-	       (lgit-delimit-section :hunk (cons sub-beg sub-end)
-				     sub-beg sub-end t))
-	      ((match-beginning diff-re-no) ;; diff
-	       (setq sub-end (or (lgit-safe-search "^diff " end) end))
-	       (lgit-decorate-diff-header diff-re-no)
-	       (lgit-delimit-section :diff (cons sub-beg sub-end)
-				     sub-beg sub-end t))
-	      ((match-beginning index-re-no) ;; index
-	       (lgit-decorate-diff-index-line index-re-no))
+  (save-match-data
+    (save-excursion
+      (let (sub-beg sub-end)
+	(goto-char beg)
+	(while (re-search-forward regexp end t)
+	  (setq sub-beg (match-beginning 0))
+	  (cond ((match-beginning del-re-no) ;; del
+		 (put-text-property (match-beginning 0) (match-end 0)
+				    'face 'lgit-diff-del))
+		((match-beginning add-re-no) ;; add
+		 (put-text-property (match-beginning 0) (match-end 0)
+				    'face 'lgit-diff-add))
+		((match-beginning none-re-no) ;; unchanged
+		 (put-text-property (match-beginning 0) (match-end 0)
+				    'face 'lgit-diff-none))
+		((match-beginning hunk-re-no) ;; hunk
+		 (setq sub-end (or (lgit-safe-search "^\\(:?diff\\|@@\\)"
+						     end)
+				   end))
+		 (lgit-decorate-hunk-header hunk-re-no)
+		 (lgit-delimit-section :hunk (cons sub-beg sub-end)
+				       sub-beg sub-end t))
+		((match-beginning diff-re-no) ;; diff
+		 (setq sub-end (or (lgit-safe-search "^diff " end) end))
+		 (lgit-decorate-diff-header diff-re-no)
+		 (lgit-delimit-section :diff (cons sub-beg sub-end)
+				       sub-beg sub-end t))
+		((match-beginning index-re-no) ;; index
+		 (lgit-decorate-diff-index-line index-re-no))
 	      
-	      );; cond
-	) ;; while
-    nil))
+		) ;; cond
+	  )	  ;; while
+	nil))))
 
-(defun lgit-decorate-section (sect-type section beg end 
-					&optional diff-src-prefix
-					diff-dst-prefix)
+(defun lgit-decorate-diff-section (sect-type section beg end 
+					     &optional diff-src-prefix
+					     diff-dst-prefix)
   (let ((a (or diff-src-prefix "a/"))
 	(b (or diff-dst-prefix "b/"))
 	re)
@@ -486,10 +488,61 @@ success."
 		  "\\)$"))
     (lgit-decorate-diff-sequence beg end re 1 2 3 4 5 6)))
 
-(defun lgit-do-insert-section (title level washer git-cmd args)
-  (let ((sect-pos (point)))
-    (when (stringp title)
-      (insert (propertize title 'face 'lgit-section-title) "\n"))))
+(defun lgit-sb-insert-repo-section ()
+  (let ((head-info (lgit-head))
+	(beg (point)))
+    (insert (propertize (or (cdr head-info) 
+			    (format "Detached HEAD: %s"
+				    (lgit-name-rev (car head-info))))
+			'face 'lgit-branch) 
+		"\n"
+		(propertize (car head-info) 'face 'font-lock-string-face)
+		"\n"
+		(propertize (lgit-git-dir) 'face 'font-lock-reference-face)
+		"\n")
+    (lgit-delimit-section :section 'repo beg (point))))
+
+(defsubst lgit-prepend (str prefix &rest other-properties)
+  (propertize str 'display 
+	      (apply 'propertize (concat prefix str) other-properties)))
+
+(defun lgit-sb-insert-unstaged-section ()
+  (let ((beg (point)))
+    (insert (lgit-prepend "Unstaged Changes:" "\n\n" 
+			  'face 'lgit-section-title)
+	    "\n")
+    (call-process "git" nil t nil "diff" "--no-color"
+		  "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/")
+    (lgit-decorate-diff-section :section 'unstaged beg (point)
+				"INDEX/" "WORKDIR/")))
+
+(defun lgit-sb-insert-staged-section ()
+  (let ((beg (point)))
+    (insert (lgit-prepend "Staged Changes:""\n\n"
+			  'face 'lgit-section-title)
+	    "\n")
+    (call-process "git" nil t nil "diff" "--no-color" "--cached"
+		  "--src-prefix=HEAD/" "--dst-prefix=INDEX/")
+    (lgit-decorate-diff-section :section 'staged beg (point) 
+				"HEAD/" "INDEX/")))
+
+(defun lgit-update-status-buffer (&optional update-display-p)
+  (with-current-buffer (lgit-get-status-buffer-create) 
+      (let ((inhibit-read-only t))
+	(erase-buffer)
+	(lgit-sb-insert-repo-section)
+	(lgit-sb-insert-unstaged-section)
+	(lgit-sb-insert-staged-section)
+	(when update-display-p
+	  (force-window-update (current-buffer)))
+	(current-buffer))))
+
+(defun lgit-display-status-buffer (&optional update-p)
+  (interactive "P")
+  (let ((buf (if update-p
+		 (lgit-update-status-buffer t)
+	       (lgit-get-status-buffer-create))))
+    (display-buffer buf t)))
 
 
 (provide 'lgit)
