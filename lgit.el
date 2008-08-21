@@ -396,7 +396,7 @@ success."
   (put-text-property (match-beginning 0)
 		     (match-end 0)
 		     'display
-		     (propertize (match-string-no-properties no)
+		     (propertize (concat "\n" (match-string-no-properties no))
 				 'face
 				 'lgit-diff-file-header)))
 
