@@ -25,6 +25,7 @@
 
 (require 'parse-time)
 (require 'autorevert)
+(require 'cl)
 
 (defgroup lgit nil
   "Controlling Git from Emacs."
@@ -353,40 +354,45 @@ success."
 ;;; Diff/Hunk
 ;;;========================================================
 
+(defconst lgit-section-map 
+  (let ((map (make-sparse-keymap "LGit:Section")))
+    (define-key map (kbd "h") 'lgit-section-cmd-toggle-hide-show)
+    map))
+
 (defconst lgit-diff-section-map 
   (let ((map (make-sparse-keymap "LGit:Diff")))
-    (define-key map (kbd "RET") 'lgit-diff-section-visit-file)
-    (define-key map (kbd "h") 'lgit-diff-section-toggle-hide-show)
+    (set-keymap-parent map lgit-section-map)
+    (define-key map (kbd "RET") 'lgit-diff-section-cmd-visit-file)
     map))
 
 (defconst lgit-staged-diff-section-map 
   (let ((map (make-sparse-keymap "LGit:Diff")))
     (set-keymap-parent map lgit-diff-section-map)
-    (define-key map (kbd "s") 'lgit-diff-section-unstage)
+    (define-key map (kbd "s") 'lgit-diff-section-cmd-unstage)
     map))
 
 (defconst lgit-unstaged-diff-section-map 
   (let ((map (make-sparse-keymap "LGit:Diff")))
     (set-keymap-parent map lgit-diff-section-map)
-    (define-key map (kbd "s") 'lgit-diff-section-stage)
+    (define-key map (kbd "s") 'lgit-diff-section-cmd-stage)
     map))
 
 (defconst lgit-hunk-section-map 
   (let ((map (make-sparse-keymap "LGit:Hunk")))
-    (define-key map (kbd "RET") 'lgit-hunk-section-visit-file)
-    (define-key map (kbd "h") 'lgit-hunk-section-toggle-hide-show)
+    (set-keymap-parent map lgit-section-map)
+    (define-key map (kbd "RET") 'lgit-hunk-section-cmd-visit-file)
     map))
 
 (defconst lgit-staged-hunk-section-map 
   (let ((map (make-sparse-keymap "LGit:Hunk")))
     (set-keymap-parent map lgit-hunk-section-map)
-    (define-key map (kbd "s") 'lgit-hunk-section-unstage)
+    (define-key map (kbd "s") 'lgit-hunk-section-cmd-unstage)
     map))
 
 (defconst lgit-unstaged-hunk-section-map 
   (let ((map (make-sparse-keymap "LGit:Hunk")))
     (set-keymap-parent map lgit-hunk-section-map)
-    (define-key map (kbd "s") 'lgit-hunk-section-stage)
+    (define-key map (kbd "s") 'lgit-hunk-section-cmd-stage)
     map))
 
 (defun list-tp ()
@@ -426,18 +432,21 @@ success."
 		     'face
 		     'lgit-diff-none))
 
+(defvar lgit-invisibility-positions nil)
+
 (defsubst lgit-delimit-section (sect-type section beg end 
-					  &optional mark-invisibility-p
+					  &optional inv-beg
 					  keymap)
   (put-text-property beg end :sect-type sect-type)
   (put-text-property beg end sect-type section)
   (put-text-property beg end :navigation beg)
   (when (keymapp keymap)
     (put-text-property beg end 'keymap keymap))
-  (when mark-invisibility-p 
-    (let ((current-inv (get-text-property beg 'invisibility)))
-      (put-text-property beg (1- end) 'invisibility
-			 (cons beg current-inv)))))
+  (when (integer-or-marker-p inv-beg) 
+    (let ((current-inv (get-text-property inv-beg 'invisible)))
+      (put-text-property inv-beg (1- end) 'invisible
+			 (cons beg current-inv))
+      (add-to-list 'lgit-invisibility-positions beg))))
 
 (defun lgit-decorate-diff-sequence (beg end diff-map hunk-map regexp
 					diff-re-no
@@ -469,14 +478,14 @@ success."
 		 (lgit-delimit-section 
 		  :hunk (list (match-string-no-properties hunk-re-no) 
 			      sub-beg sub-end)
-		  sub-beg sub-end t hunk-map))
+		  sub-beg sub-end (match-end 0) hunk-map))
 		((match-beginning diff-re-no) ;; diff
 		 (setq sub-end (or (lgit-safe-search "^diff " end) end))
 		 (lgit-decorate-diff-header diff-re-no)
 		 (lgit-delimit-section
 		  :diff (list (match-string-no-properties diff-re-no)
 			      sub-beg sub-end)
-		  sub-beg sub-end t diff-map))
+		  sub-beg sub-end (match-end 0) diff-map))
 		((match-beginning index-re-no) ;; index
 		 (lgit-decorate-diff-index-line index-re-no))
 	      
@@ -505,11 +514,11 @@ success."
 				 re 1 2 3 4 5 6)))
 
 
-(defun lgit-diff-section-visit-file (file)
+(defun lgit-diff-section-cmd-visit-file (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
-(defun lgit-hunk-section-visit-file (file hunk-header hunk-beg hunk-end)
+(defun lgit-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end)
   (interactive (cons (car (get-text-property (point) :diff))
 		     (get-text-property (point) :hunk)))
   (let ((limit (line-end-position))
@@ -523,6 +532,14 @@ success."
 	(setq adjust (1+ adjust))))
     (find-file file)
     (goto-line (+ line adjust))))
+
+(defun lgit-section-cmd-toggle-hide-show ()
+  (interactive)
+  (let ((pos (get-text-property (point) :navigation)))
+    (if (assq pos buffer-invisibility-spec)
+	(remove-from-invisibility-spec (cons pos t))
+      (add-to-invisibility-spec (cons pos t)))
+    (force-window-update (current-buffer))))
 
 ;;;========================================================
 ;;; Status Buffer
@@ -582,6 +599,8 @@ success."
   (with-current-buffer buffer  
       (let ((inhibit-read-only t))
 	(erase-buffer)
+	(set (make-local-variable 'lgit-invisibility-positions) nil)
+	(setq buffer-invisibility-spec nil)
 	(lgit-sb-insert-repo-section)
 	(lgit-sb-insert-untracked-section)
 	(lgit-sb-insert-unstaged-section)
