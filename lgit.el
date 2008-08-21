@@ -88,7 +88,7 @@ Many Lgit faces inherit from this one by default."
   '((((class color) (background light))
      :foreground "grey50")
     (((class color) (background dark))
-     :foreground "grey30"))
+     :foreground "grey70"))
   "Face for lines in a diff that are unchanged."
   :group 'lgit)
 
@@ -444,8 +444,8 @@ success."
     (put-text-property beg end 'keymap keymap))
   (when (integer-or-marker-p inv-beg) 
     (let ((current-inv (get-text-property inv-beg 'invisible)))
-      (put-text-property inv-beg (1- end) 'invisible
-			 (cons beg current-inv))
+      (add-to-list 'current-inv beg t)
+      (put-text-property inv-beg (1- end) 'invisible current-inv)
       (add-to-list 'lgit-invisibility-positions beg))))
 
 (defun lgit-decorate-diff-sequence (beg end diff-map hunk-map regexp
@@ -493,15 +493,13 @@ success."
 	  )	  ;; while
 	nil))))
 
-(defun lgit-decorate-diff-section (sect-type section beg end 
-					     &optional diff-src-prefix
-					     diff-dst-prefix
-					     diff-map hunk-map)
+(defun lgit-decorate-diff-section (beg end &optional diff-src-prefix
+				       diff-dst-prefix
+				       diff-map hunk-map)
   (let ((a (or diff-src-prefix "a/"))
 	(b (or diff-dst-prefix "b/"))
-	re)
-    (lgit-delimit-section sect-type section beg end)
-    (setq re
+	regexp)
+    (setq regexp
 	  (concat "^\\(?:"
 		  "diff --git " a "\\(.+\\) " b ".+\\|" ;1 file
 		  "\\(@@ .+@@\\).*\\|"			;2 hunk
@@ -511,7 +509,7 @@ success."
 		  "\\( .*\\)"				;6 none
 		  "\\)$"))
     (lgit-decorate-diff-sequence beg end diff-map hunk-map
-				 re 1 2 3 4 5 6)))
+				 regexp 1 2 3 4 5 6)))
 
 
 (defun lgit-diff-section-cmd-visit-file (file)
@@ -533,13 +531,22 @@ success."
     (find-file file)
     (goto-line (+ line adjust))))
 
-(defun lgit-section-cmd-toggle-hide-show ()
-  (interactive)
-  (let ((pos (get-text-property (point) :navigation)))
-    (if (assq pos buffer-invisibility-spec)
-	(remove-from-invisibility-spec (cons pos t))
-      (add-to-invisibility-spec (cons pos t)))
-    (force-window-update (current-buffer))))
+(defun lgit-section-cmd-toggle-hide-show (pos)
+  (interactive (list (get-text-property (point) :navigation)))
+  (if (assq pos buffer-invisibility-spec)
+      (remove-from-invisibility-spec (cons pos t))
+    (add-to-invisibility-spec (cons pos t)))
+  (force-window-update (current-buffer)))
+
+(defun lgit-section-cmd-toggle-hide-show-children (pos)
+  (interactive (list (get-text-property (point) :navigation)))
+  (let* ((sect-type (get-text-property (point) :sect-type))
+	 (sect-info (get-text-property (point) sect-type))))
+  (if (assq pos buffer-invisibility-spec)
+      (remove-from-invisibility-spec (cons pos t))
+    (add-to-invisibility-spec (cons pos t)))
+  (force-window-update (current-buffer)))
+
 
 ;;;========================================================
 ;;; Status Buffer
@@ -563,35 +570,41 @@ success."
     (lgit-delimit-section :section 'repo beg (point))))
 
 (defun lgit-sb-insert-untracked-section ()
-  (let ((beg (point)))
+  (let ((beg (point)) inv-beg)
     (insert (lgit-prepend "Untracked Files:" "\n\n" 
 			  'face 'lgit-section-title)
-	    "\n")
+	    (progn (setq inv-beg (point))
+		   "\n"))
     (call-process "git" nil t nil "ls-files" "--others" 
 		  "--exclude-standard")
-    (lgit-delimit-section :section 'untracked beg (point))))
+    (lgit-delimit-section :section 'untracked beg (point)
+			  inv-beg lgit-section-map)))
 
 (defun lgit-sb-insert-unstaged-section ()
-  (let ((beg (point)))
+  (let ((beg (point)) inv-beg)
     (insert (lgit-prepend "Unstaged Changes:" "\n\n" 
 			  'face 'lgit-section-title)
-	    "\n")
+	    (progn (setq inv-beg (point))
+		   "\n"))
     (call-process "git" nil t nil "diff" "--no-color"
 		  "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/")
-    (lgit-decorate-diff-section :section 'unstaged beg (point)
-				"INDEX/" "WORKDIR/"
+    (lgit-delimit-section :section 'unstaged beg (point)
+			  inv-beg lgit-section-map)
+    (lgit-decorate-diff-section beg (point) "INDEX/" "WORKDIR/"
 				lgit-unstaged-diff-section-map
 				lgit-unstaged-hunk-section-map)))
 
 (defun lgit-sb-insert-staged-section ()
-  (let ((beg (point)))
+  (let ((beg (point)) inv-beg)
     (insert (lgit-prepend "Staged Changes:""\n\n"
 			  'face 'lgit-section-title)
-	    "\n")
+	    (progn (setq inv-beg (point))
+		   "\n"))
     (call-process "git" nil t nil "diff" "--no-color" "--cached"
 		  "--src-prefix=HEAD/" "--dst-prefix=INDEX/")
-    (lgit-decorate-diff-section :section 'staged beg (point) 
-				"HEAD/" "INDEX/"
+    (lgit-delimit-section :section 'staged beg (point)
+			  inv-beg lgit-section-map)
+    (lgit-decorate-diff-section beg (point) "HEAD/" "INDEX/"
 				lgit-staged-diff-section-map
 				lgit-staged-hunk-section-map)))
 
