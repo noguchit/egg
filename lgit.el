@@ -24,7 +24,6 @@
 ;;;
 
 (require 'parse-time)
-(require 'autorevert)
 (require 'cl)
 
 (defgroup lgit nil
@@ -136,6 +135,17 @@ ARGS is a list of arguments to pass to PROGRAM."
 	str
       nil)))
 
+(defun lgit-cmd-1 (program args)
+  "Execute PROGRAM with ARGS.
+The return code and the output are return as a cons."
+  (let (str code)
+    (setq str 
+	  (with-output-to-string
+	    (with-current-buffer
+		standard-output
+	      (setq code (apply 'call-process program nil t nil args)))))
+    (cons code str)))
+
 (defsubst lgit-cmd-to-string (program &rest args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
@@ -149,6 +159,19 @@ ARGS is a list of arguments to pass to PROGRAM."
       (if (eq (aref str (1- len)) ?\n)
 	  (substring str 0 -1)
 	str))))
+
+(defun lgit-git (exit-codes &rest args)
+  (let ((ret (lgit-cmd-1 "git" args))
+	code str len)
+    (unless (consp exit-codes) (setq exit-codes (list exit-codes)))
+    (setq code (car ret)
+	  str (cdr ret))
+    (setq len (length str))
+    (when (> len 0)
+      (if (eq (aref str (1- len)) ?\n)
+	  (setq str (substring str 0 -1))))
+    (unless (memq code (cons 0 exit-codes))
+      str)))
 
 (defsubst lgit-git-to-lines (&rest args)
   (split-string (substring (lgit-cmd-to-string-1 "git" args) 0 -1)
@@ -223,7 +246,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defvar lgit-git-dir nil)
 (defsubst lgit-git-dir ()
-  (if (stringp lgit-git-dir)
+  (if (local-variable-p 'lgit-git-dir)
       lgit-git-dir
     (set (make-local-variable 'lgit-git-dir) (lgit-read-git-dir))))
 
@@ -292,7 +315,7 @@ ARGS is a list of arguments to pass to PROGRAM."
   "Run GIT asynchronously with ARGS.
 if EXIT code is an exit-code from GIT other than zero but considered
 success."
-  (let ((dir default-directory)
+  (let ((dir (file-name-directory (lgit-git-dir)))
 	(buf (get-buffer-create "*lgit-process*"))
 	(inhibit-read-only inhibit-read-only)
 	(accepted-msg (and (integerp exit-code)
@@ -348,7 +371,6 @@ success."
       (if (functionp callback-func)
 	  (apply callback-func proc cmds callback-args)))))
 
-(defun lgit-async-callback-single-file (proc cmds))
 
 ;;;========================================================
 ;;; Diff/Hunk
@@ -515,7 +537,7 @@ success."
 
 (defun lgit-diff-section-cmd-visit-file (file)
   (interactive (list (car (get-text-property (point) :diff))))
-  (find-file file))
+  (find-file-other-window file))
 
 (defun lgit-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end)
   (interactive (cons (car (get-text-property (point) :diff))
@@ -529,7 +551,7 @@ success."
       (end-of-line)
       (while (re-search-forward "^\\(:?\\+\\| \\).*" limit t)
 	(setq adjust (1+ adjust))))
-    (find-file file)
+    (find-file-other-window file)
     (goto-line (+ line adjust))))
 
 (defun lgit-section-cmd-toggle-hide-show (pos)
@@ -704,7 +726,78 @@ success."
 ;;; action
 ;;;========================================================
 
-(defun lgit-run)
+(defun lgit-revert-visited-files (file-or-files)
+  (let* ((git-dir (lgit-git-dir))
+	 (default-directory (file-name-directory git-dir))
+	 (files (if (consp file-or-files) 
+		   file-or-files
+		 (list file-or-files))))
+    (mapcar (lambda (file)
+	      (let ((buf (get-file-buffer file)))
+		(when (bufferp buf)
+		  (with-current-buffer buf
+		    (when (equal (lgit-git-dir) git-dir)
+		      (revert-buffer t t t))))))
+	    files)))
+
+(defun lgit-revert-all-visited-files ()
+  (let* ((git-dir (lgit-git-dir))
+	 (default-directory (file-name-directory git-dir))
+	 bufs files)
+    (setq files
+	  (delq nil (mapcar (lambda (buf)
+			      (with-current-buffer buf
+				(when (and (buffer-file-name buf)
+					   (equal (lgit-git-dir) git-dir))
+				  (buffer-file-name buf))))
+			    (buffer-list))))
+    (when (consp files)
+      (setq files (mapcar 'expand-file-name
+			  (apply 'lgit-git-to-lines "ls-files" files)))
+      (when (consp files)
+	(lgit-revert-visited-files files)))))
+
+(defun lgit-log-buffer ()
+  (or (get-buffer (concat " *lgit-logs@" (lgit-git-dir) "*"))
+      (let ((git-dir (lgit-git-dir))
+	    (default-directory default-directory)
+	    dir)
+	(unless git-dir
+	  (error "Can't find git dir in %s" default-directory))
+	(setq dir (file-name-nondirectory git-dir))
+	(setq default-directory dir)
+	(get-buffer-create (concat " *lgit-logs@" git-dir "*")))))
+
+(defsubst lgit-log (&rest strings)
+  (with-current-buffer (lgit-log-buffer)
+    (goto-char (point-max))
+    (cons (current-buffer)
+	  (prog1 (point)
+	    (apply 'insert (current-time-string) "\n" strings)))))
+
+(defun lgit-hunk-section-cmd-stage (pos)
+  (interactive (list (point)))
+  (let ((patch (lgit-hunk-section-patch-string pos))
+	(file (car (get-text-property pos :diff)))
+	(default-directory (file-name-directory (lgit-git-dir)))
+	output ret)
+    (unless (stringp file)
+      (error "No diff with file-name here!"))
+    (setq file (expand-file-name file))
+    (setq output (lgit-log "git apply --cached <REGION\n"))
+    (with-temp-buffer
+      (insert patch)
+      (setq ret (call-process-region (point-min) (point-max) "git"
+				     nil (car output) nil
+				     "apply" "--cached"))
+      (lgit-log (format "RET:%d\n" ret)))
+    (if (/= ret 0)
+	(with-current-buffer (car output)
+	  (widen)
+	  (narrow-to-region (cdr output) (point-max)))
+      (lgit-update-status-buffer (lgit-get-status-buffer-create) t)
+      (lgit-revert-visited-files file))))
+
 
 
 (provide 'lgit)
