@@ -889,55 +889,64 @@ success."
 
 (defvar egg-log-msg-ring (make-ring 32))
 (defvar egg-log-msg-ring-idx nil)
-(defvar egg-log-msg-new-text nil)
 (defvar egg-log-msg-action nil)
 (define-derived-mode egg-log-msg-mode text-mode "Egg:LogMsg"
   "Major mode for editing Git log message.\n\n
 \{egg-log-msg-mode-map}."
-  (setq default-directory (file-name-nondirectory (lgit-git-dir)))
+  (setq default-directory (file-name-directory (lgit-git-dir)))
   (make-local-variable 'egg-log-msg-action)
-  (make-local-variable 'egg-log-msg-new-text)
-  (make-local-variable 'egg-log-msg-current-text)
   (set (make-local-variable 'egg-log-msg-ring-idx) nil))
 
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
 (define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
-(define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-newer-text)
+(define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
+
+(defun egg-log-msg-done ()
+  (interactive)
+  (widen)
+  (goto-char (point-min))
+  (if (save-excursion (re-search-forward "\\sw\\|\\-" nil t))
+      (ring-insert egg-log-msg-ring 
+		   (buffer-substring-no-properties (point-min) (point-max)))
+    (message "Please enter a log message!"))
+  (ding))
 
 (defun egg-log-msg-hist-cycle (&optional forward-p)
   "Cycle through message log history."
   (let ((len (ring-length egg-log-msg-ring)))
-    (if (<= len 0) 
-	(progn (message "No older message text.") (ding))
-      (unless (or (<= (point-max) (point-min))
-		  egg-log-msg-new-text)
-	(setq egg-log-msg-new-text (buffer-string)))
-      (erase-buffer)
-      (setq egg-log-msg-ring-idx
-	    (if (null egg-log-msg-ring-idx)
-		(if forward-p 
-		    (ring-minus1 0)
-		  0)
-	      (if forward-p 
-		  (ring-minus1 egg-log-msg-ring-idx)
-		(ring-plus1 egg-log-msg-ring-idx)))) 
+    (cond ((<= len 0) 
+	   ;; no history
+	   (message "No previous log message.")
+	   (ding))
+	  ;; don't accidentally throw away unsaved text
+	  ((and  (null egg-log-msg-ring-idx)
+		 (> (point-max) (point-min))
+		 (not (y-or-n-p "throw away current text? "))))
+	  ;; do it
+	  (t (erase-buffer)
+	     (setq egg-log-msg-ring-idx
+		   (if (null egg-log-msg-ring-idx)
+		       (if forward-p 
+			   ;; 1st-time + fwd = oldest
+			   (ring-minus1 0 len)
+			 ;; 1st-time + bwd = newest
+		       0)
+		     (if forward-p 
+			 ;; newer
+			 (ring-minus1 egg-log-msg-ring-idx len)
+		       ;; older
+		       (ring-plus1 egg-log-msg-ring-idx len)))) 
+	     
+	     (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx))))))
 
-      (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx)))))
-
-(defun egg-log-msg-hist-cycle-backward ()
+(defun egg-log-msg-older-text ()
   "Cycle backward through comment history."
   (interactive)
-  (when (or egg-log-msg-ring-idx
-	    (<= (point-max) (point-min))
-	    (y-or-n-p "throw away current text? ")) 
-    (egg-log-msg-hist-cycle)))
+  (egg-log-msg-hist-cycle))
 
-(defun egg-log-msg-hist-cycle-forward ()
+(defun egg-log-msg-newer-text ()
   "Cycle forward through comment history."
   (interactive)
-  (when (or egg-log-msg-ring-idx
-	    (<= (point-max) (point-min))
-	    (y-or-n-p "throw away current text? ")) 
-    (egg-log-msg-hist-cycle t)))
+  (egg-log-msg-hist-cycle t))
 
 (provide 'egg)
