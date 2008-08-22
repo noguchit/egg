@@ -703,6 +703,8 @@ success."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-status-buffer-mode-hook))
 
+(defvar egg-buffer-update-func nil)
+
 (defun egg-get-status-buffer-create (&optional init-p)
   (let* ((git-dir (egg-git-dir))
 	 (dir (file-name-directory git-dir))
@@ -714,7 +716,10 @@ success."
     (when (or (null (prog1 buf (setq buf (get-buffer-create buf-name))))
 	      init-p)
       (with-current-buffer buf
-	(egg-status-buffer-mode)))
+	(egg-status-buffer-mode)
+	(setq egg-buffer-update-func 
+	      (lambda (buf)
+		(egg-update-status-buffer buf t)))))
     buf))
 
 (defun egg-status (&optional no-update-p)
@@ -801,7 +806,8 @@ success."
 	  (narrow-to-region (cdr output) (point-max))
 	  (display-buffer (current-buffer) t)
 	  nil)
-      (egg-update-status-buffer (egg-get-status-buffer-create) t)
+      (if (functionp egg-buffer-update-func)
+	  (funcall egg-buffer-update-func (current-buffer))) 
       file)))
 
 (defun egg-hunk-section-cmd-stage (pos)
@@ -852,7 +858,8 @@ success."
 	  (narrow-to-region (cdr output) (point-max))
 	  (display-buffer (current-buffer) t)
 	  nil)
-      (egg-update-status-buffer (egg-get-status-buffer-create) t)
+      (if (functionp egg-buffer-update-func)
+	  (funcall egg-buffer-update-func (current-buffer))) 
       file)))
 
 (defun egg-diff-section-cmd-stage (pos)
@@ -890,12 +897,18 @@ success."
 (defvar egg-log-msg-ring (make-ring 32))
 (defvar egg-log-msg-ring-idx nil)
 (defvar egg-log-msg-action nil)
+(defvar egg-log-msg-text-beg nil)
+(defvar egg-log-msg-text-end nil)
+(defvar egg-log-msg-diff-beg nil)
 (define-derived-mode egg-log-msg-mode text-mode "Egg:LogMsg"
   "Major mode for editing Git log message.\n\n
 \{egg-log-msg-mode-map}."
   (setq default-directory (file-name-directory (lgit-git-dir)))
   (make-local-variable 'egg-log-msg-action)
-  (set (make-local-variable 'egg-log-msg-ring-idx) nil))
+  (set (make-local-variable 'egg-log-msg-ring-idx) nil)
+  (set (make-local-variable 'egg-log-msg-text-beg) nil)
+  (set (make-local-variable 'egg-log-msg-text-end) nil)
+  (set (make-local-variable 'egg-log-msg-diff-beg) nil))
 
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
 (define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
@@ -906,10 +919,13 @@ success."
   (widen)
   (goto-char (point-min))
   (if (save-excursion (re-search-forward "\\sw\\|\\-" nil t))
-      (ring-insert egg-log-msg-ring 
-		   (buffer-substring-no-properties (point-min) (point-max)))
-    (message "Please enter a log message!"))
-  (ding))
+      (when (functionp egg-log-msg-action)
+	(ring-insert egg-log-msg-ring 
+		     (buffer-substring-no-properties egg-log-msg-text-beg
+						     egg-log-msg-text-end))
+	(funcall egg-log-msg-action))
+    (message "Please enter a log message!")
+    (ding)))
 
 (defun egg-log-msg-hist-cycle (&optional forward-p)
   "Cycle through message log history."
@@ -920,10 +936,10 @@ success."
 	   (ding))
 	  ;; don't accidentally throw away unsaved text
 	  ((and  (null egg-log-msg-ring-idx)
-		 (> (point-max) (point-min))
+		 (> egg-log-msg-text-end egg-log-msg-text-beg)
 		 (not (y-or-n-p "throw away current text? "))))
 	  ;; do it
-	  (t (erase-buffer)
+	  (t (delete-region egg-log-msg-text-beg egg-log-msg-text-end)
 	     (setq egg-log-msg-ring-idx
 		   (if (null egg-log-msg-ring-idx)
 		       (if forward-p 
@@ -936,7 +952,7 @@ success."
 			 (ring-minus1 egg-log-msg-ring-idx len)
 		       ;; older
 		       (ring-plus1 egg-log-msg-ring-idx len)))) 
-	     
+	     (goto-char egg-log-msg-text-beg)
 	     (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx))))))
 
 (defun egg-log-msg-older-text ()
@@ -948,5 +964,60 @@ success."
   "Cycle forward through comment history."
   (interactive)
   (egg-log-msg-hist-cycle t))
+
+(defun egg-commit-log-insert-diff (buf)
+  (with-current-buffer buf
+    (let ((inhibit-read-only t)
+	  beg)
+      (goto-char egg-log-msg-diff-beg)
+      (delete-region (point) (point-max))
+      (setq beg (point))
+      (egg-sb-insert-staged-section)
+      (egg-sb-insert-unstaged-section)
+      (egg-sb-insert-untracked-section)
+      (put-text-property beg (point) 'read-only t)
+      (put-text-property beg (point) 'front-sticky nil)
+      (force-window-update buf))))
+
+(defun egg-commit-log-edit ()
+  (interactive)
+  (let* ((git-dir (lgit-git-dir))
+	 (default-directory (file-name-directory git-dir))
+	 (buf (get-buffer-create (concat "*commit@egg:" git-dir "*")))
+	 (head-info (egg-head))
+	 (head (or (cdr head-info) 
+		   (format "Detached HEAD! (%s)" (car head-info))))
+	 (inhibit-read-only inhibit-read-only)
+	 tmp)
+    (pop-to-buffer buf)
+    (setq inhibit-read-only t)
+    (erase-buffer)
+    (egg-log-msg-mode)
+    (set (make-local-variable 'egg-invisibility-positions) nil)
+    (setq buffer-invisibility-spec nil)
+    (set (make-local-variable 'egg-log-msg-action) 'egg-commit)
+    (set (make-local-variable 'egg-buffer-update-func) 'egg-commit-log-insert-diff)
+    (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
+	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
+	    (propertize "Commit Message (type C-c C-c when done) :"
+			'face 'font-lock-comment-face))
+    (put-text-property (point-min) (point) 'read-only t)
+    (put-text-property (point-min) (point) 'rear-sticky nil)
+    (insert "\n")
+    (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
+    (set-marker-insertion-type egg-log-msg-text-beg nil)
+    (setq tmp (point))
+    (insert (propertize "\n" 'read-only t 'front-sticky nil))
+    (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
+    (set-marker-insertion-type egg-log-msg-diff-beg nil)
+    (egg-commit-log-insert-diff buf)
+;;     (egg-sb-insert-staged-section)
+;;     (egg-sb-insert-unstaged-section)
+;;     (egg-sb-insert-untracked-section)
+;;     (put-text-property tmp (point) 'read-only t)
+;;     (put-text-property tmp (point) 'front-sticky nil)
+    (goto-char egg-log-msg-text-beg)
+    (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
+    (set-marker-insertion-type egg-log-msg-text-end t)))
 
 (provide 'egg)
