@@ -398,6 +398,7 @@ success."
   (let ((map (make-sparse-keymap "Egg:Diff")))
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
+    (define-key map (kbd "u") 'egg-diff-section-cmd-undo)
     map))
 
 (defconst egg-hunk-section-map 
@@ -416,6 +417,7 @@ success."
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
+    (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
     map))
 
 (defun list-tp ()
@@ -828,7 +830,8 @@ success."
     (unless (stringp file)
       (error "No diff with file-name here!"))
     (setq file-full-name
-	  (egg-hunk-section-patch-index file patch "--quiet" "--reverse"))
+	  (egg-hunk-section-patch-index file patch
+					"-p1" "--quiet" "--reverse"))
     (when (stringp file-full-name)
       (egg-revert-visited-files file-full-name))))
 
@@ -876,6 +879,5 @@ success."
 	  (egg-diff-section-mod-index file 0 "checkout" "--" file))
     (when (stringp file-full-name)
       (egg-revert-visited-files file-full-name))))
-
 
 (provide 'egg)
