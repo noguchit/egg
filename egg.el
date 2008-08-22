@@ -685,7 +685,7 @@ success."
 
 (defconst egg-status-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
-    (define-key map (kbd "q") 'bury-buffer)
+    (define-key map (kbd "q") 'quit-window)
     (define-key map (kbd "g") 'egg-status-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-status-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-status-buffer-cmd-navigate-prev)
@@ -717,7 +717,7 @@ success."
 	(egg-status-buffer-mode)))
     buf))
 
-(defun egg-display-status-buffer (&optional no-update-p)
+(defun egg-status (&optional no-update-p)
   (interactive "P")
   (let ((buf (egg-get-status-buffer-create)))
     (unless no-update-p
@@ -787,8 +787,8 @@ success."
     (setq args (mapcar (lambda (word) 
 			 (if (string= word git-file) file word))
 		       git-args))
-    (setq output (egg-log (egg-git) (mapconcat 'identity args " ")
-			   "<REGION\n"))
+    (setq output (egg-log (egg-git) " " (mapconcat 'identity args " ")
+			   " <REGION\n"))
     (with-temp-buffer
       (insert patch)
       (setq ret 
@@ -843,7 +843,7 @@ success."
     (setq args (mapcar (lambda (word) 
 			 (if (string= word git-file) file word))
 		       git-args))
-    (setq output (egg-log "git" (mapconcat 'identity args " ") "\n"))
+    (setq output (egg-log "git " (mapconcat 'identity args " ") "\n"))
     (setq ret (apply 'call-process "git" nil (car output) nil args))
     (egg-log (format "RET:%d\n" ret))
     (if (not (memq ret (list 0 accepted-code)))
