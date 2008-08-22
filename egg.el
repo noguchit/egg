@@ -1,14 +1,14 @@
-;;; lgit -- a magit fork
+;;; egg -- a magit fork
 
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2008  Linh Dang
 ;;
-;; LGit is free software; you can redistribute it and/or modify it
+;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation; either version 3, or (at your option)
 ;; any later version.
 ;;
-;; LGit is distributed in the hope that it will be useful, but WITHOUT
+;; Egg is distributed in the hope that it will be useful, but WITHOUT
 ;; ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 ;; or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
 ;; License for more details.
@@ -26,90 +26,90 @@
 (require 'parse-time)
 (require 'cl)
 
-(defgroup lgit nil
+(defgroup egg nil
   "Controlling Git from Emacs."
-  :prefix "lgit-"
+  :prefix "egg-"
   :group 'tools)
 
-(defface lgit-header
+(defface egg-header
   '((t :weight bold :inherit variable-pitch :height 1.3))
   "Face for generic headers.
 
-Many Lgit faces inherit from this one by default."
-  :group 'lgit)
+Many Egg faces inherit from this one by default."
+  :group 'egg)
 
-(defface lgit-section-title
+(defface egg-section-title
   '((((class color) (background light))
-     :foreground "DarkGoldenrod" :inherit lgit-header :height 1.1)
+     :foreground "DarkGoldenrod" :inherit egg-header :height 1.1)
     (((class color) (background dark))
-     :foreground "PaleGreen" :inherit lgit-header :height 1.1)
+     :foreground "PaleGreen" :inherit egg-header :height 1.1)
     (t :weight bold))
   "Face for generic header lines.
 
-Many Lgit faces inherit from this one by default."
-  :group 'lgit)
+Many Egg faces inherit from this one by default."
+  :group 'egg)
 
-(defface lgit-branch
+(defface egg-branch
   '((((class color) (background light))
-     :foreground "SkyBlue" :inherit lgit-header :height 1.4)
+     :foreground "SkyBlue" :inherit egg-header :height 1.4)
     (((class color) (background dark))
-     :foreground "Yellow" :inherit lgit-header :height 1.4)
+     :foreground "Yellow" :inherit egg-header :height 1.4)
     (t :weight bold))
   "Face for the current branch."
-  :group 'lgit)
+  :group 'egg)
 
-(defface lgit-diff-file-header
+(defface egg-diff-file-header
   '((((class color) (background light))
-     :foreground "SlateBlue" :inherit lgit-header)
+     :foreground "SlateBlue" :inherit egg-header)
     (((class color) (background dark))
-     :foreground "LightSlateBlue" :inherit lgit-header)
+     :foreground "LightSlateBlue" :inherit egg-header)
     (t :weight bold))
   "Face for diff file headers."
-  :group 'lgit)
+  :group 'egg)
 
-(defface lgit-diff-hunk-header
+(defface egg-diff-hunk-header
   '((((class color) (background light))
      :background "grey85")
     (((class color) (background dark))
      :background "grey45"))
   "Face for diff hunk headers."
-  :group 'lgit)
+  :group 'egg)
 
-(defface lgit-diff-add
+(defface egg-diff-add
   '((((class color) (background light))
      :foreground "blue1")
     (((class color) (background dark))
      :foreground "white"))
   "Face for lines in a diff that have been added."
-  :group 'lgit)
+  :group 'egg)
 
-(defface lgit-diff-none
+(defface egg-diff-none
   '((((class color) (background light))
      :foreground "grey50")
     (((class color) (background dark))
      :foreground "grey70"))
   "Face for lines in a diff that are unchanged."
-  :group 'lgit)
+  :group 'egg)
 
-(defface lgit-diff-del
+(defface egg-diff-del
   '((((class color) (background light))
      :foreground "red")
     (((class color) (background dark))
      :foreground "OrangeRed"))
   "Face for lines in a diff that have been deleted."
-  :group 'lgit)
+  :group 'egg)
 
-(defface lgit-item-highlight
+(defface egg-item-highlight
   '((((class color) (background light))
      :foreground "gray95")
     (((class color) (background dark))
      :foreground "gray30"))
   "Face for highlighting the current item."
-  :group 'lgit)
+  :group 'egg)
 
-(defcustom lgit-diff-init-hiding-mode nil
+(defcustom egg-diff-init-hiding-mode nil
   "Initial hiding mode for diff results."
-  :group 'lgit
+  :group 'egg
   :type '(choice :tag "Initial Hiding Mode"
 		 (const :tag "Hide Nothing" nil)
 		 (const :tag "Hide Everything" t)))
@@ -117,12 +117,12 @@ Many Lgit faces inherit from this one by default."
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
-(defsubst lgit-prepend (str prefix &rest other-properties)
+(defsubst egg-prepend (str prefix &rest other-properties)
   (propertize str 'display 
 	      (apply 'propertize (concat prefix str) other-properties)))
 
 
-(defun lgit-cmd-to-string-1 (program args)
+(defun egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
   (let (str code)
@@ -135,7 +135,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 	str
       nil)))
 
-(defun lgit-cmd-1 (program args)
+(defun egg-cmd-1 (program args)
   "Execute PROGRAM with ARGS.
 The return code and the output are return as a cons."
   (let (str code)
@@ -146,22 +146,22 @@ The return code and the output are return as a cons."
 	      (setq code (apply 'call-process program nil t nil args)))))
     (cons code str)))
 
-(defsubst lgit-cmd-to-string (program &rest args)
+(defsubst egg-cmd-to-string (program &rest args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
-  (lgit-cmd-to-string-1 program args))
+  (egg-cmd-to-string-1 program args))
 
 
-(defun lgit-git-to-string (&rest args)
-  (let* ((str (lgit-cmd-to-string-1 "git" args))
+(defun egg-git-to-string (&rest args)
+  (let* ((str (egg-cmd-to-string-1 "git" args))
 	 (len (length str)))
     (when (> len 0)
       (if (eq (aref str (1- len)) ?\n)
 	  (substring str 0 -1)
 	str))))
 
-(defun lgit-git (exit-codes &rest args)
-  (let ((ret (lgit-cmd-1 "git" args))
+(defun egg-git (exit-codes &rest args)
+  (let ((ret (egg-cmd-1 "git" args))
 	code str len)
     (unless (consp exit-codes) (setq exit-codes (list exit-codes)))
     (setq code (car ret)
@@ -173,44 +173,44 @@ ARGS is a list of arguments to pass to PROGRAM."
     (unless (memq code (cons 0 exit-codes))
       str)))
 
-(defsubst lgit-git-to-lines (&rest args)
-  (split-string (substring (lgit-cmd-to-string-1 "git" args) 0 -1)
+(defsubst egg-git-to-lines (&rest args)
+  (split-string (substring (egg-cmd-to-string-1 "git" args) 0 -1)
 		"\n"))
 
-(defsubst lgit-local-branches ()
+(defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
-  (lgit-git-to-lines "rev-parse" "--symbolic" "--branches"))
+  (egg-git-to-lines "rev-parse" "--symbolic" "--branches"))
 
-(defun lgit-remote-branches (&optional raw-p)
+(defun egg-remote-branches (&optional raw-p)
   "Get a list of local branches. E.g. (\"origin/master\", \"joe/fork1\")."
-  (let ((lst (lgit-git-to-lines "rev-parse" "--symbolic" "--remotes")))
+  (let ((lst (egg-git-to-lines "rev-parse" "--symbolic" "--remotes")))
     (if raw-p lst
       (mapcar (lambda (full-name)
 		(let ((tmp (split-string full-name "/")))
 		  (cons (cadr tmp) (car tmp))))
 	      lst))))
 
-(defsubst lgit-rbranch-to-remote (rbranch)
+(defsubst egg-rbranch-to-remote (rbranch)
   (and (stringp rbranch)
        (> (length rbranch) 0)
        (car (split-string rbranch "/"))))
 
-(defsubst lgit-rbranch-name (rbranch)
+(defsubst egg-rbranch-name (rbranch)
   (and (stringp rbranch) 
        (> (length rbranch) 0)
        (cadr (split-string rbranch "/"))))
 
-(defsubst lgit-push-refspec (lbranch rbranch)
-   (setq rbranch (lgit-rbranch-name rbranch))
+(defsubst egg-push-refspec (lbranch rbranch)
+   (setq rbranch (egg-rbranch-name rbranch))
    (if (or lbranch rbranch)
        (format "%s%s%s" (or lbranch "") (if rbranch ":" "") (or rbranch ""))))
 
-(defun lgit-file-as-string-raw (file-name)
+(defun egg-file-as-string-raw (file-name)
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (buffer-string)))
 
-(defun lgit-pick-file-contents (file-name regexp &rest indices)
+(defun egg-pick-file-contents (file-name regexp &rest indices)
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (goto-char (point-min))
@@ -221,60 +221,60 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (if (match-beginning idx)
 	      (return (match-string-no-properties idx))))))))
 
-(defun lgit-file-as-string (file-name)
-  (let ((str (lgit-file-as-string-raw file-name)))
+(defun egg-file-as-string (file-name)
+  (let ((str (egg-file-as-string-raw file-name)))
     (if (> (length str) 0)
 	(substring str 0 -1)
       str)))
 
-(defsubst lgit-is-in-git ()
+(defsubst egg-is-in-git ()
   (= (call-process "git" nil nil nil "rev-parse" "--git-dir") 0))
 
-(defsubst lgit-is-dir-in-git (dir)
-  (let ((default-directory dir)) (lgit-is-in-git)))
+(defsubst egg-is-dir-in-git (dir)
+  (let ((default-directory dir)) (egg-is-in-git)))
 
-(defsubst lgit-name-rev (rev)
-  (lgit-git-to-string "name-rev" "--always" "--name-only" rev))
+(defsubst egg-name-rev (rev)
+  (egg-git-to-string "name-rev" "--always" "--name-only" rev))
 
-(defun lgit-read-git-dir ()
-  (let ((dir (lgit-git-to-string "rev-parse" "--git-dir")))
+(defun egg-read-git-dir ()
+  (let ((dir (egg-git-to-string "rev-parse" "--git-dir")))
     (if (stringp dir) 
 	(expand-file-name dir))))
 
-(defsubst lgit-read-dir-git-dir (dir)
-  (let ((default-directory dir)) (lgit-read-git-dir)))
+(defsubst egg-read-dir-git-dir (dir)
+  (let ((default-directory dir)) (egg-read-git-dir)))
 
-(defvar lgit-git-dir nil)
-(defsubst lgit-git-dir ()
-  (if (local-variable-p 'lgit-git-dir)
-      lgit-git-dir
-    (set (make-local-variable 'lgit-git-dir) (lgit-read-git-dir))))
+(defvar egg-git-dir nil)
+(defsubst egg-git-dir ()
+  (if (local-variable-p 'egg-git-dir)
+      egg-git-dir
+    (set (make-local-variable 'egg-git-dir) (egg-read-git-dir))))
 
-(defsubst lgit-buf-git-dir (buffer)
+(defsubst egg-buf-git-dir (buffer)
   (with-current-buffer buffer
-    (lgit-git-dir)))
+    (egg-git-dir)))
 
-(defun lgit-HEAD ()
-  (let* ((git-dir (lgit-git-dir))) 
+(defun egg-HEAD ()
+  (let* ((git-dir (egg-git-dir))) 
     (if git-dir
-	(lgit-pick-file-contents (concat git-dir "/HEAD")
+	(egg-pick-file-contents (concat git-dir "/HEAD")
 				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2))))
 
-(defsubst lgit-current-branch ()
-  (let* ((git-dir (lgit-git-dir))) 
+(defsubst egg-current-branch ()
+  (let* ((git-dir (egg-git-dir))) 
     (if (stringp git-dir)
-	(lgit-pick-file-contents (concat git-dir "/HEAD")
+	(egg-pick-file-contents (concat git-dir "/HEAD")
 				 "^ref: refs/heads/\\(.+\\)" 1))))
 
-(defsubst lgit-current-sha1 ()
-  (lgit-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
+(defsubst egg-current-sha1 ()
+  (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
 
-(defsubst lgit-head ()
-  (if (lgit-git-dir)
-      (cons (lgit-current-sha1) (lgit-current-branch))))
+(defsubst egg-head ()
+  (if (egg-git-dir)
+      (cons (egg-current-sha1) (egg-current-branch))))
 
-(defun lgit-config-section-raw (type &optional name)
-  (lgit-pick-file-contents (concat (lgit-git-dir) "/config")
+(defun egg-config-section-raw (type &optional name)
+  (egg-pick-file-contents (concat (egg-git-dir) "/config")
 			   (concat "^"
 				   (if name (format "\\[%s \"%s\"\\]" type name)
 				     (format "\\[%s\\]" type))
@@ -282,17 +282,17 @@ ARGS is a list of arguments to pass to PROGRAM."
 				   "\\(\\(:?\t.+\n\\)+\\)")
 			   1))
 
-(defsubst lgit-config-section (type &optional name)
+(defsubst egg-config-section (type &optional name)
   (mapcar 
    (lambda (line) (split-string line "[ =]+" t))
-   (split-string (lgit-config-section-raw type name) "[\t\n]+" t)))
+   (split-string (egg-config-section-raw type name) "[\t\n]+" t)))
 
-(defsubst lgit-config-get (type attr &optional name)
-  (and (lgit-git-dir)
-       (cadr (assoc attr (lgit-config-section type name)))))
+(defsubst egg-config-get (type attr &optional name)
+  (and (egg-git-dir)
+       (cadr (assoc attr (egg-config-section type name)))))
 
-(defun lgit-bool-config (type attr &optional name)
-  (let ((flag (lgit-config-get type attr name)))
+(defun egg-bool-config (type attr &optional name)
+  (let ((flag (egg-config-get type attr name)))
     (cond ((equal flag "true")
 	   t)
 	  ((equal flag "false")
@@ -305,18 +305,18 @@ ARGS is a list of arguments to pass to PROGRAM."
 ;;; hooks
 ;;;========================================================
 
-(add-hook 'find-file-hook 'lgit-git-dir)
+(add-hook 'find-file-hook 'egg-git-dir)
 
 ;;;========================================================
 ;;; Async Git process
 ;;;========================================================
 
-(defun lgit-async-do (exit-code func-args args)
+(defun egg-async-do (exit-code func-args args)
   "Run GIT asynchronously with ARGS.
 if EXIT code is an exit-code from GIT other than zero but considered
 success."
-  (let ((dir (file-name-directory (lgit-git-dir)))
-	(buf (get-buffer-create "*lgit-process*"))
+  (let ((dir (file-name-directory (egg-git-dir)))
+	(buf (get-buffer-create "*egg-process*"))
 	(inhibit-read-only inhibit-read-only)
 	(accepted-msg (and (integerp exit-code)
 			   (format "exited abnormally with code %d"
@@ -326,17 +326,17 @@ success."
     (when (and (processp proc) 		;; is a process
 	       (not (eq (process-status proc) 'exit)) ;; not finised
 	       (= (process-exit-status proc) 0))      ;; still running
-      (error "LGIT: %s is already running!" (process-command proc)))
+      (error "EGG: %s is already running!" (process-command proc)))
     (with-current-buffer buf
       (setq inhibit-read-only t)
       (setq default-directory dir)
       ;;(erase-buffer)
       (widen)
       (goto-char (point-max))
-      (insert "LGIT-GIT-CMD:\n")
+      (insert "EGG-GIT-CMD:\n")
       (insert (format "%S\n" args))
-      (insert "LGIT-GIT-OUTPUT:\n")
-      (setq proc (apply 'start-process "lgit-git" buf "git" args))
+      (insert "EGG-GIT-OUTPUT:\n")
+      (setq proc (apply 'start-process "egg-git" buf "git" args))
       (setq mode-line-process " git")
       (when (and (consp func-args) (functionp (car func-args)))
 	(process-put proc :callback-func (car func-args))
@@ -345,28 +345,28 @@ success."
 	(process-put proc :accepted-msg accepted-msg)
 	(process-put proc :accepted-code exit-code))
       (process-put proc :cmds (cons "git" args))
-      (set-process-sentinel proc #'lgit-process-sentinel))))
+      (set-process-sentinel proc #'egg-process-sentinel))))
 
-(defun lgit-process-sentinel (proc msg)
+(defun egg-process-sentinel (proc msg)
   (let ((exit-code (process-get proc :accepted-code))
 	(accepted-msg (process-get proc :accepted-msg))
 	(callback-func (process-get proc :callback-func))
 	(callback-args (process-get proc :callback-args))
 	(cmds (process-get proc :cmds)))
     (cond ((string= msg "finished\n")
-	   (message "LGIT: git finished."))
+	   (message "EGG: git finished."))
 	  ((string= msg "killed\n")
-	   (message "LGIT: git was killed."))
+	   (message "EGG: git was killed."))
 	  ((string-match accepted-msg msg)
-	   (message "LGIT: git exited with code: %d." exit-code))
+	   (message "EGG: git exited with code: %d." exit-code))
 	  ((string-match "exited abnormally" msg)
-	   (message "LGIT: git failed."))
-	  (t (message "LGIT: git is weird!")))
+	   (message "EGG: git failed."))
+	  (t (message "EGG: git is weird!")))
     (with-current-buffer (process-buffer proc)
       (setq mode-line-process nil)
       (widen)
       (goto-char (point-max))
-      (re-search-backward "^LGIT-GIT-CMD:" nil t)
+      (re-search-backward "^EGG-GIT-CMD:" nil t)
       (narrow-to-region (point) (point-max))
       (if (functionp callback-func)
 	  (apply callback-func proc cmds callback-args)))))
@@ -376,88 +376,88 @@ success."
 ;;; Diff/Hunk
 ;;;========================================================
 
-(defconst lgit-section-map 
-  (let ((map (make-sparse-keymap "LGit:Section")))
-    (define-key map (kbd "h") 'lgit-section-cmd-toggle-hide-show)
-    (define-key map (kbd "H") 'lgit-section-cmd-toggle-hide-show-children)
+(defconst egg-section-map 
+  (let ((map (make-sparse-keymap "Egg:Section")))
+    (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
+    (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
     map))
 
-(defconst lgit-diff-section-map 
-  (let ((map (make-sparse-keymap "LGit:Diff")))
-    (set-keymap-parent map lgit-section-map)
-    (define-key map (kbd "RET") 'lgit-diff-section-cmd-visit-file)
+(defconst egg-diff-section-map 
+  (let ((map (make-sparse-keymap "Egg:Diff")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file)
     map))
 
-(defconst lgit-staged-diff-section-map 
-  (let ((map (make-sparse-keymap "LGit:Diff")))
-    (set-keymap-parent map lgit-diff-section-map)
-    (define-key map (kbd "s") 'lgit-diff-section-cmd-unstage)
+(defconst egg-staged-diff-section-map 
+  (let ((map (make-sparse-keymap "Egg:Diff")))
+    (set-keymap-parent map egg-diff-section-map)
+    (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
     map))
 
-(defconst lgit-unstaged-diff-section-map 
-  (let ((map (make-sparse-keymap "LGit:Diff")))
-    (set-keymap-parent map lgit-diff-section-map)
-    (define-key map (kbd "s") 'lgit-diff-section-cmd-stage)
+(defconst egg-unstaged-diff-section-map 
+  (let ((map (make-sparse-keymap "Egg:Diff")))
+    (set-keymap-parent map egg-diff-section-map)
+    (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
     map))
 
-(defconst lgit-hunk-section-map 
-  (let ((map (make-sparse-keymap "LGit:Hunk")))
-    (set-keymap-parent map lgit-section-map)
-    (define-key map (kbd "RET") 'lgit-hunk-section-cmd-visit-file)
+(defconst egg-hunk-section-map 
+  (let ((map (make-sparse-keymap "Egg:Hunk")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file)
     map))
 
-(defconst lgit-staged-hunk-section-map 
-  (let ((map (make-sparse-keymap "LGit:Hunk")))
-    (set-keymap-parent map lgit-hunk-section-map)
-    (define-key map (kbd "s") 'lgit-hunk-section-cmd-unstage)
+(defconst egg-staged-hunk-section-map 
+  (let ((map (make-sparse-keymap "Egg:Hunk")))
+    (set-keymap-parent map egg-hunk-section-map)
+    (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
     map))
 
-(defconst lgit-unstaged-hunk-section-map 
-  (let ((map (make-sparse-keymap "LGit:Hunk")))
-    (set-keymap-parent map lgit-hunk-section-map)
-    (define-key map (kbd "s") 'lgit-hunk-section-cmd-stage)
+(defconst egg-unstaged-hunk-section-map 
+  (let ((map (make-sparse-keymap "Egg:Hunk")))
+    (set-keymap-parent map egg-hunk-section-map)
+    (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
     map))
 
 (defun list-tp ()
   (interactive)
   (message "tp: %S" (text-properties-at (point))))
 
-(defun lgit-safe-search (re limit &optional no)
+(defun egg-safe-search (re limit &optional no)
   (save-excursion
     (save-match-data
       (and (re-search-forward re limit t)
 	   (match-beginning (or no 0))))))
 
-(defun lgit-decorate-diff-header (no)
+(defun egg-decorate-diff-header (no)
   (put-text-property (match-beginning 0)
 		     (match-end 0)
 		     'display
 		     (propertize (concat "\n" (match-string-no-properties no))
 				 'face
-				 'lgit-diff-file-header)))
+				 'egg-diff-file-header)))
 
-(defun lgit-decorate-diff-index-line (no)
+(defun egg-decorate-diff-index-line (no)
   (put-text-property (1- (match-beginning 0))
 		     (match-end 0)
 		     'display
 		     (propertize 
 		      (concat "\t-- "
 			      (match-string-no-properties no))
-		      'face 'lgit-diff-none)))
+		      'face 'egg-diff-none)))
 
-(defun lgit-decorate-hunk-header (no)
+(defun egg-decorate-hunk-header (no)
   (put-text-property (match-beginning no)
 		     (match-end no)
 		     'face
-		     'lgit-diff-hunk-header)
+		     'egg-diff-hunk-header)
   (put-text-property (match-end no)
 		     (match-end 0)
 		     'face
-		     'lgit-diff-none))
+		     'egg-diff-none))
 
-(defvar lgit-invisibility-positions nil)
+(defvar egg-invisibility-positions nil)
 
-(defsubst lgit-delimit-section (sect-type section beg end 
+(defsubst egg-delimit-section (sect-type section beg end 
 					  &optional inv-beg
 					  keymap)
   (put-text-property beg end :sect-type sect-type)
@@ -469,9 +469,9 @@ success."
     (let ((current-inv (get-text-property inv-beg 'invisible)))
       (add-to-list 'current-inv beg t)
       (put-text-property inv-beg (1- end) 'invisible current-inv)
-      (add-to-list 'lgit-invisibility-positions beg))))
+      (add-to-list 'egg-invisibility-positions beg))))
 
-(defun lgit-decorate-diff-sequence (beg end diff-map hunk-map regexp
+(defun egg-decorate-diff-sequence (beg end diff-map hunk-map regexp
 					diff-re-no
 					hunk-re-no
 					index-re-no
@@ -486,37 +486,37 @@ success."
 	  (setq sub-beg (match-beginning 0))
 	  (cond ((match-beginning del-re-no) ;; del
 		 (put-text-property (match-beginning 0) (match-end 0)
-				    'face 'lgit-diff-del))
+				    'face 'egg-diff-del))
 		((match-beginning add-re-no) ;; add
 		 (put-text-property (match-beginning 0) (match-end 0)
-				    'face 'lgit-diff-add))
+				    'face 'egg-diff-add))
 		((match-beginning none-re-no) ;; unchanged
 		 (put-text-property (match-beginning 0) (match-end 0)
-				    'face 'lgit-diff-none))
+				    'face 'egg-diff-none))
 		((match-beginning hunk-re-no) ;; hunk
-		 (setq sub-end (or (lgit-safe-search "^\\(:?diff\\|@@\\)" end)
+		 (setq sub-end (or (egg-safe-search "^\\(:?diff\\|@@\\)" end)
 				   end))
-		 (lgit-decorate-hunk-header hunk-re-no)
-		 (lgit-delimit-section 
+		 (egg-decorate-hunk-header hunk-re-no)
+		 (egg-delimit-section 
 		  :hunk (list (match-string-no-properties hunk-re-no) 
 			      sub-beg sub-end)
 		  sub-beg sub-end (match-end 0) hunk-map))
 		((match-beginning diff-re-no) ;; diff
-		 (setq sub-end (or (lgit-safe-search "^diff " end) end))
-		 (setq head-end (or (lgit-safe-search "^@@" end) end))
-		 (lgit-decorate-diff-header diff-re-no)
-		 (lgit-delimit-section
+		 (setq sub-end (or (egg-safe-search "^diff " end) end))
+		 (setq head-end (or (egg-safe-search "^@@" end) end))
+		 (egg-decorate-diff-header diff-re-no)
+		 (egg-delimit-section
 		  :diff (list (match-string-no-properties diff-re-no)
 			      sub-beg sub-end head-end)
 		  sub-beg sub-end (match-end 0) diff-map))
 		((match-beginning index-re-no) ;; index
-		 (lgit-decorate-diff-index-line index-re-no))
+		 (egg-decorate-diff-index-line index-re-no))
 	      
 		) ;; cond
 	  )	  ;; while
 	nil))))
 
-(defun lgit-decorate-diff-section (beg end &optional diff-src-prefix
+(defun egg-decorate-diff-section (beg end &optional diff-src-prefix
 				       diff-dst-prefix
 				       diff-map hunk-map)
   (let ((a (or diff-src-prefix "a/"))
@@ -531,15 +531,15 @@ success."
 		  "\\(\\+.*\\)\\|"			;5 add
 		  "\\( .*\\)"				;6 none
 		  "\\)$"))
-    (lgit-decorate-diff-sequence beg end diff-map hunk-map
+    (egg-decorate-diff-sequence beg end diff-map hunk-map
 				 regexp 1 2 3 4 5 6)))
 
 
-(defun lgit-diff-section-cmd-visit-file (file)
+(defun egg-diff-section-cmd-visit-file (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file-other-window file))
 
-(defun lgit-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end)
+(defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end)
   (interactive (cons (car (get-text-property (point) :diff))
 		     (get-text-property (point) :hunk)))
   (let ((limit (line-end-position))
@@ -554,14 +554,14 @@ success."
     (find-file-other-window file)
     (goto-line (+ line adjust))))
 
-(defun lgit-section-cmd-toggle-hide-show (pos)
+(defun egg-section-cmd-toggle-hide-show (pos)
   (interactive (list (get-text-property (point) :navigation)))
   (if (assq pos buffer-invisibility-spec)
       (remove-from-invisibility-spec (cons pos t))
     (add-to-invisibility-spec (cons pos t)))
   (force-window-update (current-buffer)))
 
-(defun lgit-section-cmd-toggle-hide-show-children (pos sect-type)
+(defun egg-section-cmd-toggle-hide-show-children (pos sect-type)
   (interactive (list (get-text-property (point) :navigation)
 		     (get-text-property (point) :sect-type)))
 
@@ -578,12 +578,12 @@ success."
 	(add-to-invisibility-spec (cons child t))))
     (force-window-update (current-buffer))))
 
-(defun lgit-diff-section-patch-string (&optional pos)
+(defun egg-diff-section-patch-string (&optional pos)
   (let ((diff-info (get-text-property (or pos (point)) :diff)))
     (buffer-substring-no-properties (nth 1 diff-info)
 				    (nth 2 diff-info))))
 
-(defun lgit-hunk-section-patch-string (&optional pos)
+(defun egg-hunk-section-patch-string (&optional pos)
   (let ((diff-info (get-text-property (or pos (point)) :diff))
 	(hunk-info (get-text-property (or pos (point)) :hunk)))
     (concat (buffer-substring-no-properties (nth 1 diff-info)
@@ -595,139 +595,139 @@ success."
 ;;; Status Buffer
 ;;;========================================================
 
-(defun lgit-sb-insert-repo-section ()
-  (let ((head-info (lgit-head))
+(defun egg-sb-insert-repo-section ()
+  (let ((head-info (egg-head))
 	(beg (point)))
     (insert (propertize (or (cdr head-info) 
 			    (format "Detached HEAD: %s"
-				    (lgit-name-rev (car head-info))))
-			'face 'lgit-branch) 
+				    (egg-name-rev (car head-info))))
+			'face 'egg-branch) 
 		"\n"
 		(propertize (car head-info) 'face 'font-lock-string-face)
 		"\n"
-		(propertize (lgit-git-dir) 'face 'font-lock-constant-face)
+		(propertize (egg-git-dir) 'face 'font-lock-constant-face)
 		"\n")
     (call-process "git" nil t nil
 		  "log" "--max-count=5"
 		  "--abbrev-commit" "--pretty=oneline")
-    (lgit-delimit-section :section 'repo beg (point))))
+    (egg-delimit-section :section 'repo beg (point))))
 
-(defun lgit-sb-insert-untracked-section ()
+(defun egg-sb-insert-untracked-section ()
   (let ((beg (point)) inv-beg)
-    (insert (lgit-prepend "Untracked Files:" "\n\n" 
-			  'face 'lgit-section-title)
+    (insert (egg-prepend "Untracked Files:" "\n\n" 
+			  'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
     (call-process "git" nil t nil "ls-files" "--others" 
 		  "--exclude-standard")
-    (lgit-delimit-section :section 'untracked beg (point)
-			  inv-beg lgit-section-map)))
+    (egg-delimit-section :section 'untracked beg (point)
+			  inv-beg egg-section-map)))
 
-(defun lgit-sb-insert-unstaged-section ()
+(defun egg-sb-insert-unstaged-section ()
   (let ((beg (point)) inv-beg)
-    (insert (lgit-prepend "Unstaged Changes:" "\n\n" 
-			  'face 'lgit-section-title)
+    (insert (egg-prepend "Unstaged Changes:" "\n\n" 
+			  'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
     (call-process "git" nil t nil "diff" "--no-color"
 		  "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/")
-    (lgit-delimit-section :section 'unstaged beg (point)
-			  inv-beg lgit-section-map)
-    (lgit-decorate-diff-section beg (point) "INDEX/" "WORKDIR/"
-				lgit-unstaged-diff-section-map
-				lgit-unstaged-hunk-section-map)))
+    (egg-delimit-section :section 'unstaged beg (point)
+			  inv-beg egg-section-map)
+    (egg-decorate-diff-section beg (point) "INDEX/" "WORKDIR/"
+				egg-unstaged-diff-section-map
+				egg-unstaged-hunk-section-map)))
 
-(defun lgit-sb-insert-staged-section ()
+(defun egg-sb-insert-staged-section ()
   (let ((beg (point)) inv-beg)
-    (insert (lgit-prepend "Staged Changes:""\n\n"
-			  'face 'lgit-section-title)
+    (insert (egg-prepend "Staged Changes:""\n\n"
+			  'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
     (call-process "git" nil t nil "diff" "--no-color" "--cached"
 		  "--src-prefix=HEAD/" "--dst-prefix=INDEX/")
-    (lgit-delimit-section :section 'staged beg (point)
-			  inv-beg lgit-section-map)
-    (lgit-decorate-diff-section beg (point) "HEAD/" "INDEX/"
-				lgit-staged-diff-section-map
-				lgit-staged-hunk-section-map)))
+    (egg-delimit-section :section 'staged beg (point)
+			  inv-beg egg-section-map)
+    (egg-decorate-diff-section beg (point) "HEAD/" "INDEX/"
+				egg-staged-diff-section-map
+				egg-staged-hunk-section-map)))
 
-(defun lgit-update-status-buffer (buffer &optional update-display-p)
+(defun egg-update-status-buffer (buffer &optional update-display-p)
   (with-current-buffer buffer  
       (let ((inhibit-read-only t))
 	(erase-buffer)
-	(set (make-local-variable 'lgit-invisibility-positions) nil)
+	(set (make-local-variable 'egg-invisibility-positions) nil)
 	(setq buffer-invisibility-spec nil)
-	(lgit-sb-insert-repo-section)
-	(lgit-sb-insert-untracked-section)
-	(lgit-sb-insert-unstaged-section)
-	(lgit-sb-insert-staged-section)
+	(egg-sb-insert-repo-section)
+	(egg-sb-insert-untracked-section)
+	(egg-sb-insert-unstaged-section)
+	(egg-sb-insert-staged-section)
 	(when update-display-p
 	  (force-window-update (current-buffer)))
 	(goto-char (point-min))
 	(current-buffer))))
 
-(defun lgit-status-buffer-cmd-refresh ()
+(defun egg-status-buffer-cmd-refresh ()
   (interactive)
-  (lgit-update-status-buffer (current-buffer) t)
+  (egg-update-status-buffer (current-buffer) t)
   (goto-char (point-min)))
 
-(defun lgit-status-buffer-cmd-navigate-next ()
+(defun egg-status-buffer-cmd-navigate-next ()
   (interactive)
   (goto-char (or (next-single-property-change (point) :navigation)
 		 (point))))
 
-(defun lgit-status-buffer-cmd-navigate-prev ()
+(defun egg-status-buffer-cmd-navigate-prev ()
   (interactive)
   (goto-char (previous-single-property-change (point) :navigation
 					      nil (point-min))))
 
-(defconst lgit-status-buffer-mode-map
-  (let ((map (make-sparse-keymap "LGit:StatusBuffer")))
+(defconst egg-status-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
     (define-key map (kbd "q") 'bury-buffer)
-    (define-key map (kbd "g") 'lgit-status-buffer-cmd-refresh)
-    (define-key map (kbd "n") 'lgit-status-buffer-cmd-navigate-next)
-    (define-key map (kbd "p") 'lgit-status-buffer-cmd-navigate-prev)
+    (define-key map (kbd "g") 'egg-status-buffer-cmd-refresh)
+    (define-key map (kbd "n") 'egg-status-buffer-cmd-navigate-next)
+    (define-key map (kbd "p") 'egg-status-buffer-cmd-navigate-prev)
     map))
 
-(defun lgit-status-buffer-mode ()
+(defun egg-status-buffer-mode ()
   "Major mode to display the status buffer."
   (kill-all-local-variables)
   (setq buffer-read-only t)
-  (setq major-mode 'lgit-status-buffer-mode
-	mode-name "LGit:Status"
+  (setq major-mode 'egg-status-buffer-mode
+	mode-name "Egg:Status"
 	mode-line-process ""
 	truncate-lines t)
-  (use-local-map lgit-status-buffer-mode-map)
+  (use-local-map egg-status-buffer-mode-map)
   (setq buffer-invisibility-spec nil)
-  (run-mode-hooks 'lgit-status-buffer-mode-hook))
+  (run-mode-hooks 'egg-status-buffer-mode-hook))
 
-(defun lgit-get-status-buffer-create (&optional init-p)
-  (let* ((git-dir (lgit-git-dir))
+(defun egg-get-status-buffer-create (&optional init-p)
+  (let* ((git-dir (egg-git-dir))
 	 (dir (file-name-directory git-dir))
 	 (dir-name (file-name-nondirectory (directory-file-name dir)))
-	 (buf-name (format "*%s@lgit:%s*" dir-name dir))
+	 (buf-name (format "*%s@egg:%s*" dir-name dir))
 	 (default-directory dir)
 	 (buf (get-buffer buf-name)))
 
     (when (or (null (prog1 buf (setq buf (get-buffer-create buf-name))))
 	      init-p)
       (with-current-buffer buf
-	(lgit-status-buffer-mode)))
+	(egg-status-buffer-mode)))
     buf))
 
-(defun lgit-display-status-buffer (&optional no-update-p)
+(defun egg-display-status-buffer (&optional no-update-p)
   (interactive "P")
-  (let ((buf (lgit-get-status-buffer-create)))
+  (let ((buf (egg-get-status-buffer-create)))
     (unless no-update-p
-      (lgit-update-status-buffer buf t))
+      (egg-update-status-buffer buf t))
     (display-buffer buf t)))
 
 ;;;========================================================
 ;;; action
 ;;;========================================================
 
-(defun lgit-revert-visited-files (file-or-files)
-  (let* ((git-dir (lgit-git-dir))
+(defun egg-revert-visited-files (file-or-files)
+  (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 (files (if (consp file-or-files) 
 		   file-or-files
@@ -736,143 +736,143 @@ success."
 	      (let ((buf (get-file-buffer file)))
 		(when (bufferp buf)
 		  (with-current-buffer buf
-		    (when (equal (lgit-git-dir) git-dir)
+		    (when (equal (egg-git-dir) git-dir)
 		      (revert-buffer t t t))))))
 	    files)))
 
-(defun lgit-revert-all-visited-files ()
-  (let* ((git-dir (lgit-git-dir))
+(defun egg-revert-all-visited-files ()
+  (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 bufs files)
     (setq files
 	  (delq nil (mapcar (lambda (buf)
 			      (with-current-buffer buf
 				(when (and (buffer-file-name buf)
-					   (equal (lgit-git-dir) git-dir))
+					   (equal (egg-git-dir) git-dir))
 				  (buffer-file-name buf))))
 			    (buffer-list))))
     (when (consp files)
       (setq files (mapcar 'expand-file-name
-			  (apply 'lgit-git-to-lines "ls-files" files)))
+			  (apply 'egg-git-to-lines "ls-files" files)))
       (when (consp files)
-	(lgit-revert-visited-files files)))))
+	(egg-revert-visited-files files)))))
 
-(defun lgit-log-buffer ()
-  (or (get-buffer (concat " *lgit-logs@" (lgit-git-dir) "*"))
-      (let ((git-dir (lgit-git-dir))
+(defun egg-log-buffer ()
+  (or (get-buffer (concat " *egg-logs@" (egg-git-dir) "*"))
+      (let ((git-dir (egg-git-dir))
 	    (default-directory default-directory)
 	    dir)
 	(unless git-dir
 	  (error "Can't find git dir in %s" default-directory))
 	(setq dir (file-name-nondirectory git-dir))
 	(setq default-directory dir)
-	(get-buffer-create (concat " *lgit-logs@" git-dir "*")))))
+	(get-buffer-create (concat " *egg-logs@" git-dir "*")))))
 
-(defsubst lgit-log (&rest strings)
-  (with-current-buffer (lgit-log-buffer)
+(defsubst egg-log (&rest strings)
+  (with-current-buffer (egg-log-buffer)
     (goto-char (point-max))
     (cons (current-buffer)
 	  (prog1 (point)
 	    (apply 'insert (current-time-string) "\n" strings)))))
 
-(defun lgit-hunk-section-patch-index (git-file patch &rest git-args)
-  (let ((default-directory (file-name-directory (lgit-git-dir)))
+(defun egg-hunk-section-patch-index (git-file patch &rest git-args)
+  (let ((default-directory (file-name-directory (egg-git-dir)))
 	output ret args file)
     (setq file (expand-file-name git-file))
     (setq args (mapcar (lambda (word) 
 			 (if (string= word git-file) file word))
 		       git-args))
-    (setq output (lgit-log "git" (mapconcat 'identity args " ")
+    (setq output (egg-log "git" (mapconcat 'identity args " ")
 			   "<REGION\n"))
     (with-temp-buffer
       (insert patch)
       (setq ret 
 	    (apply 'call-process-region (point-min) (point-max)
 		   "git" nil (car output) nil args))
-      (lgit-log (format "RET:%d\n" ret)))
+      (egg-log (format "RET:%d\n" ret)))
     (if (/= ret 0)
 	(with-current-buffer (car output)
 	  (widen)
 	  (narrow-to-region (cdr output) (point-max))
 	  (display-buffer (current-buffer) t)
 	  nil)
-      (lgit-update-status-buffer (lgit-get-status-buffer-create) t)
+      (egg-update-status-buffer (egg-get-status-buffer-create) t)
       file)))
 
-(defun lgit-hunk-section-cmd-stage (pos)
+(defun egg-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
-  (let ((patch (lgit-hunk-section-patch-string pos))
+  (let ((patch (egg-hunk-section-patch-string pos))
 	(file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (lgit-hunk-section-patch-index file patch "apply" "--cached")))
+    (egg-hunk-section-patch-index file patch "apply" "--cached")))
 
-(defun lgit-hunk-section-cmd-unstage (pos)
+(defun egg-hunk-section-cmd-unstage (pos)
   (interactive (list (point)))
-  (let ((patch (lgit-hunk-section-patch-string pos))
+  (let ((patch (egg-hunk-section-patch-string pos))
 	(file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (lgit-hunk-section-patch-index file patch 
+    (egg-hunk-section-patch-index file patch 
 				   "apply" "--cached" "--reverse")))
 
-(defun lgit-hunk-section-cmd-undo (pos)
+(defun egg-hunk-section-cmd-undo (pos)
   (interactive (list (point)))
-  (let ((patch (lgit-hunk-section-patch-string pos))
+  (let ((patch (egg-hunk-section-patch-string pos))
 	(file (car (get-text-property pos :diff)))
 	file-full-name)
     (unless (stringp file)
       (error "No diff with file-name here!"))
     (setq file-full-name
-	  (lgit-hunk-section-patch-index file patch
+	  (egg-hunk-section-patch-index file patch
 					 "apply" "--reverse" "--" file))
     (when (stringp file-full-name)
-      (lgit-revert-visited-files file-full-name))))
+      (egg-revert-visited-files file-full-name))))
 
-(defun lgit-diff-section-mod-index (git-file accepted-code &rest git-args)
+(defun egg-diff-section-mod-index (git-file accepted-code &rest git-args)
   (interactive (list (point)))
-  (let ((default-directory (file-name-directory (lgit-git-dir)))
+  (let ((default-directory (file-name-directory (egg-git-dir)))
 	output ret args file)
     (setq file (expand-file-name git-file))
     (setq args (mapcar (lambda (word) 
 			 (if (string= word git-file) file word))
 		       git-args))
-    (setq output (lgit-log "git" (mapconcat 'identity args " ") "\n"))
+    (setq output (egg-log "git" (mapconcat 'identity args " ") "\n"))
     (setq ret (apply 'call-process "git" nil (car output) nil args))
-    (lgit-log (format "RET:%d\n" ret))
+    (egg-log (format "RET:%d\n" ret))
     (if (not (memq ret (list 0 accepted-code)))
 	(with-current-buffer (car output)
 	  (widen)
 	  (narrow-to-region (cdr output) (point-max))
 	  (display-buffer (current-buffer) t)
 	  nil)
-      (lgit-update-status-buffer (lgit-get-status-buffer-create) t)
+      (egg-update-status-buffer (egg-get-status-buffer-create) t)
       file)))
 
-(defun lgit-diff-section-cmd-stage (pos)
+(defun egg-diff-section-cmd-stage (pos)
   (interactive (list (point)))
   (let ((file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (lgit-diff-section-mod-index file nil "add" file)))
+    (egg-diff-section-mod-index file nil "add" file)))
 
-(defun lgit-diff-section-cmd-unstage (pos)
+(defun egg-diff-section-cmd-unstage (pos)
   (interactive (list (point)))
   (let ((file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (lgit-diff-section-mod-index file 1 "reset" "HEAD" "--" file)))
+    (egg-diff-section-mod-index file 1 "reset" "HEAD" "--" file)))
 
-(defun lgit-diff-section-cmd-undo (pos)
+(defun egg-diff-section-cmd-undo (pos)
   (interactive (list (point)))
   (let ((file (car (get-text-property pos :diff)))
 	file-full-name)
     (unless (stringp file)
       (error "No diff with file-name here!"))
     (setq file-full-name
-	  (lgit-diff-section-mod-index file 0 "checkout" "--" file))
+	  (egg-diff-section-mod-index file 0 "checkout" "--" file))
     (when (stringp file-full-name)
-      (lgit-revert-visited-files file-full-name))))
+      (egg-revert-visited-files file-full-name))))
 
 
-(provide 'lgit)
+(provide 'egg)
