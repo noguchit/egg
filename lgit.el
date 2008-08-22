@@ -775,28 +775,67 @@ success."
 	  (prog1 (point)
 	    (apply 'insert (current-time-string) "\n" strings)))))
 
-(defun lgit-hunk-section-cmd-stage (pos)
-  (interactive (list (point)))
-  (let ((patch (lgit-hunk-section-patch-string pos))
-	(file (car (get-text-property pos :diff)))
-	(default-directory (file-name-directory (lgit-git-dir)))
+(defun lgit-hunk-section-patch-index (pos file patch &optional reverse-p)
+  (let ((default-directory (file-name-directory (lgit-git-dir)))
+	(args (if reverse-p
+		  '("apply" "--cached" "--reverse")
+		'("apply" "--cached")))
 	output ret)
-    (unless (stringp file)
-      (error "No diff with file-name here!"))
     (setq file (expand-file-name file))
-    (setq output (lgit-log "git apply --cached <REGION\n"))
+    (setq output (lgit-log "git apply --cached" 
+			   (if reverse-p " --reverse" " ") "<REGION\n"))
     (with-temp-buffer
       (insert patch)
-      (setq ret (call-process-region (point-min) (point-max) "git"
-				     nil (car output) nil
-				     "apply" "--cached"))
+      (setq ret 
+	    (apply 'call-process-region (point-min) (point-max)
+		   "git" nil (car output) nil args))
       (lgit-log (format "RET:%d\n" ret)))
     (if (/= ret 0)
 	(with-current-buffer (car output)
 	  (widen)
-	  (narrow-to-region (cdr output) (point-max)))
-      (lgit-update-status-buffer (lgit-get-status-buffer-create) t)
-      (lgit-revert-visited-files file))))
+	  (narrow-to-region (cdr output) (point-max))
+	  (display-buffer (current-buffer) t))
+      (lgit-update-status-buffer (lgit-get-status-buffer-create) t))))
+
+(defun lgit-hunk-section-cmd-stage (pos)
+  (interactive (list (point)))
+  (let ((patch (lgit-hunk-section-patch-string pos))
+	(file (car (get-text-property pos :diff))))
+    (unless (stringp file)
+      (error "No diff with file-name here!"))
+    (lgit-hunk-section-patch-index pos file patch)))
+
+(defun lgit-hunk-section-cmd-unstage (pos)
+  (interactive (list (point)))
+  (let ((patch (lgit-hunk-section-patch-string pos))
+	(file (car (get-text-property pos :diff))))
+    (unless (stringp file)
+      (error "No diff with file-name here!"))
+    (lgit-hunk-section-patch-index pos file patch 'reverse-p)))
+
+;; (defun lgit-hunk-section-cmd-stage (pos)
+;;   (interactive (list (point)))
+;;   (let ((patch (lgit-hunk-section-patch-string pos))
+;; 	(file (car (get-text-property pos :diff)))
+;; 	(default-directory (file-name-directory (lgit-git-dir)))
+;; 	output ret)
+;;     (unless (stringp file)
+;;       (error "No diff with file-name here!"))
+;;     (setq file (expand-file-name file))
+;;     (setq output (lgit-log "git apply --cached <REGION\n"))
+;;     (with-temp-buffer
+;;       (insert patch)
+;;       (setq ret (call-process-region (point-min) (point-max) "git"
+;; 				     nil (car output) nil
+;; 				     "apply" "--cached"))
+;;       (lgit-log (format "RET:%d\n" ret)))
+;;     (if (/= ret 0)
+;; 	(with-current-buffer (car output)
+;; 	  (widen)
+;; 	  (narrow-to-region (cdr output) (point-max)))
+;;       (lgit-update-status-buffer (lgit-get-status-buffer-create) t))))
+
+
 
 
 
