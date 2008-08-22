@@ -880,4 +880,64 @@ success."
     (when (stringp file-full-name)
       (egg-revert-visited-files file-full-name))))
 
+;;;========================================================
+;;; log message
+;;;========================================================
+
+(require 'derived)
+(require 'ring)
+
+(defvar egg-log-msg-ring (make-ring 32))
+(defvar egg-log-msg-ring-idx nil)
+(defvar egg-log-msg-new-text nil)
+(defvar egg-log-msg-action nil)
+(define-derived-mode egg-log-msg-mode text-mode "Egg:LogMsg"
+  "Major mode for editing Git log message.\n\n
+\{egg-log-msg-mode-map}."
+  (setq default-directory (file-name-nondirectory (lgit-git-dir)))
+  (make-local-variable 'egg-log-msg-action)
+  (make-local-variable 'egg-log-msg-new-text)
+  (make-local-variable 'egg-log-msg-current-text)
+  (set (make-local-variable 'egg-log-msg-ring-idx) nil))
+
+(define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
+(define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
+(define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-newer-text)
+
+(defun egg-log-msg-hist-cycle (&optional forward-p)
+  "Cycle through message log history."
+  (let ((len (ring-length egg-log-msg-ring)))
+    (if (<= len 0) 
+	(progn (message "No older message text.") (ding))
+      (unless (or (<= (point-max) (point-min))
+		  egg-log-msg-new-text)
+	(setq egg-log-msg-new-text (buffer-string)))
+      (erase-buffer)
+      (setq egg-log-msg-ring-idx
+	    (if (null egg-log-msg-ring-idx)
+		(if forward-p 
+		    (ring-minus1 0)
+		  0)
+	      (if forward-p 
+		  (ring-minus1 egg-log-msg-ring-idx)
+		(ring-plus1 egg-log-msg-ring-idx)))) 
+
+      (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx)))))
+
+(defun egg-log-msg-hist-cycle-backward ()
+  "Cycle backward through comment history."
+  (interactive)
+  (when (or egg-log-msg-ring-idx
+	    (<= (point-max) (point-min))
+	    (y-or-n-p "throw away current text? ")) 
+    (egg-log-msg-hist-cycle)))
+
+(defun egg-log-msg-hist-cycle-forward ()
+  "Cycle forward through comment history."
+  (interactive)
+  (when (or egg-log-msg-ring-idx
+	    (<= (point-max) (point-min))
+	    (y-or-n-p "throw away current text? ")) 
+    (egg-log-msg-hist-cycle t)))
+
 (provide 'egg)
