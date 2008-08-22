@@ -625,28 +625,30 @@ success."
     (egg-delimit-section :section 'untracked beg (point)
 			  inv-beg egg-section-map)))
 
-(defun egg-sb-insert-unstaged-section ()
+(defun egg-sb-insert-unstaged-section (&rest extra-diff-options)
   (let ((beg (point)) inv-beg)
     (insert (egg-prepend "Unstaged Changes:" "\n\n" 
 			  'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
-    (call-process "git" nil t nil "diff" "--no-color"
-		  "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/")
+    (apply 'call-process "git" nil t nil "diff" "--no-color"  "-p"
+	   "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/"
+	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map)
     (egg-decorate-diff-section beg (point) "INDEX/" "WORKDIR/"
 				egg-unstaged-diff-section-map
 				egg-unstaged-hunk-section-map)))
 
-(defun egg-sb-insert-staged-section ()
+(defun egg-sb-insert-staged-section (&rest extra-diff-options)
   (let ((beg (point)) inv-beg)
     (insert (egg-prepend "Staged Changes:""\n\n"
 			  'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
-    (call-process "git" nil t nil "diff" "--no-color" "--cached"
-		  "--src-prefix=HEAD/" "--dst-prefix=INDEX/")
+    (apply 'call-process "git" nil t nil "diff" "--no-color" "--cached" "-p"
+	   "--src-prefix=HEAD/" "--dst-prefix=INDEX/"
+	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map)
     (egg-decorate-diff-section beg (point) "HEAD/" "INDEX/"
@@ -668,10 +670,13 @@ success."
 	(goto-char (point-min))
 	(current-buffer))))
 
+(defun egg-update-status-buffer-disp (buf)
+  (egg-update-status-buffer buf t)
+  (goto-char (point-min)))
+
 (defun egg-status-buffer-cmd-refresh ()
   (interactive)
-  (egg-update-status-buffer (current-buffer) t)
-  (goto-char (point-min)))
+  (egg-update-status-buffer-disp (current-buffer)))
 
 (defun egg-status-buffer-cmd-navigate-next ()
   (interactive)
@@ -717,9 +722,7 @@ success."
 	      init-p)
       (with-current-buffer buf
 	(egg-status-buffer-mode)
-	(setq egg-buffer-update-func 
-	      (lambda (buf)
-		(egg-update-status-buffer buf t)))))
+	(setq egg-buffer-update-func 'egg-update-status-buffer-disp)))
     buf))
 
 (defun egg-status (&optional no-update-p)
@@ -913,6 +916,7 @@ success."
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
 (define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
+(define-key egg-log-msg-mode-map (kbd "C-l") 'egg-commit-log-cmd-update)
 
 (defun egg-log-msg-done ()
   (interactive)
@@ -972,12 +976,22 @@ success."
       (goto-char egg-log-msg-diff-beg)
       (delete-region (point) (point-max))
       (setq beg (point))
-      (egg-sb-insert-staged-section)
+      (egg-sb-insert-staged-section "--stat")
       (egg-sb-insert-unstaged-section)
       (egg-sb-insert-untracked-section)
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
       (force-window-update buf))))
+
+(defun egg-commit-log-update (buf)
+  (egg-commit-log-insert-diff buf)
+  (egg-update-status-buffer (egg-get-status-buffer-create)))
+
+(defun egg-commit-log-cmd-update ()
+  (interactive)
+  (save-excursion
+    (egg-commit-log-update (current-buffer)))
+  (recenter))
 
 (defun egg-commit-log-edit ()
   (interactive)
@@ -996,7 +1010,7 @@ success."
     (set (make-local-variable 'egg-invisibility-positions) nil)
     (setq buffer-invisibility-spec nil)
     (set (make-local-variable 'egg-log-msg-action) 'egg-commit)
-    (set (make-local-variable 'egg-buffer-update-func) 'egg-commit-log-insert-diff)
+    (set (make-local-variable 'egg-buffer-update-func) 'egg-commit-log-update)
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "Commit Message (type C-c C-c when done) :"
