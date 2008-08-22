@@ -160,18 +160,18 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (substring str 0 -1)
 	str))))
 
-(defun egg-git (exit-codes &rest args)
-  (let ((ret (egg-cmd-1 "git" args))
-	code str len)
-    (unless (consp exit-codes) (setq exit-codes (list exit-codes)))
-    (setq code (car ret)
-	  str (cdr ret))
-    (setq len (length str))
-    (when (> len 0)
-      (if (eq (aref str (1- len)) ?\n)
-	  (setq str (substring str 0 -1))))
-    (unless (memq code (cons 0 exit-codes))
-      str)))
+;; ;; (defun egg-git (exit-codes &rest args)
+;; ;;   (let ((ret (egg-cmd-1 "git" args))
+;; ;; 	code str len)
+;; ;;     (unless (consp exit-codes) (setq exit-codes (list exit-codes)))
+;; ;;     (setq code (car ret)
+;; ;; 	  str (cdr ret))
+;; ;;     (setq len (length str))
+;; ;;     (when (> len 0)
+;; ;;       (if (eq (aref str (1- len)) ?\n)
+;; ;; 	  (setq str (substring str 0 -1))))
+;; ;;     (unless (memq code (cons 0 exit-codes))
+;; ;;       str)))
 
 (defsubst egg-git-to-lines (&rest args)
   (split-string (substring (egg-cmd-to-string-1 "git" args) 0 -1)
@@ -775,6 +775,9 @@ success."
 	  (prog1 (point)
 	    (apply 'insert (current-time-string) "\n" strings)))))
 
+(defvar egg-git-program nil)
+(defsubst egg-git () (or egg-git-program "git"))
+
 (defun egg-hunk-section-patch-index (git-file patch &rest git-args)
   (let ((default-directory (file-name-directory (egg-git-dir)))
 	output ret args file)
@@ -782,13 +785,13 @@ success."
     (setq args (mapcar (lambda (word) 
 			 (if (string= word git-file) file word))
 		       git-args))
-    (setq output (egg-log "git" (mapconcat 'identity args " ")
+    (setq output (egg-log (egg-git) (mapconcat 'identity args " ")
 			   "<REGION\n"))
     (with-temp-buffer
       (insert patch)
       (setq ret 
 	    (apply 'call-process-region (point-min) (point-max)
-		   "git" nil (car output) nil args))
+		   (egg-git) nil (car output) nil args))
       (egg-log (format "RET:%d\n" ret)))
     (if (/= ret 0)
 	(with-current-buffer (car output)
@@ -820,12 +823,12 @@ success."
   (interactive (list (point)))
   (let ((patch (egg-hunk-section-patch-string pos))
 	(file (car (get-text-property pos :diff)))
+	(egg-git-program "patch") ;; hack
 	file-full-name)
     (unless (stringp file)
       (error "No diff with file-name here!"))
     (setq file-full-name
-	  (egg-hunk-section-patch-index file patch
-					 "apply" "--reverse" "--" file))
+	  (egg-hunk-section-patch-index file patch "--quiet" "--reverse"))
     (when (stringp file-full-name)
       (egg-revert-visited-files file-full-name))))
 
