@@ -775,15 +775,18 @@ success."
 	  (prog1 (point)
 	    (apply 'insert (current-time-string) "\n" strings)))))
 
-(defun lgit-hunk-section-patch-index (pos file patch &optional reverse-p)
+(defun lgit-hunk-section-patch-index (pos file patch mode)
   (let ((default-directory (file-name-directory (lgit-git-dir)))
-	(args (if reverse-p
-		  '("apply" "--cached" "--reverse")
-		'("apply" "--cached")))
-	output ret)
+	output ret args)
     (setq file (expand-file-name file))
-    (setq output (lgit-log "git apply --cached" 
-			   (if reverse-p " --reverse" " ") "<REGION\n"))
+    (setq args (cond ((eq mode 'patch) '("apply" "--cached"))
+		     ((eq mode 'reverse) '("apply" "--cached" "--reverse"))
+		     ((eq mode 'checkout) 
+		      (list "apply" "--reverse" "--" file))
+		     (t (error "Unknown mode: %s!" mode))))
+    
+    (setq output (lgit-log "git" (mapconcat 'identity args " ")
+			   "<REGION\n"))
     (with-temp-buffer
       (insert patch)
       (setq ret 
@@ -795,7 +798,9 @@ success."
 	  (widen)
 	  (narrow-to-region (cdr output) (point-max))
 	  (display-buffer (current-buffer) t))
-      (lgit-update-status-buffer (lgit-get-status-buffer-create) t))))
+      (lgit-update-status-buffer (lgit-get-status-buffer-create) t)
+      (when (eq mode 'checkout)
+	(lgit-revert-visited-files file)))))
 
 (defun lgit-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
@@ -803,7 +808,7 @@ success."
 	(file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (lgit-hunk-section-patch-index pos file patch)))
+    (lgit-hunk-section-patch-index pos file patch 'patch)))
 
 (defun lgit-hunk-section-cmd-unstage (pos)
   (interactive (list (point)))
@@ -811,7 +816,15 @@ success."
 	(file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (lgit-hunk-section-patch-index pos file patch 'reverse-p)))
+    (lgit-hunk-section-patch-index pos file patch 'reverse)))
+
+(defun lgit-hunk-section-cmd-undo (pos)
+  (interactive (list (point)))
+  (let ((patch (lgit-hunk-section-patch-string pos))
+	(file (car (get-text-property pos :diff))))
+    (unless (stringp file)
+      (error "No diff with file-name here!"))
+    (lgit-hunk-section-patch-index pos file patch 'checkout)))
 
 (defun lgit-diff-section-cmd-stage (pos)
   (interactive (list (point)))
