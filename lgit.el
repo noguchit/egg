@@ -850,6 +850,26 @@ success."
 	  (narrow-to-region (cdr output) (point-max))
 	  (display-buffer (current-buffer) t)))))
 
+(defun lgit-diff-section-cmd-undo (pos)
+  (interactive (list (point)))
+  (let ((file (car (get-text-property pos :diff)))
+	(default-directory (file-name-directory (lgit-git-dir)))
+	output ret)
+    (unless (stringp file)
+      (error "No diff with file-name here!"))
+    (setq file (expand-file-name file))
+    (setq output (lgit-log "git checkout -- " file "\n"))
+    (setq ret (call-process "git" nil (car output) nil 
+			    "checkout" "--" file))
+    (lgit-log (format "RET:%d\n" ret))
+    (if (/= ret 0)
+	(with-current-buffer (car output)
+	  (widen)
+	  (narrow-to-region (cdr output) (point-max))
+	  (display-buffer (current-buffer) t))
+      (lgit-update-status-buffer (lgit-get-status-buffer-create) t)
+      (lgit-revert-visited-files file))))
+
 
 
 (provide 'lgit)
