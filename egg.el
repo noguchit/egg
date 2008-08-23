@@ -905,7 +905,7 @@ success."
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-commit-log-cmd-update)
 
-(defun egg-commit ()
+(defun egg-log-msg-commit ()
   (when (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end 
 			     "commit" "-F" "-")
     (egg-update-status-buffer (egg-get-status-buffer-create) t)))
@@ -920,7 +920,8 @@ success."
 	(ring-insert egg-log-msg-ring 
 		     (buffer-substring-no-properties egg-log-msg-text-beg
 						     egg-log-msg-text-end))
-	(funcall egg-log-msg-action))
+	(funcall egg-log-msg-action)
+	(bury-buffer))
     (message "Please enter a log message!")
     (ding)))
 
@@ -1002,7 +1003,7 @@ success."
     (egg-log-msg-mode)
     (set (make-local-variable 'egg-invisibility-positions) nil)
     (setq buffer-invisibility-spec nil)
-    (set (make-local-variable 'egg-log-msg-action) 'egg-commit)
+    (set (make-local-variable 'egg-log-msg-action) 'egg-log-msg-commit)
     (set (make-local-variable 'egg-buffer-update-func) 'egg-commit-log-update)
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
