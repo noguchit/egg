@@ -625,10 +625,9 @@ success."
     (egg-delimit-section :section 'untracked beg (point)
 			  inv-beg egg-section-map)))
 
-(defun egg-sb-insert-unstaged-section (&rest extra-diff-options)
+(defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg)
-    (insert (egg-prepend "Unstaged Changes:" "\n\n" 
-			  'face 'egg-section-title)
+    (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
     (apply 'call-process "git" nil t nil "diff" "--no-color"  "-p"
@@ -640,9 +639,9 @@ success."
 				egg-unstaged-diff-section-map
 				egg-unstaged-hunk-section-map)))
 
-(defun egg-sb-insert-staged-section (&rest extra-diff-options)
+(defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg)
-    (insert (egg-prepend "Staged Changes:""\n\n"
+    (insert (egg-prepend title "\n\n"
 			  'face 'egg-section-title)
 	    (progn (setq inv-beg (point))
 		   "\n"))
@@ -662,9 +661,9 @@ success."
 	(set (make-local-variable 'egg-invisibility-positions) nil)
 	(setq buffer-invisibility-spec nil)
 	(egg-sb-insert-repo-section)
+	(egg-sb-insert-unstaged-section "Unstaged Changes:")
+	(egg-sb-insert-staged-section "Staged Changes:")
 	(egg-sb-insert-untracked-section)
-	(egg-sb-insert-unstaged-section)
-	(egg-sb-insert-staged-section)
 	(when update-display-p
 	  (force-window-update (current-buffer)))
 	(goto-char (point-min))
@@ -952,8 +951,8 @@ success."
       (goto-char egg-log-msg-diff-beg)
       (delete-region (point) (point-max))
       (setq beg (point))
-      (egg-sb-insert-staged-section "--stat")
-      (egg-sb-insert-unstaged-section)
+      (egg-sb-insert-staged-section "Changes to Commit:" "--stat")
+      (egg-sb-insert-unstaged-section "Deferred Changes:")
       (egg-sb-insert-untracked-section)
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
@@ -1001,11 +1000,6 @@ success."
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
     (egg-commit-log-insert-diff buf)
-;;     (egg-sb-insert-staged-section)
-;;     (egg-sb-insert-unstaged-section)
-;;     (egg-sb-insert-untracked-section)
-;;     (put-text-property tmp (point) 'read-only t)
-;;     (put-text-property tmp (point) 'front-sticky nil)
     (goto-char egg-log-msg-text-beg)
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
