@@ -23,7 +23,6 @@
 ;;;    http://zagadka.vm.bytemark.co.uk/magit
 ;;;
 
-(require 'parse-time)
 (require 'cl)
 
 (defgroup egg nil
