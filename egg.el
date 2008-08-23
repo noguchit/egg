@@ -159,18 +159,6 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (substring str 0 -1)
 	str))))
 
-;; ;; (defun egg-git (exit-codes &rest args)
-;; ;;   (let ((ret (egg-cmd-1 "git" args))
-;; ;; 	code str len)
-;; ;;     (unless (consp exit-codes) (setq exit-codes (list exit-codes)))
-;; ;;     (setq code (car ret)
-;; ;; 	  str (cdr ret))
-;; ;;     (setq len (length str))
-;; ;;     (when (> len 0)
-;; ;;       (if (eq (aref str (1- len)) ?\n)
-;; ;; 	  (setq str (substring str 0 -1))))
-;; ;;     (unless (memq code (cons 0 exit-codes))
-;; ;;       str)))
 
 (defsubst egg-git-to-lines (&rest args)
   (split-string (substring (egg-cmd-to-string-1 "git" args) 0 -1)
@@ -298,7 +286,6 @@ ARGS is a list of arguments to pass to PROGRAM."
 	   nil)
 	  (t (error "Unexpected contents of boolean config %s of %s.%s"
 		    attr type name)))))
-
 
 ;;;========================================================
 ;;; hooks
@@ -730,26 +717,35 @@ success."
 
 (defvar egg-buffer-update-func nil)
 
-(defun egg-get-status-buffer-create (&optional init-p)
+(defun egg-get-status-buffer (&optional create-p)
   (let* ((git-dir (egg-git-dir))
 	 (dir (file-name-directory git-dir))
 	 (dir-name (file-name-nondirectory (directory-file-name dir)))
 	 (buf-name (format "*%s@egg:%s*" dir-name dir))
 	 (default-directory dir)
 	 (buf (get-buffer buf-name)))
-
-    (when (or (null (prog1 buf (setq buf (get-buffer-create buf-name))))
-	      init-p)
+    (unless (or (bufferp buf) (not create-p))
+      (setq buf (get-buffer-create buf-name)))
+    
+    (when (and buf create-p)
       (with-current-buffer buf
-	(egg-status-buffer-mode)
-	(setq egg-buffer-update-func 'egg-update-status-buffer-disp)))
+	(when (not (eq major-mode 'egg-status-buffer-mode))
+	  (egg-status-buffer-mode)
+	  (setq egg-buffer-update-func 'egg-update-status-buffer-disp))))
     buf))
+
+(defun egg-update-status-buffer-no-create ()
+  (let ((buf (egg-get-status-buffer)))
+    (when (bufferp buf)
+      (with-current-buffer buf
+	(funcall egg-buffer-update-func buf)))))
 
 (defun egg-status (&optional no-update-p)
   (interactive "P")
-  (let ((buf (egg-get-status-buffer-create)))
+  (let ((buf (egg-get-status-buffer 'create)))
     (unless no-update-p
-      (egg-update-status-buffer buf t))
+      (with-current-buffer buf
+	(funcall egg-buffer-update-func buf)))
     (display-buffer buf t)))
 
 ;;;========================================================
@@ -965,7 +961,7 @@ success."
 			       "commit" "-F" "-"))
     (when output
       (egg-show-git-output output -1 "GIT-COMMIT")
-      (egg-update-status-buffer (egg-get-status-buffer-create) t))))
+      (egg-update-status-buffer-no-create))))
 
 (defun egg-log-msg-done ()
   (interactive)
@@ -1036,7 +1032,7 @@ success."
 
 (defun egg-commit-log-update (buf)
   (egg-commit-log-insert-diff buf)
-  (egg-update-status-buffer (egg-get-status-buffer-create)))
+  (egg-update-status-buffer-no-create))
 
 (defun egg-commit-log-cmd-update ()
   (interactive)
