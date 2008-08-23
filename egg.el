@@ -803,15 +803,27 @@ success."
   (let (output ret)
     (setq output (egg-log program " " (mapconcat 'identity args " ")
 			  (if (stringp stdin) " <REGION\n" "\n")))
-    (if (stringp stdin)
-	(with-temp-buffer
-	  (insert stdin)
-	  (setq ret 
-		(apply 'call-process-region (point-min) (point-max)
-		       program nil (car output) nil args)))
-      (setq ret
-	    (apply 'call-process program nil (car output) nil args)))
+    (setq ret 
+	  (cond ((stringp stdin)
+		 (with-temp-buffer
+		   (insert stdin)
+		   (apply 'call-process-region (point-min) (point-max)
+				program nil (car output) nil args)))
+		((consp stdin)
+		 (apply 'call-process-region (car stdin) (cdr stdin)
+			program nil (car output) nil args))
+		((null stdin)
+		 (apply 'call-process program nil (car output) nil args)))) 
     (egg-sync-handle-exit-code ret accepted-codes output)))
+
+(defsubst egg-sync-do-region-0 (program beg end args)
+  (egg-sync-do program (cons beg end) nil args))
+
+(defsubst egg-sync-do-region (program beg end &rest args)
+  (egg-sync-do program (cons beg end) nil args))
+
+(defsubst egg-sync-git-region (beg end &rest args)
+  (egg-sync-do "git" (cons beg end) nil args))
 
 (defun egg-sync-do-file (file program stdin accepted-codes args)
   (let ((default-directory (file-name-directory (egg-git-dir))))
@@ -893,11 +905,17 @@ success."
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-commit-log-cmd-update)
 
+(defun egg-commit ()
+  (when (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end 
+			     "commit" "-F" "-")
+    (egg-update-status-buffer (egg-get-status-buffer-create) t)))
+
 (defun egg-log-msg-done ()
   (interactive)
   (widen)
-  (goto-char (point-min))
-  (if (save-excursion (re-search-forward "\\sw\\|\\-" nil t))
+  (goto-char egg-log-msg-text-beg)
+  (if (save-excursion (re-search-forward "\\sw\\|\\-" 
+					 egg-log-msg-text-end t))
       (when (functionp egg-log-msg-action)
 	(ring-insert egg-log-msg-ring 
 		     (buffer-substring-no-properties egg-log-msg-text-beg
@@ -988,7 +1006,7 @@ success."
     (set (make-local-variable 'egg-buffer-update-func) 'egg-commit-log-update)
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
-	    (propertize "Commit Message (type C-c C-c when done) :"
+	    (propertize "----- Commit Message (type C-c C-c when done) -----"
 			'face 'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
@@ -996,7 +1014,9 @@ success."
     (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-beg nil)
     (setq tmp (point))
-    (insert (propertize "\n" 'read-only t 'front-sticky nil))
+    (insert (propertize "\n-------------- End of Commit Message --------------" 
+			'read-only t 'front-sticky nil
+			'face 'font-lock-comment-face))
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
     (egg-commit-log-insert-diff buf)
