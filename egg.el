@@ -693,6 +693,7 @@ success."
     (define-key map (kbd "g") 'egg-status-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-status-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-status-buffer-cmd-navigate-prev)
+    (define-key map (kbd "c") 'egg-commit-log-edit)
     map))
 
 (defun egg-status-buffer-mode ()
