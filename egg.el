@@ -384,7 +384,9 @@ success."
 (defconst egg-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:Diff")))
     (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file)
+    (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
+    (define-key map (kbd "o") 'egg-diff-section-cmd-visit-file)
+    (define-key map (kbd "f") 'egg-diff-section-cmd-visit-file)
     map))
 
 (defconst egg-staged-diff-section-map 
@@ -403,7 +405,9 @@ success."
 (defconst egg-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file)
+    (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
+    (define-key map (kbd "o") 'egg-hunk-section-cmd-visit-file)
+    (define-key map (kbd "f") 'egg-hunk-section-cmd-visit-file)
     map))
 
 (defconst egg-staged-hunk-section-map 
@@ -538,11 +542,13 @@ success."
 
 (defun egg-diff-section-cmd-visit-file (file)
   (interactive (list (car (get-text-property (point) :diff))))
+  (find-file file))
+
+(defun egg-diff-section-cmd-visit-file-other-window (file)
+  (interactive (list (car (get-text-property (point) :diff))))
   (find-file-other-window file))
 
-(defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end)
-  (interactive (cons (car (get-text-property (point) :diff))
-		     (get-text-property (point) :hunk)))
+(defun egg-hunk-compute-line-no (hunk-header hunk-beg)
   (let ((limit (line-end-position))
 	(line (string-to-number (nth 2 (split-string hunk-header "[ @,\+,-]+" t))))
 	(adjust 0))
@@ -552,8 +558,23 @@ success."
       (end-of-line)
       (while (re-search-forward "^\\(:?\\+\\| \\).*" limit t)
 	(setq adjust (1+ adjust))))
-    (find-file-other-window file)
-    (goto-line (+ line adjust))))
+    (+ line adjust)))
+
+(defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg
+					     &rest ignored)
+  (interactive (cons (car (get-text-property (point) :diff))
+		     (get-text-property (point) :hunk)))
+  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
+    (find-file file)
+    (goto-line line)))
+
+(defun egg-hunk-section-cmd-visit-file-other-window (file hunk-header hunk-beg
+							  &rest ignored)
+  (interactive (cons (car (get-text-property (point) :diff))
+		     (get-text-property (point) :hunk)))
+  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
+    (find-file file)
+    (goto-line line)))
 
 (defun egg-section-cmd-toggle-hide-show (pos)
   (interactive (list (get-text-property (point) :navigation)))
