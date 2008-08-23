@@ -787,8 +787,11 @@ success."
 (defun egg-sync-handle-exit-code (ret accepted-codes logger)
   (let (output)
     (with-current-buffer (car logger)
-      (setq output (buffer-substring-no-properties 
-		    (cdr logger) (point-max))))
+      (save-excursion
+	(goto-char (cdr logger))
+	(forward-line 1)
+	(setq output (buffer-substring-no-properties 
+		      (point) (point-max)))))
     (egg-log (format "RET:%d\n" ret))
     (if (listp accepted-codes)
 	(setq accepted-codes (cons 0 accepted-codes))
@@ -830,13 +833,14 @@ success."
   (egg-sync-do "git" (cons beg end) nil args))
 
 (defun egg-sync-do-file (file program stdin accepted-codes args)
-  (let ((default-directory (file-name-directory (egg-git-dir))))
+  (let ((default-directory (file-name-directory (egg-git-dir)))
+	output)
     (setq file (expand-file-name file))
     (setq args (mapcar (lambda (word)
 			 (if (string= word file) file word))
 		       args))
-    (if (egg-sync-do program stdin accepted-codes args)
-	file)))
+    (when (setq output (egg-sync-do program stdin accepted-codes args))
+      (cons file output))))
 
 (defun egg-hunk-section-patch-cmd (pos program &rest args)
   (let ((patch (egg-hunk-section-patch-string pos))
@@ -845,18 +849,39 @@ success."
       (error "No diff with file-name here!"))
     (egg-sync-do-file file program patch nil args)))
 
+(defun egg-show-git-output (output line-no &optional prefix)
+  (unless (stringp prefix) (setq prefix "GIT"))
+  (if (consp output) (setq output (cdr output)))
+  (when (and (stringp output) (> (length output) 1))
+    (when (numberp line-no)
+      (when (setq output (split-string output "\n" t))
+	(cond ((< line-no 0)
+	       (setq line-no (1+ line-no))
+	       (setq output (nth line-no (nreverse output))))
+	      ((> line-no 0)
+	       (setq line-no (1- line-no))
+	       (setq output (nth line-no output)))
+	      (t (setq output nil)))))
+    (when (stringp output)
+      (message "%s> %s" prefix output))))
+
 (defun egg-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
-  (egg-hunk-section-patch-cmd pos "git" "apply" "--cached"))
+  (egg-show-git-output 
+   (egg-hunk-section-patch-cmd pos "git" "apply" "--cached")
+   -1 "GIT-APPLY"))
 
 (defun egg-hunk-section-cmd-unstage (pos)
   (interactive (list (point)))
-  (egg-hunk-section-patch-cmd pos "git" "apply" "--cached" "--reverse"))
+  (egg-show-git-output 
+   (egg-hunk-section-patch-cmd pos "git" "apply" "--cached" "--reverse")
+   -1 "GIT-APPLY"))
 
 (defun egg-hunk-section-cmd-undo (pos)
   (interactive (list (point)))
   (let ((file (egg-hunk-section-patch-cmd pos "patch"
 					  "-p1" "--quiet" "--reverse")))
+    (if (consp file) (setq file (car file)))
     (when (stringp file)
       (egg-revert-visited-files file))))
 
@@ -873,11 +898,14 @@ success."
 
 (defun egg-diff-section-cmd-unstage (pos)
   (interactive (list (point)))
-  (egg-diff-section-patch-cmd pos 1 "reset" "HEAD" "--"))
+  (egg-show-git-output 
+   (egg-diff-section-patch-cmd pos 1 "reset" "HEAD" "--")
+   1  "GIT-RESET"))
 
 (defun egg-diff-section-cmd-undo (pos)
   (interactive (list (point)))
-  (let ((file (egg-diff-section-patch-cmd pos nil "reset" "HEAD" "--")))
+  (let ((file (egg-diff-section-patch-cmd pos nil "checkout" "--")))
+    (if (consp file) (setq file (car file)))
     (when (stringp file)
       (egg-revert-visited-files file))))
 
@@ -910,9 +938,13 @@ success."
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-commit-log-cmd-update)
 
 (defun egg-log-msg-commit ()
-  (when (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end 
-			     "commit" "-F" "-")
-    (egg-update-status-buffer (egg-get-status-buffer-create) t)))
+  (let (output)
+    (setq output 
+	  (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end 
+			       "commit" "-F" "-"))
+    (when output
+      (egg-show-git-output output -1 "GIT-COMMIT")
+      (egg-update-status-buffer (egg-get-status-buffer-create) t))))
 
 (defun egg-log-msg-done ()
   (interactive)
