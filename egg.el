@@ -806,7 +806,7 @@ success."
 (defun egg-sync-do (program stdin accepted-codes args)
   (let (logger ret)
     (setq logger (egg-log "RUN:" program " " (mapconcat 'identity args " ")
-			  (if (stringp stdin) " <REGION\n" "\n")))
+			  (if stdin " <REGION\n" "\n")))
     (setq ret 
 	  (cond ((stringp stdin)
 		 (with-temp-buffer
