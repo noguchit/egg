@@ -208,6 +208,20 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (if (match-beginning idx)
 	      (return (match-string-no-properties idx))))))))
 
+(defun egg-pick-file-records (file-name start-re end-re)
+  (with-temp-buffer
+    (insert-file-contents-literally file-name)
+    (goto-char (point-min))
+    (let (lst beg)
+      (save-match-data
+	(while (re-search-forward start-re nil t)
+	  (setq beg (match-beginning 0))
+	  (when (re-search-forward end-re nil t)
+	    (setq lst (cons (buffer-substring-no-properties 
+			     beg (match-beginning 0))
+			    lst)))))
+      lst)))
+
 (defun egg-file-as-string (file-name)
   (let ((str (egg-file-as-string-raw file-name)))
     (if (> (length str) 0)
@@ -274,6 +288,41 @@ ARGS is a list of arguments to pass to PROGRAM."
    (lambda (line) (split-string line "[ =]+" t))
    (split-string (egg-config-section-raw type name) "[\t\n]+" t)))
 
+(defun egg-get-all-config-branches (file)
+  (interactive "fFilename: ")
+  (save-match-data
+    (mapcar (lambda (rec)
+	      (let ((key (car rec))
+		    (infos (cdr rec)))
+		(cons (progn (string-match "\"\\(.+\\)\"" key)
+			     (match-string-no-properties 1 key))
+		      (mapcar (lambda (attr)
+				(split-string attr "[ =]+" t))
+			      infos))))
+	    (mapcar (lambda (str)
+		      (split-string str "[\t\n]+" t))
+		    (egg-pick-file-records file "^\\[branch \"" "^\\[")))))
+
+(defun egg-config-get-all (file type)
+  (interactive "fFilename: ")
+  (save-match-data
+    (mapcar (lambda (rec)
+	      (let ((key (car rec))
+		    (infos (cdr rec)))
+		(cons (progn (string-match "\"\\(.+\\)\"" key)
+			     (match-string-no-properties 1 key))
+		      (mapcar (lambda (attr)
+				(split-string attr "[ =]+" t))
+			      infos))))
+	    (mapcar (lambda (str)
+		      (split-string str "[\t\n]+" t))
+		    (egg-pick-file-records file
+					   (concat "^\\[" type " \"")
+					   "^\\[")))))
+
+(defsubst egg-config-get-all-branches ()
+  (egg-config-get-all (concat (egg-git-dir) "/config") "branch"))
+
 (defsubst egg-config-get (type attr &optional name)
   (and (egg-git-dir)
        (cadr (assoc attr (egg-config-section type name)))))
@@ -287,11 +336,14 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (t (error "Unexpected contents of boolean config %s of %s.%s"
 		    attr type name)))))
 
-;;;========================================================
-;;; hooks
-;;;========================================================
-
-(add-hook 'find-file-hook 'egg-git-dir)
+(defun egg-tracking-target (branch)
+  (dolist (rbranch-info (egg-config-get-all-branches))
+    (let* ((infos (cdr rbranch-info))
+	   (rbranch (car rbranch-info))
+	   (lbranch (file-name-nondirectory (cadr (assoc "merge" infos))))
+	   (remote (cadr (assoc "remote" infos))))
+      (if (string= lbranch branch)
+	  (return (concat remote "/" rbranch))))))
 
 ;;;========================================================
 ;;; Async Git process
@@ -447,8 +499,6 @@ success."
 		     'face
 		     'egg-diff-none))
 
-(defvar egg-invisibility-positions nil)
-
 (defsubst egg-delimit-section (sect-type section beg end 
 					  &optional inv-beg
 					  keymap)
@@ -460,8 +510,7 @@ success."
   (when (integer-or-marker-p inv-beg) 
     (let ((current-inv (get-text-property inv-beg 'invisible)))
       (add-to-list 'current-inv beg t)
-      (put-text-property inv-beg (1- end) 'invisible current-inv)
-      (add-to-list 'egg-invisibility-positions beg))))
+      (put-text-property inv-beg (1- end) 'invisible current-inv))))
 
 (defun egg-decorate-diff-sequence (beg end diff-map hunk-map regexp
 					diff-re-no
@@ -601,6 +650,97 @@ success."
 					    (nth 2 hunk-info)))))
 
 ;;;========================================================
+;;; Buffer
+;;;========================================================
+(defvar egg-buffer-refresh-func nil)
+
+(defun egg-buffer-cmd-refresh ()
+  (interactive)
+  (when (and (egg-git-dir)
+	     (functionp egg-buffer-refresh-func))
+    (funcall egg-buffer-refresh-func (current-buffer))
+    (recenter)))
+
+(defun egg-buffer-cmd-navigate-next ()
+  (interactive)
+  (goto-char (or (next-single-property-change (point) :navigation)
+		 (point))))
+
+(defun egg-buffer-cmd-navigate-prev ()
+  (interactive)
+  (goto-char (previous-single-property-change (point) :navigation
+					      nil (point-min))))
+
+(defconst egg-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:Buffer")))
+    (define-key map (kbd "q") 'quit-window)
+    (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
+    (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
+    (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
+    map))
+
+(defun egg-get-buffer (fmt create-p)
+  (let* ((git-dir (egg-git-dir))
+	 (dir (file-name-directory git-dir))
+	 (dir-name (file-name-nondirectory
+		    (directory-file-name dir)))
+	 (buf-name (format fmt dir-name git-dir))
+	 (default-directory dir)
+	 (buf (get-buffer buf-name)))
+    (unless (or (bufferp buf) (not create-p))
+      (setq buf (get-buffer-create buf-name)))
+    buf))
+
+(defmacro define-egg-buffer (type args mode name-fmt &rest body)
+  (let* ((type-name (symbol-name type))
+	 (get-buffer-sym (intern (concat "egg-get-" type-name "-buffer")))
+	 (buffer-mode-sym (intern (concat "egg-" type-name "-buffer-mode")))
+	 (buffer-mode-hook-sym (intern (concat "egg-" type-name "-buffer-mode-hook")))
+	 (buffer-mode-map-sym (intern (concat "egg-" type-name "-buffer-mode-map")))
+	 (update-buffer-disp-sym (intern (concat "egg-update-" type-name "-buffer-disp")))
+	 (update-buffer-no-create-sym (intern (concat "egg-update-" type-name "-buffer-no-create"))))
+    `(progn
+       (defun ,buffer-mode-sym ()
+	 ,(concat "Major mode to display the " type-name " buffer.")
+	 ,(if mode
+	      `(,mode)
+	    `(progn
+	       (kill-all-local-variables)
+	       (use-local-map ,buffer-mode-map-sym)
+	       (setq buffer-read-only t)
+	       (setq truncate-lines t))) 
+
+	 (setq major-mode ',buffer-mode-sym
+	       mode-name ,(concat "Egg:" (capitalize type-name))
+	       mode-line-process "")
+	 (set (make-local-variable 'egg-buffer-refresh-func)
+	      (quote ,update-buffer-disp-sym))
+	 (setq buffer-invisibility-spec nil)
+	 (run-mode-hooks ',buffer-mode-hook-sym))
+
+       (defun ,get-buffer-sym (&optional create-p)
+	 (let ((buf (egg-get-buffer ,name-fmt create-p)))
+	   (when (bufferp buf)
+	     (with-current-buffer buf
+	       (unless (eq major-mode ',buffer-mode-sym)
+		 (,buffer-mode-sym))))
+	   buf))
+       (defun ,update-buffer-disp-sym ,args
+	 ,@body)
+       (defun ,update-buffer-no-create-sym ()
+	 (let ((buf (,get-buffer-sym)))
+	   (when (bufferp buf)
+	     (with-current-buffer buf
+	       (,update-buffer-disp-sym buf)))))
+       (add-hook 'egg-buffers-refresh-hook ',update-buffer-no-create-sym))))
+
+
+;; (cl-macroexpand '(define-egg-buffer diff "*diff-%s@egg:%s*"))
+;; (cl-macroexpand ' (define-egg-buffer diff (buf) "*diff-%s@egg:%s*" (show-diff buf) ))
+
+
+
+;;;========================================================
 ;;; Status Buffer
 ;;;========================================================
 
@@ -661,91 +801,31 @@ success."
 				egg-staged-diff-section-map
 				egg-staged-hunk-section-map)))
 
-(defun egg-update-status-buffer (buffer &optional update-display-p)
-  (with-current-buffer buffer  
-      (let ((inhibit-read-only t))
-	(erase-buffer)
-	(set (make-local-variable 'egg-invisibility-positions) nil)
-	(setq buffer-invisibility-spec nil)
-	(egg-sb-insert-repo-section)
-	(egg-sb-insert-unstaged-section "Unstaged Changes:")
-	(egg-sb-insert-staged-section "Staged Changes:")
-	(egg-sb-insert-untracked-section)
-	(when update-display-p
-	  (force-window-update (current-buffer)))
-	(goto-char (point-min))
-	(current-buffer))))
-
-(defun egg-update-status-buffer-disp (buf)
-  (egg-update-status-buffer buf t)
-  (goto-char (point-min)))
-
-(defun egg-status-buffer-cmd-refresh ()
-  (interactive)
-  (egg-update-status-buffer-disp (current-buffer)))
-
-(defun egg-status-buffer-cmd-navigate-next ()
-  (interactive)
-  (goto-char (or (next-single-property-change (point) :navigation)
-		 (point))))
-
-(defun egg-status-buffer-cmd-navigate-prev ()
-  (interactive)
-  (goto-char (previous-single-property-change (point) :navigation
-					      nil (point-min))))
-
 (defconst egg-status-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
-    (define-key map (kbd "q") 'quit-window)
-    (define-key map (kbd "g") 'egg-status-buffer-cmd-refresh)
-    (define-key map (kbd "n") 'egg-status-buffer-cmd-navigate-next)
-    (define-key map (kbd "p") 'egg-status-buffer-cmd-navigate-prev)
+    (set-keymap-parent map egg-buffer-mode-map)
     (define-key map (kbd "c") 'egg-commit-log-edit)
     map))
 
-(defun egg-status-buffer-mode ()
-  "Major mode to display the status buffer."
-  (kill-all-local-variables)
-  (setq buffer-read-only t)
-  (setq major-mode 'egg-status-buffer-mode
-	mode-name "Egg:Status"
-	mode-line-process ""
-	truncate-lines t)
-  (use-local-map egg-status-buffer-mode-map)
-  (setq buffer-invisibility-spec nil)
-  (run-mode-hooks 'egg-status-buffer-mode-hook))
-
-(defvar egg-buffer-update-func nil)
-
-(defun egg-get-status-buffer (&optional create-p)
-  (let* ((git-dir (egg-git-dir))
-	 (dir (file-name-directory git-dir))
-	 (dir-name (file-name-nondirectory (directory-file-name dir)))
-	 (buf-name (format "*%s@egg:%s*" dir-name dir))
-	 (default-directory dir)
-	 (buf (get-buffer buf-name)))
-    (unless (or (bufferp buf) (not create-p))
-      (setq buf (get-buffer-create buf-name)))
-    
-    (when (and buf create-p)
-      (with-current-buffer buf
-	(when (not (eq major-mode 'egg-status-buffer-mode))
-	  (egg-status-buffer-mode)
-	  (setq egg-buffer-update-func 'egg-update-status-buffer-disp))))
-    buf))
-
-(defun egg-update-status-buffer-no-create ()
-  (let ((buf (egg-get-status-buffer)))
-    (when (bufferp buf)
-      (with-current-buffer buf
-	(funcall egg-buffer-update-func buf)))))
+(define-egg-buffer status (buffer)
+  nil "*%s-status@%s*"
+  (with-current-buffer buffer  
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (setq buffer-invisibility-spec nil)
+      (egg-sb-insert-repo-section)
+      (egg-sb-insert-unstaged-section "Unstaged Changes:")
+      (egg-sb-insert-staged-section "Staged Changes:")
+      (egg-sb-insert-untracked-section)
+      (goto-char (point-min))
+      (current-buffer))))
 
 (defun egg-status (&optional no-update-p)
   (interactive "P")
   (let ((buf (egg-get-status-buffer 'create)))
     (unless no-update-p
       (with-current-buffer buf
-	(funcall egg-buffer-update-func buf)))
+	(egg-update-status-buffer-disp buf)))
     (display-buffer buf t)))
 
 ;;;========================================================
@@ -819,8 +899,7 @@ success."
 	  (narrow-to-region (cdr logger) (point-max))
 	  (display-buffer (current-buffer) t)
 	  nil)
-      (if (functionp egg-buffer-update-func)
-	  (funcall egg-buffer-update-func (current-buffer)))
+      (run-hooks 'egg-buffers-refresh-hook)
       output)))
 
 (defun egg-sync-do (program stdin accepted-codes args)
@@ -952,7 +1031,7 @@ success."
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
 (define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
-(define-key egg-log-msg-mode-map (kbd "C-l") 'egg-commit-log-cmd-update)
+(define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
 
 (defun egg-log-msg-commit ()
   (let (output)
@@ -961,7 +1040,7 @@ success."
 			       "commit" "-F" "-"))
     (when output
       (egg-show-git-output output -1 "GIT-COMMIT")
-      (egg-update-status-buffer-no-create))))
+      (run-hooks 'egg-buffers-refresh-hook))))
 
 (defun egg-log-msg-done ()
   (interactive)
@@ -1016,10 +1095,11 @@ success."
   (interactive)
   (egg-log-msg-hist-cycle t))
 
-(defun egg-commit-log-insert-diff (buf)
+
+(define-egg-buffer commit (buf) egg-log-msg-mode
+  "*%s-commit@%s*"
   (with-current-buffer buf
-    (let ((inhibit-read-only t)
-	  beg)
+    (let ((inhibit-read-only t) beg)
       (goto-char egg-log-msg-diff-beg)
       (delete-region (point) (point-max))
       (setq beg (point))
@@ -1030,21 +1110,11 @@ success."
       (put-text-property beg (point) 'front-sticky nil)
       (force-window-update buf))))
 
-(defun egg-commit-log-update (buf)
-  (egg-commit-log-insert-diff buf)
-  (egg-update-status-buffer-no-create))
-
-(defun egg-commit-log-cmd-update ()
-  (interactive)
-  (save-excursion
-    (egg-commit-log-update (current-buffer)))
-  (recenter))
-
 (defun egg-commit-log-edit ()
   (interactive)
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
-	 (buf (get-buffer-create (concat "*commit@egg:" git-dir "*")))
+	 (buf (egg-get-commit-buffer 'create))
 	 (head-info (egg-head))
 	 (head (or (cdr head-info) 
 		   (format "Detached HEAD! (%s)" (car head-info))))
@@ -1053,11 +1123,8 @@ success."
     (pop-to-buffer buf)
     (setq inhibit-read-only t)
     (erase-buffer)
-    (egg-log-msg-mode)
-    (set (make-local-variable 'egg-invisibility-positions) nil)
     (setq buffer-invisibility-spec nil)
     (set (make-local-variable 'egg-log-msg-action) 'egg-log-msg-commit)
-    (set (make-local-variable 'egg-buffer-update-func) 'egg-commit-log-update)
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "----- Commit Message (type C-c C-c when done) -----"
@@ -1073,9 +1140,114 @@ success."
 			'face 'font-lock-comment-face))
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
-    (egg-commit-log-insert-diff buf)
+    (egg-update-commit-buffer-disp buf)
     (goto-char egg-log-msg-text-beg)
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
+
+;;;========================================================
+;;; diff-mode
+;;;========================================================
+
+(defconst egg-diff-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:DiffBuffer")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    map))
+
+;;;========================================================
+;;; minor-mode
+;;;========================================================
+
+
+(defun egg-file-version-other-window (&optional ask-p)
+  "Show other version of the current file in another window."
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let* ((mode major-mode)
+	 (git-dir (egg-git-dir))
+	 (lbranch (egg-current-branch))
+	 (rbranch (and git-dir (egg-tracking-target lbranch)))
+	 (rev (if ask-p
+		  (egg-read-rev "show version: " rbranch)
+		":0"))
+	 (canon-name (car (split-string
+			   (shell-command-to-string
+			    (concat "git ls-files --full-name -- "
+				    (buffer-file-name))))))
+	 (git-name (concat rev ":" canon-name))
+	 (buf (get-buffer-create (concat "*" git-name "*"))))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+	(erase-buffer)
+	(call-process "git" nil buf nil "show" git-name)
+	(funcall mode)
+	(set-buffer-modified-p nil)
+	(setq buffer-read-only t)))
+    (pop-to-buffer buf)))
+
+(defvar egg-minor-mode nil)
+(defvar egg-minor-mode-map (make-sparse-keymap "Egg"))
+(defvar egg-file-cmd-map (make-sparse-keymap "Egg:File"))
+
+(defun egg-mode-key-prefix-set (var val)
+  (define-key egg-minor-mode-map (read-kbd-macro val) egg-file-cmd-map)
+  (custom-set-default var val))
+
+(let ((map egg-file-cmd-map))
+  (define-key map (kbd "a") 'egg-blame)
+  (define-key map (kbd "b") 'egg-create-branch)
+  (define-key map (kbd "d") 'egg-status)
+  (define-key map (kbd "v") 'egg-status)
+  (define-key map (kbd "i") 'egg-stage-file)
+  (define-key map (kbd "l") 'egg-show-logs)
+  (define-key map (kbd "u") 'egg-cancel-modifications)
+  (define-key map (kbd "v") 'egg-next-action)
+  (define-key map (kbd "w") 'egg-commit-log-edit)
+  (define-key map (kbd "=") 'egg-diff-file)
+  (define-key map (kbd "~") 'egg-file-version-other-window)
+  )
+
+(defcustom egg-mode-key-prefix "C-x v"
+  "Prefix keystrokes for egg minor-mode commands."
+  :group 'egg
+  :type 'string
+  :set 'egg-mode-key-prefix-set)
+
+;;;###autoload
+(defun egg-minor-mode (&optional arg)
+  "Turn-on egg-minor-mode which enable key bindings for egg
+in current buffer."
+  (interactive "p")
+  (setq egg-minor-mode (if (null arg)
+			     (not egg-minor-mode)
+			   (> arg 0)))
+  (when egg-minor-mode
+    (if (boundp 'vc-mode)
+	(set 'vc-mode nil))))
+
+;;;###autoload
+(defun egg-minor-mode-find-file-hook ()
+  (if (egg-is-in-git)
+      (egg-minor-mode 1)
+    (egg-minor-mode -1)))
+
+(or (assq 'egg-minor-mode minor-mode-alist)
+    (setq minor-mode-alist
+	  (cons '(egg-minor-mode " Egg") minor-mode-alist)))
+
+(setcdr (or (assq 'egg-minor-mode minor-mode-map-alist)
+	    (car (setq minor-mode-map-alist
+		       (cons (list 'egg-minor-mode)
+			     minor-mode-map-alist))))
+	egg-minor-mode-map)
+
+(if (and (boundp 'vc-handled-backends)
+	 (listp (symbol-value 'vc-handled-backends)))
+    (set 'vc-handled-backends
+	 (delq 'Git (symbol-value 'vc-handled-backends))))
+
+(add-hook 'find-file-hook 'egg-git-dir)
+(add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
 
 (provide 'egg)
