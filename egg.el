@@ -1152,12 +1152,100 @@ success."
 ;;;========================================================
 ;;; diff-mode
 ;;;========================================================
+(defvar egg-diff-buffer-info nil)
 
 (defconst egg-diff-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:DiffBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
     map))
 
+(defun egg-diff-buffer-insert-diffs (buffer)
+  (with-current-buffer buffer
+    (let ((args (plist-get egg-diff-buffer-info :args))
+	  (title (plist-get egg-diff-buffer-info :title))
+	  (prologue (plist-get egg-diff-buffer-info :prologue))
+	  (src-prefix (plist-get egg-diff-buffer-info :src))
+	  (dst-prefix (plist-get egg-diff-buffer-info :dst))
+	  (diff-map (plist-get egg-diff-buffer-info :diff-map))
+	  (hunk-map (plist-get egg-diff-buffer-info :hunk-map))
+	  (inhibit-read-only t)
+	  pos inv-beg)
+      (erase-buffer)
+      (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
+	      (progn (setq inv-beg (point))
+		     "\n"))
+      (insert prologue "\n")
+      (apply 'call-process "git" nil t nil "diff" args)
+      (egg-delimit-section :section 'top-level (point-min) (point))
+      (egg-decorate-diff-section (point-min) (point)
+				 src-prefix dst-prefix
+				 diff-map hunk-map))))
+
+(define-egg-buffer diff "*%s-diff@%s*"
+  "Major mode to display the git diff output."
+  (kill-all-local-variables)
+  (setq buffer-read-only t)
+  (setq major-mode 'egg-diff-buffer-mode
+	mode-name  "Egg:Diff"
+	mode-line-process ""
+	truncate-lines t)
+  (use-local-map egg-diff-buffer-mode-map)
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-diff-buffer-insert-diffs)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-diff-buffer-mode-hook))
+
+(defun egg-do-diff (diff-info)
+  (let* ((git-dir (egg-git-dir))
+	 (dir (file-name-directory git-dir))
+	 (buf (egg-get-diff-buffer 'create)))
+    (with-current-buffer buf
+      (set (make-local-variable 'egg-diff-buffer-info) diff-info)
+      (egg-diff-buffer-insert-diffs buf))))
+
+(defun egg-build-diff-info (src dst &optional file)
+  (let* ((git-dir (egg-git-dir))
+	 (dir (file-name-directory git-dir))
+	 info tmp)
+    (setq info
+	  (cond ((and (null src) (null dst))
+		 (list :args (list "--no-color" "-p"
+				   "--src-prefix=INDEX/"
+				   "--dst-prefix=WORKDIR/")
+		       :title (format "from INDEX to %s" dir)
+		       :prologue "hunks can be removed or added into INDEX."
+		       :src "INDEX/" :dst "WORKDIR/"
+		       :diff-map egg-unstaged-diff-section-map
+		       :hunk-map egg-unstaged-hunk-section-map))
+		((and (equal src "HEAD") (equal dst "INDEX"))
+		 (list :args (list "--no-color" "--cached" "-p"
+				   "--src-prefix=INDEX/"
+				   "--dst-prefix=WORKDIR/")
+		       :title "from HEAD to INDEX" 
+		       :prologue "hunks can be removed from INDEX."
+		       :src "HEAD/" :dst "INDEX/"
+		       :diff-map egg-staged-diff-section-map
+		       :hunk-map egg-staged-hunk-section-map))
+		((and (stringp src) (stringp dst))
+		 (list :args (list "--no-color" "-p"
+				   (concat src ".." dst))
+		       :title (format "from %s to %s" src dst) 
+		       :prologue (format "a: %s\nb: %s" src dst)
+		       :diff-map egg-diff-section-map
+		       :hunk-map egg-hunk-section-map))))
+    (when (stringp file)
+      (setq file (list file)))
+    (when (consp file) 
+      (setq tmp (plist-get info :prologue))
+      (setq tmp (concat "\n"
+			     (mapconcat 'identity file "\n")
+			     "\n\n"
+			     tmp))
+      (plist-put info :prologue tmp)
+      (setq tmp (plist-get info :args))
+      (setq tmp (append tmp (cons "--" file)))
+      (plist-put info :args tmp))
+    info))
 
 ;;;========================================================
 ;;; minor-mode
@@ -1256,3 +1344,5 @@ in current buffer."
 (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
 
 (provide 'egg)
+
+
