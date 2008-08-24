@@ -169,13 +169,24 @@ ARGS is a list of arguments to pass to PROGRAM."
   (egg-git-to-lines "rev-parse" "--symbolic" "--branches"))
 
 (defun egg-remote-branches (&optional raw-p)
-  "Get a list of local branches. E.g. (\"origin/master\", \"joe/fork1\")."
+  "Get a list of remote branches. E.g. (\"origin/master\", \"joe/fork1\")."
   (let ((lst (egg-git-to-lines "rev-parse" "--symbolic" "--remotes")))
     (if raw-p lst
       (mapcar (lambda (full-name)
 		(let ((tmp (split-string full-name "/")))
 		  (cons (cadr tmp) (car tmp))))
 	      lst))))
+
+(defun egg-all-refs (&optional raw-p)
+  "Get a list of all refs."
+  (append (egg-git-to-lines "rev-parse" "--symbolic"
+			    "--branches" "--tags" "--remotes")
+	  (delq nil
+		(mapcar 
+		 (lambda (head)
+		   (if (file-exists-p (concat (egg-git-dir) "/" head))
+		       head))
+		 '("HEAD" "ORIG_HEAD" "MERGE_HEAD" "FETCH_HEAD")))))
 
 (defsubst egg-rbranch-to-remote (rbranch)
   (and (stringp rbranch)
@@ -286,22 +297,8 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-config-section (type &optional name)
   (mapcar 
    (lambda (line) (split-string line "[ =]+" t))
-   (split-string (egg-config-section-raw type name) "[\t\n]+" t)))
-
-(defun egg-get-all-config-branches (file)
-  (interactive "fFilename: ")
-  (save-match-data
-    (mapcar (lambda (rec)
-	      (let ((key (car rec))
-		    (infos (cdr rec)))
-		(cons (progn (string-match "\"\\(.+\\)\"" key)
-			     (match-string-no-properties 1 key))
-		      (mapcar (lambda (attr)
-				(split-string attr "[ =]+" t))
-			      infos))))
-	    (mapcar (lambda (str)
-		      (split-string str "[\t\n]+" t))
-		    (egg-pick-file-records file "^\\[branch \"" "^\\[")))))
+   (split-string (or (egg-config-section-raw type name) "")
+		 "[\t\n]+" t)))
 
 (defun egg-config-get-all (file type)
   (interactive "fFilename: ")
@@ -336,7 +333,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (t (error "Unexpected contents of boolean config %s of %s.%s"
 		    attr type name)))))
 
-(defun egg-tracking-target (branch)
+(defun egg-tracking-target-wrong (branch)
   (dolist (rbranch-info (egg-config-get-all-branches))
     (let* ((infos (cdr rbranch-info))
 	   (rbranch (car rbranch-info))
@@ -344,6 +341,16 @@ ARGS is a list of arguments to pass to PROGRAM."
 	   (remote (cadr (assoc "remote" infos))))
       (if (string= lbranch branch)
 	  (return (concat remote "/" rbranch))))))
+
+(defun egg-tracking-target (branch &optional mode)
+  (let ((remote (egg-config-get "branch" "remote" branch))
+	(rbranch (egg-config-get "branch" "merge" branch)))
+    (when (stringp rbranch)
+      (setq rbranch (file-name-nondirectory rbranch))
+      (cond ((null mode) (concat remote "/" rbranch))
+	    ((eq :name-only mode) rbranch)
+	    (t (cons rbranch remote))))))
+
 
 ;;;========================================================
 ;;; Async Git process
@@ -436,11 +443,16 @@ success."
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
     map))
 
-(defconst egg-unstaged-diff-section-map 
+(defconst egg-wdir-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:Diff")))
     (set-keymap-parent map egg-diff-section-map)
-    (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
     (define-key map (kbd "u") 'egg-diff-section-cmd-undo)
+    map))
+
+(defconst egg-unstaged-diff-section-map 
+  (let ((map (make-sparse-keymap "Egg:Diff")))
+    (set-keymap-parent map egg-wdir-diff-section-map)
+    (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
     map))
 
 (defconst egg-hunk-section-map 
@@ -457,11 +469,16 @@ success."
     (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
     map))
 
-(defconst egg-unstaged-hunk-section-map 
+(defconst egg-wdir-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-hunk-section-map)
-    (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
     (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
+    map))
+
+(defconst egg-unstaged-hunk-section-map 
+  (let ((map (make-sparse-keymap "Egg:Hunk")))
+    (set-keymap-parent map egg-wdir-hunk-section-map)
+    (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
     map))
 
 (defun list-tp ()
@@ -561,10 +578,15 @@ success."
 
 (defun egg-decorate-diff-section (beg end &optional diff-src-prefix
 				       diff-dst-prefix
-				       diff-map hunk-map)
+				       diff-map hunk-map
+				       a-rev b-rev)
   (let ((a (or diff-src-prefix "a/"))
 	(b (or diff-dst-prefix "b/"))
 	regexp)
+    (when (stringp a-rev)
+      (put-text-property beg end :a-revision a-rev))
+    (when (stringp b-rev)
+      (put-text-property beg end :b-revision b-rev))
     (setq regexp
 	  (concat "^\\(?:"
 		  "diff --git " a "\\(.+\\) " b ".+\\|" ;1 file
@@ -995,12 +1017,25 @@ success."
    (egg-diff-section-patch-cmd pos 1 "reset" "HEAD" "--")
    1  "GIT-RESET"))
 
-(defun egg-diff-section-cmd-undo (pos)
+(defun egg-diff-section-cmd-undo-old-no-revsion-check (pos)
   (interactive (list (point)))
   (let ((file (egg-diff-section-patch-cmd pos nil "checkout" "--")))
     (if (consp file) (setq file (car file)))
     (when (stringp file)
       (egg-revert-visited-files file))))
+
+(defun egg-diff-section-cmd-undo (pos)
+  (interactive (list (point)))
+  (let ((file (car (or (get-text-property pos :diff)
+		       (error "No diff with file-name here!"))))
+	(src-rev (get-text-property pos :a-revision))
+	args)
+    (setq args
+	  (if (stringp src-rev)
+	      (list "checkout" src-rev "--" file)
+	    (list "checkout" "--" file)))
+    (egg-sync-do-file file "git" nil nil args)))
+
 
 ;;;========================================================
 ;;; log message
@@ -1166,6 +1201,8 @@ success."
 	  (prologue (plist-get egg-diff-buffer-info :prologue))
 	  (src-prefix (plist-get egg-diff-buffer-info :src))
 	  (dst-prefix (plist-get egg-diff-buffer-info :dst))
+	  (src-rev (plist-get egg-diff-buffer-info :src-revision))
+	  (dst-rev (plist-get egg-diff-buffer-info :dst-revision))
 	  (diff-map (plist-get egg-diff-buffer-info :diff-map))
 	  (hunk-map (plist-get egg-diff-buffer-info :hunk-map))
 	  (inhibit-read-only t)
@@ -1179,7 +1216,8 @@ success."
       (egg-delimit-section :section 'top-level (point-min) (point))
       (egg-decorate-diff-section (point-min) (point)
 				 src-prefix dst-prefix
-				 diff-map hunk-map))))
+				 diff-map hunk-map
+				 src-rev dst-rev))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
   "Major mode to display the git diff output."
@@ -1201,7 +1239,8 @@ success."
 	 (buf (egg-get-diff-buffer 'create)))
     (with-current-buffer buf
       (set (make-local-variable 'egg-diff-buffer-info) diff-info)
-      (egg-diff-buffer-insert-diffs buf))))
+      (egg-diff-buffer-insert-diffs buf))
+    buf))
 
 (defun egg-build-diff-info (src dst &optional file)
   (let* ((git-dir (egg-git-dir))
@@ -1231,8 +1270,18 @@ success."
 				   (concat src ".." dst))
 		       :title (format "from %s to %s" src dst) 
 		       :prologue (format "a: %s\nb: %s" src dst)
+		       :src-revision src
+		       :dst-revision dst
 		       :diff-map egg-diff-section-map
-		       :hunk-map egg-hunk-section-map))))
+		       :hunk-map egg-hunk-section-map))
+		((and (stringp src) (null dst))
+		 (list :args (list "--no-color" "-p" src)
+		       :title (format "from %s to %s" src dir) 
+		       :prologue (concat (format "a: %s\nb: %s\n" src dir)
+					 "hunks can be removed???")
+		       :src-revision src
+		       :diff-map egg-wdir-diff-section-map
+		       :hunk-map egg-wdir-hunk-section-map))))
     (when (stringp file)
       (setq file (list file)))
     (when (consp file) 
@@ -1247,10 +1296,37 @@ success."
       (plist-put info :args tmp))
     info))
 
+
+(defun egg-revs ()
+  (apply 'nconc 
+	 (mapcar (lambda (ref)
+		   (cons ref 
+			 (mapcar (lambda (suffix)
+			     (concat ref suffix))
+				 '("^" "^^" "^^^" "^^^^" "^^^^^"
+				   "~0" "~1" "~2" "~3" "~4" "~5"))))
+		 (egg-all-refs))))
+
+(defun egg-read-rev (prompt &optional default special-rev)
+  (unless (listp special-rev)
+    (setq special-rev (list special-rev)))
+  (completing-read prompt (nconc special-rev (egg-revs)) nil nil default))
+
+
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
-
+(defun egg-diff-file (&optional ask-p)
+  "Diff the current file in another window."
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let ((git-file (egg-git-to-string "ls-files" "--full-name" "--" 
+				     (buffer-file-name)))
+	(src-rev (and ask-p (egg-read-rev "diff against: " "HEAD")))
+	buf)
+    (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file))) 
+    (pop-to-buffer buf)))
 
 (defun egg-file-version-other-window (&optional ask-p)
   "Show other version of the current file in another window."
@@ -1262,12 +1338,10 @@ success."
 	 (lbranch (egg-current-branch))
 	 (rbranch (and git-dir (egg-tracking-target lbranch)))
 	 (rev (if ask-p
-		  (egg-read-rev "show version: " rbranch)
+		  (egg-read-rev "show version: " rbranch ":0")
 		":0"))
-	 (canon-name (car (split-string
-			   (shell-command-to-string
-			    (concat "git ls-files --full-name -- "
-				    (buffer-file-name))))))
+	 (canon-name (egg-git-to-string "ls-files" "--full-name" "--" 
+					(buffer-file-name)))
 	 (git-name (concat rev ":" canon-name))
 	 (buf (get-buffer-create (concat "*" git-name "*"))))
     (with-current-buffer buf
