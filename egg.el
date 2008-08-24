@@ -691,32 +691,16 @@ success."
       (setq buf (get-buffer-create buf-name)))
     buf))
 
-(defmacro define-egg-buffer (type args mode name-fmt &rest body)
+(defmacro define-egg-buffer (type name-fmt &rest body)
   (let* ((type-name (symbol-name type))
 	 (get-buffer-sym (intern (concat "egg-get-" type-name "-buffer")))
 	 (buffer-mode-sym (intern (concat "egg-" type-name "-buffer-mode")))
 	 (buffer-mode-hook-sym (intern (concat "egg-" type-name "-buffer-mode-hook")))
 	 (buffer-mode-map-sym (intern (concat "egg-" type-name "-buffer-mode-map")))
-	 (update-buffer-disp-sym (intern (concat "egg-update-" type-name "-buffer-disp")))
 	 (update-buffer-no-create-sym (intern (concat "egg-update-" type-name "-buffer-no-create"))))
     `(progn
        (defun ,buffer-mode-sym ()
-	 ,(concat "Major mode to display the " type-name " buffer.")
-	 ,(if mode
-	      `(,mode)
-	    `(progn
-	       (kill-all-local-variables)
-	       (use-local-map ,buffer-mode-map-sym)
-	       (setq buffer-read-only t)
-	       (setq truncate-lines t))) 
-
-	 (setq major-mode ',buffer-mode-sym
-	       mode-name ,(concat "Egg:" (capitalize type-name))
-	       mode-line-process "")
-	 (set (make-local-variable 'egg-buffer-refresh-func)
-	      (quote ,update-buffer-disp-sym))
-	 (setq buffer-invisibility-spec nil)
-	 (run-mode-hooks ',buffer-mode-hook-sym))
+	 ,@body)
 
        (defun ,get-buffer-sym (&optional create-p)
 	 (let ((buf (egg-get-buffer ,name-fmt create-p)))
@@ -725,13 +709,12 @@ success."
 	       (unless (eq major-mode ',buffer-mode-sym)
 		 (,buffer-mode-sym))))
 	   buf))
-       (defun ,update-buffer-disp-sym ,args
-	 ,@body)
        (defun ,update-buffer-no-create-sym ()
 	 (let ((buf (,get-buffer-sym)))
 	   (when (bufferp buf)
 	     (with-current-buffer buf
-	       (,update-buffer-disp-sym buf)))))
+	       (when (functionp egg-buffer-refresh-func)
+		 (funcall egg-buffer-refresh-func buf))))))
        (add-hook 'egg-buffers-refresh-hook ',update-buffer-no-create-sym))))
 
 
@@ -807,9 +790,8 @@ success."
     (define-key map (kbd "c") 'egg-commit-log-edit)
     map))
 
-(define-egg-buffer status (buffer)
-  nil "*%s-status@%s*"
-  (with-current-buffer buffer  
+(defun egg-status-buffer-redisplay (buf)
+  (with-current-buffer buf
     (let ((inhibit-read-only t))
       (erase-buffer)
       (setq buffer-invisibility-spec nil)
@@ -817,15 +799,28 @@ success."
       (egg-sb-insert-unstaged-section "Unstaged Changes:")
       (egg-sb-insert-staged-section "Staged Changes:")
       (egg-sb-insert-untracked-section)
-      (goto-char (point-min))
-      (current-buffer))))
+      (goto-char (point-min)))))
+
+(define-egg-buffer status "*%s-status@%s*"
+  "Major mode to display the egg status buffer."
+  (kill-all-local-variables)
+  (setq buffer-read-only t)
+  (setq major-mode 'egg-status-buffer-mode
+	mode-name  "Egg:Status"
+	mode-line-process ""
+	truncate-lines t)
+  (use-local-map egg-status-buffer-mode-map)
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-status-buffer-redisplay)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-status-buffer-mode-hook))
 
 (defun egg-status (&optional no-update-p)
   (interactive "P")
   (let ((buf (egg-get-status-buffer 'create)))
     (unless no-update-p
       (with-current-buffer buf
-	(egg-update-status-buffer-disp buf)))
+	(egg-status-buffer-redisplay buf)))
     (display-buffer buf t)))
 
 ;;;========================================================
@@ -1095,9 +1090,7 @@ success."
   (interactive)
   (egg-log-msg-hist-cycle t))
 
-
-(define-egg-buffer commit (buf) egg-log-msg-mode
-  "*%s-commit@%s*"
+(defun egg-commit-log-buffer-show-diffs (buf)
   (with-current-buffer buf
     (let ((inhibit-read-only t) beg)
       (goto-char egg-log-msg-diff-beg)
@@ -1110,6 +1103,16 @@ success."
       (put-text-property beg (point) 'front-sticky nil)
       (force-window-update buf))))
 
+(define-egg-buffer commit "*%s-commit@%s*"
+  (egg-log-msg-mode)
+  (setq major-mode 'egg-commit-buffer-mode
+	mode-name "Egg:Commit"
+	mode-line-process "")
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-commit-log-buffer-show-diffs)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-commit-buffer-mode-hook))
+
 (defun egg-commit-log-edit ()
   (interactive)
   (let* ((git-dir (egg-git-dir))
@@ -1118,12 +1121,11 @@ success."
 	 (head-info (egg-head))
 	 (head (or (cdr head-info) 
 		   (format "Detached HEAD! (%s)" (car head-info))))
-	 (inhibit-read-only inhibit-read-only)
-	 tmp)
+	 tmp
+	 (inhibit-read-only inhibit-read-only))
     (pop-to-buffer buf)
     (setq inhibit-read-only t)
     (erase-buffer)
-    (setq buffer-invisibility-spec nil)
     (set (make-local-variable 'egg-log-msg-action) 'egg-log-msg-commit)
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
@@ -1140,7 +1142,7 @@ success."
 			'face 'font-lock-comment-face))
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
-    (egg-update-commit-buffer-disp buf)
+    (egg-commit-log-buffer-show-diffs buf)
     (goto-char egg-log-msg-text-beg)
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
@@ -1153,6 +1155,7 @@ success."
   (let ((map (make-sparse-keymap "Egg:DiffBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
     map))
+
 
 ;;;========================================================
 ;;; minor-mode
