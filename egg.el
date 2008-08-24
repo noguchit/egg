@@ -159,6 +159,13 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (substring str 0 -1)
 	str))))
 
+(defsubst egg-cmd-ok (program &rest args)
+  (= (apply 'call-process program nil nil nil args) 0))
+
+(defsubst egg-git-ok (&rest args)
+  (= (apply 'call-process "git" nil nil nil args) 0))
+
+(defsubst egg-wdir-clean () (egg-git-ok "diff" "--quiet"))
 
 (defsubst egg-git-to-lines (&rest args)
   (split-string (substring (egg-cmd-to-string-1 "git" args) 0 -1)
@@ -1355,6 +1362,113 @@ success."
 	(set-buffer-modified-p nil)
 	(setq buffer-read-only t)))
     (pop-to-buffer buf)))
+
+;; (defconst egg-key-action-alist 
+;;   '((?b :new-branch "create new [b]ranch")
+;;     (?s :status "show [s]tatus")
+;;     (?f :stage-file "stage current [f]ile")
+;;     (?a :stage-all "stage [a]ll changes")
+;;     (?d :diff-file "[d]iff current file")
+;;     (?c :commit "[c]ommit staged changes")
+;;     (?? :more-options "[?] more options")))
+
+(defconst egg-key-action-alist 
+  '((?b :new-branch "[b]ranch")
+    (?s :status "[s]tatus")
+    (?f :stage-file "stage [f]ile")
+    (?a :stage-all "stage [a]ll")
+    (?d :diff-file "[d]iff")
+    (?c :commit "[c]ommit")
+    (?? :more-options "[?] options")))
+
+(defun egg-guess-next-action (file-is-modified-p
+			      wdir-is-modified-p
+			      index-is-clean)
+  (if file-is-modified-p
+      :stage-file 
+    ;; file is unchanged
+    (if wdir-is-modified-p
+	:stage-all
+      ;; wdir is clean
+      (if index-is-clean
+	  :new-branch
+	:commit))))
+
+(defun egg-get-all-alternatives (file-modified-p
+				 wdir-modified-p
+				 index-clean-p)
+  (let ((lst (list :new-branch :status)))
+    (when file-modified-p
+      (setq lst  (append lst (list :stage-file :diff-file :stage-all))))
+    (when wdir-modified-p
+      (add-to-list 'lst :stage-all))
+    (unless index-clean-p
+      (add-to-list 'lst :commit))
+    lst))
+
+(defun egg-get-some-alternatives (file-is-modified-p
+				  wdir-is-modified-p
+				  index-is-clean)
+  (if file-is-modified-p
+      '(:stage-file :diff-file :status :more-options)
+    ;; file is unchanged
+    (if wdir-is-modified-p
+	'(:stage-all :status :more-options)
+      ;; wdir is clean
+      (if index-is-clean
+	  '(:new-branch :status :more-options)
+	'(:commit :status :more-options)))))
+
+(defun egg-build-key-prompt (prefix default alternatives)
+  (let ((action-desc-alist (mapcar 'cdr egg-key-action-alist)))
+    (concat prefix " default: "
+	    (nth 1 (assq default action-desc-alist))
+	  ". or "
+	  (mapconcat 'identity 
+		     (mapcar (lambda (action)
+			       (nth 1 (assq action action-desc-alist)))
+			     (remq default alternatives)) ", "))))
+
+(defun egg-prompt-next-action (file-modified-p
+			       wdir-modified-p
+			       index-clean-p)
+  (let ((default (egg-guess-next-action file-modified-p
+					wdir-modified-p
+					index-clean-p))
+	(all-alternatives (egg-get-all-alternatives file-modified-p
+						    wdir-modified-p
+						    index-clean-p))
+	(some-alternatives (egg-get-some-alternatives file-modified-p
+						      wdir-modified-p
+						      index-clean-p))
+	key action min-alternatives alternatives a-list)
+    (setq min-alternatives (list default :status :more-options))
+    (setq a-list (list min-alternatives
+		       some-alternatives
+		       all-alternatives))
+    (setq alternatives (car a-list) a-list (cdr a-list))
+    (while (null action)
+      (setq key (read-key-sequence 
+		 (egg-build-key-prompt "What's next?"
+				       default alternatives)))
+      (setq key (string-to-char key))
+      (cond ((memq key '(?\r ?\n ?\ ))
+	     (setq action default))
+	    ((eq key ??)
+	     (when a-list
+	       (setq alternatives (car a-list) a-list (cdr a-list))))
+	    (t (setq action (cadr (assq key egg-key-action-alist)))
+	       (unless action
+		 (ding)))))
+    action))
+
+(defun egg-next-action (&optional ask-p)
+  (interactive "P")
+  (let ((wdir-clean-p (egg-wdir-clean))
+	action confused)
+    (when (or ask-p confused)
+      (setq action
+	    (cond (()))))))
 
 (defvar egg-minor-mode nil)
 (defvar egg-minor-mode-map (make-sparse-keymap "Egg"))
