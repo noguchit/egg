@@ -1034,7 +1034,10 @@ success."
 	  (if (stringp src-rev)
 	      (list "checkout" src-rev "--" file)
 	    (list "checkout" "--" file)))
-    (egg-sync-do-file file "git" nil nil args)))
+    (when (setq file (egg-sync-do-file file "git" nil nil args))
+      (if (consp file) (setq file (car file)))
+      (when (stringp file)
+	(egg-revert-visited-files file)))))
 
 
 ;;;========================================================
@@ -1418,5 +1421,3 @@ in current buffer."
 (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
 
 (provide 'egg)
-
-
