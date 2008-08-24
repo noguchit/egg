@@ -418,6 +418,8 @@ success."
   (let ((map (make-sparse-keymap "Egg:Section")))
     (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
     (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
+    (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
+    (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     map))
 
 (defconst egg-diff-section-map 
@@ -1121,7 +1123,6 @@ success."
 	 (head-info (egg-head))
 	 (head (or (cdr head-info) 
 		   (format "Detached HEAD! (%s)" (car head-info))))
-	 tmp
 	 (inhibit-read-only inhibit-read-only))
     (pop-to-buffer buf)
     (setq inhibit-read-only t)
@@ -1129,15 +1130,16 @@ success."
     (set (make-local-variable 'egg-log-msg-action) 'egg-log-msg-commit)
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
-	    (propertize "----- Commit Message (type C-c C-c when done) -----"
+	    (propertize "--------------- Commit Message (type C-c C-c when done) ---------------"
 			'face 'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
     (insert "\n")
     (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-beg nil)
-    (setq tmp (point))
-    (insert (propertize "\n-------------- End of Commit Message --------------" 
+    (put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg 
+		       :navigation 'commit-log-text)
+    (insert (propertize "\n------------------------ End of Commit Message ------------------------" 
 			'read-only t 'front-sticky nil
 			'face 'font-lock-comment-face))
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
