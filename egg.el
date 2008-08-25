@@ -166,6 +166,9 @@ ARGS is a list of arguments to pass to PROGRAM."
   (= (apply 'call-process "git" nil nil nil args) 0))
 
 (defsubst egg-wdir-clean () (egg-git-ok "diff" "--quiet"))
+(defsubst egg-file-updated (file) 
+  (egg-git-ok "diff" "--quiet" "--" file))
+(defsubst egg-index-empty () (egg-git-ok "diff" "--cached" "--quiet"))
 
 (defsubst egg-git-to-lines (&rest args)
   (split-string (substring (egg-cmd-to-string-1 "git" args) 0 -1)
@@ -1363,23 +1366,27 @@ success."
 	(setq buffer-read-only t)))
     (pop-to-buffer buf)))
 
-;; (defconst egg-key-action-alist 
-;;   '((?b :new-branch "create new [b]ranch")
-;;     (?s :status "show [s]tatus")
-;;     (?f :stage-file "stage current [f]ile")
-;;     (?a :stage-all "stage [a]ll changes")
-;;     (?d :diff-file "[d]iff current file")
-;;     (?c :commit "[c]ommit staged changes")
-;;     (?? :more-options "[?] more options")))
-
 (defconst egg-key-action-alist 
-  '((?b :new-branch "[b]ranch")
-    (?s :status "[s]tatus")
-    (?f :stage-file "stage [f]ile")
-    (?a :stage-all "stage [a]ll")
-    (?d :diff-file "[d]iff")
-    (?c :commit "[c]ommit")
-    (?? :more-options "[?] options")))
+  '((?b :new-branch "[b]ranch" "start new [b]ranch")
+    (?s :status "[s]tatus" "show repo's [s]tatus" )
+    (?f :stage-file "stage [f]ile" "stage current [f]ile")
+    (?a :stage-all "stage [a]ll" "stage [a]ll files")
+    (?d :diff-file "[d]iff" "[d]iff current file")
+    (?c :commit "[c]ommit" "[c]ommit staged changes")
+    (?? :more-options "[?] options" "[?] more options")))
+
+(defconst egg-action-function-alist
+  '((:new-branch . egg-new-branch)
+    (:status     . egg-status)
+    (:stage-file . egg-stage-file)
+    (:stage-all  . egg-stage-workdir)
+    (:diff-file  . egg-diff-file)
+    (:commit     . egg-commit-log-edit)))
+
+(defcustom egg-next-action-prompt-p t
+  "Always prompt when trying to guess the next logical action ."
+  :group 'egg
+  :type 'boolean)
 
 (defun egg-guess-next-action (file-is-modified-p
 			      wdir-is-modified-p
@@ -1413,20 +1420,22 @@ success."
       '(:stage-file :diff-file :status :more-options)
     ;; file is unchanged
     (if wdir-is-modified-p
-	'(:stage-all :status :more-options)
+	'(:stage-all :commit :status :more-options)
       ;; wdir is clean
       (if index-is-clean
 	  '(:new-branch :status :more-options)
 	'(:commit :status :more-options)))))
 
-(defun egg-build-key-prompt (prefix default alternatives)
-  (let ((action-desc-alist (mapcar 'cdr egg-key-action-alist)))
+(defun egg-build-key-prompt (prefix default alternatives &optional
+				    long-text-p)
+  (let ((text-idx (if long-text-p 2 1))
+	(action-desc-alist (mapcar 'cdr egg-key-action-alist)))
     (concat prefix " default: "
-	    (nth 1 (assq default action-desc-alist))
+	    (nth text-idx (assq default action-desc-alist))
 	  ". or "
 	  (mapconcat 'identity 
 		     (mapcar (lambda (action)
-			       (nth 1 (assq action action-desc-alist)))
+			       (nth text-idx (assq action action-desc-alist)))
 			     (remq default alternatives)) ", "))))
 
 (defun egg-prompt-next-action (file-modified-p
@@ -1441,6 +1450,7 @@ success."
 	(some-alternatives (egg-get-some-alternatives file-modified-p
 						      wdir-modified-p
 						      index-clean-p))
+	(long-text-p t)
 	key action min-alternatives alternatives a-list)
     (setq min-alternatives (list default :status :more-options))
     (setq a-list (list min-alternatives
@@ -1450,7 +1460,9 @@ success."
     (while (null action)
       (setq key (read-key-sequence 
 		 (egg-build-key-prompt "What's next?"
-				       default alternatives)))
+				       default alternatives
+				       long-text-p)))
+      (setq long-text-p nil)
       (setq key (string-to-char key))
       (cond ((memq key '(?\r ?\n ?\ ))
 	     (setq action default))
@@ -1464,11 +1476,20 @@ success."
 
 (defun egg-next-action (&optional ask-p)
   (interactive "P")
-  (let ((wdir-clean-p (egg-wdir-clean))
-	action confused)
-    (when (or ask-p confused)
-      (setq action
-	    (cond (()))))))
+  (save-some-buffers nil 'egg-is-in-git)
+  (let ((file-modified-p (not (egg-file-updated (buffer-file-name))))
+	(wdir-modified-p (not (egg-wdir-clean)))
+	(index-clean-p (egg-index-empty))
+	action default)
+     (setq action (if (or ask-p egg-next-action-prompt-p)
+		      (egg-prompt-next-action file-modified-p
+					      wdir-modified-p
+					      index-clean-p)
+		    (egg-guess-next-action file-modified-p
+					   wdir-modified-p
+					   index-clean-p)))
+     
+     (funcall (cdr (assq action egg-action-function-alist)))))
 
 (defvar egg-minor-mode nil)
 (defvar egg-minor-mode-map (make-sparse-keymap "Egg"))
