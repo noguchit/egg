@@ -1349,7 +1349,7 @@ success."
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
-(defun egg-diff-file (&optional ask-p)
+(defun egg-file-diff (&optional ask-p)
   "Diff the current file in another window."
   (interactive "P")
   (unless (buffer-file-name)
@@ -1360,6 +1360,23 @@ success."
 	buf)
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file))) 
     (pop-to-buffer buf)))
+
+(defun egg-file-chekout-other-version (&optional confirm-p)
+  "Checkout HEAD's version of the current file.
+if CONFIRM-P was not null, then ask for confirmation if the
+current file contains unstaged changes."
+  (interactive)
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let* ((file (buffer-file-name))
+	 (file-modified-p (not (egg-file-updated (buffer-file-name))))
+	 rev)
+    (when file-modified-p
+      (unless (y-or-n-p (format "ignored unstaged changes in %s? " file))
+	(error "File %s contains unstaged changes!" file)))
+    (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
+    (when (egg-sync-do-file file "git" nil nil (list "checkout" rev "--" file))
+      (revert-buffer t t t))))
 
 (defun egg-file-version-other-window (&optional ask-p)
   "Show other version of the current file in another window."
@@ -1397,11 +1414,11 @@ success."
     (?q :quit "[q] quit" nil)))
 
 (defconst egg-action-function-alist
-  '((:new-branch . egg-new-branch)
+  '((:new-branch . egg-checkout-new-branch)
     (:status     . egg-status)
     (:stage-file . egg-stage-current-file)
     (:stage-all  . egg-stage-all-files)
-    (:diff-file  . egg-diff-file)
+    (:diff-file  . egg-file-diff)
     (:commit     . egg-commit-log-edit)
     (:quit 	 . (lambda () (message "do nothing now! later.") (ding) nil))))
 
@@ -1575,7 +1592,7 @@ success."
 
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-blame)
-  (define-key map (kbd "b") 'egg-create-branch)
+  (define-key map (kbd "b") 'egg-checkout-new-branch)
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "v") 'egg-status)
   (define-key map (kbd "i") 'egg-stage-current-file)
@@ -1583,7 +1600,7 @@ success."
   (define-key map (kbd "u") 'egg-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
-  (define-key map (kbd "=") 'egg-diff-file)
+  (define-key map (kbd "=") 'egg-file-diff)
   (define-key map (kbd "~") 'egg-file-version-other-window))
 
 (defcustom egg-mode-key-prefix "C-x v"
