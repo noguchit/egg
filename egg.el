@@ -1049,6 +1049,20 @@ success."
       (when (stringp file)
 	(egg-revert-visited-files file)))))
 
+(defun egg-stage-current-file ()
+  (interactive)
+  (let ((git-dir (egg-git-dir))
+	(file (buffer-file-name)))
+    (when (egg-sync-do-file file "git" nil nil (list "add" "--" file))
+	(message "staged %s modifications" file))))
+
+(defun egg-stage-all-files ()
+  (interactive)
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir)))
+    (when (egg-sync-do "git" nil nil (list "add" "-u"))
+	(message "staged all tracked files's modifications"))))
+
 
 ;;;========================================================
 ;;; log message
@@ -1379,8 +1393,8 @@ success."
 (defconst egg-action-function-alist
   '((:new-branch . egg-new-branch)
     (:status     . egg-status)
-    (:stage-file . egg-stage-file)
-    (:stage-all  . egg-stage-workdir)
+    (:stage-file . egg-stage-current-file)
+    (:stage-all  . egg-stage-all-files)
     (:diff-file  . egg-diff-file)
     (:commit     . egg-commit-log-edit)
     (:quit 	 . (lambda () (message "do nothing now! later.") (ding) nil))))
@@ -1558,7 +1572,7 @@ success."
   (define-key map (kbd "b") 'egg-create-branch)
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "v") 'egg-status)
-  (define-key map (kbd "i") 'egg-stage-file)
+  (define-key map (kbd "i") 'egg-stage-current-file)
   (define-key map (kbd "l") 'egg-show-logs)
   (define-key map (kbd "u") 'egg-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
