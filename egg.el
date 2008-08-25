@@ -24,6 +24,7 @@
 ;;;
 
 (require 'cl)
+(require 'electric)
 
 (defgroup egg nil
   "Controlling Git from Emacs."
@@ -1402,6 +1403,8 @@ current file contains unstaged changes."
 	(set-buffer-modified-p nil)
 	(setq buffer-read-only t)))
     (pop-to-buffer buf)))
+
+(defun egg-file-ediff () ())
 
 (defconst egg-key-action-alist 
   '((?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
