@@ -38,6 +38,45 @@
 Many Egg faces inherit from this one by default."
   :group 'egg)
 
+(defface egg-text-base
+  '((((class color) (background light))
+     :foreground "navy" :inherit variable-pitch)
+    (((class color) (background dark))
+     :foreground "SteelBlue" :inherit variable-pitch)
+    (t))
+  "Face for description text."
+  :group 'egg)
+
+(defface egg-text-1
+  '((t :inherit egg-text-base :height 1.2))
+  "Face for description text."
+  :group 'egg)
+
+(defface egg-text-2
+  '((t :inherit egg-text-base :height 1.3))
+  "Face for description text."
+  :group 'egg)
+
+(defface egg-text-3
+  '((t :inherit egg-text-base :height 1.5))
+  "Face for description text."
+  :group 'egg)
+
+(defface egg-text-4
+  '((t :inherit egg-text-base :height 1.8))
+  "Face for description text."
+  :group 'egg)
+
+(defface egg-electrict-choice
+  '((((class color) (background light))
+     :foreground "Blue" :inherit egg-text-base :weight bold :height 1.2)
+    (((class color) (background dark))
+     :foreground "Cyan" :inherit egg-text-base  :weight bold :height 1.2)
+    (t))
+  "Face for description text."
+  :group 'egg)
+
+
 (defface egg-section-title
   '((((class color) (background light))
      :foreground "DarkGoldenrod" :inherit egg-header :height 1.1)
@@ -1483,8 +1522,12 @@ current file contains unstaged changes."
 		  (with-current-buffer buf
 		    (let ((inhibit-read-only t))
 		      (erase-buffer)
-		      (insert desc "\n\n")
-		      (insert "select an action: \n\n")
+		      (insert (propertize "Select Action\n" 'face
+					  'egg-section-title))
+		      (insert (propertize desc 'face 'egg-text-1) "\n\n")
+		      (insert (propertize "select an action:" 
+					  'face 'egg-text-1)
+			      "\n\n")
 		      (put-text-property (point-min) (point)
 					 'intangible t)
 		      (setq beg (point))
@@ -1492,7 +1535,8 @@ current file contains unstaged changes."
 		       (mapconcat
 			(lambda (entry)
 			  (propertize (concat "- " (cdr entry))
-				      :action (car entry)))
+				      :action (car entry)
+				      'face 'egg-electrict-choice))
 			action-alist
 			"\n")
 		       "\n")
