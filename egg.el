@@ -1367,13 +1367,14 @@ success."
     (pop-to-buffer buf)))
 
 (defconst egg-key-action-alist 
-  '((?b :new-branch "[b]ranch" "start new [b]ranch")
-    (?s :status "[s]tatus" "show repo's [s]tatus" )
-    (?f :stage-file "stage [f]ile" "stage current [f]ile")
-    (?a :stage-all "stage [a]ll" "stage [a]ll files")
-    (?d :diff-file "[d]iff" "[d]iff current file")
-    (?c :commit "[c]ommit" "[c]ommit staged changes")
-    (?? :more-options "[?] options" "[?] more options")))
+  '((?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
+    (?s :status "show repo's [s]tatus" "Browse the current status of the repo" )
+    (?f :stage-file "stage current [f]ile" "Stage current file's changes")
+    (?a :stage-all "stage [a]ll files" "Stage all current changes inside this repo.")
+    (?d :diff-file "[d]iff current file" "Compare the current file against the staged snapshot.")
+    (?c :commit "[c]ommit staged changes" "Process to commit current staged changes onto HEAD.")
+    (?? :more-options "[?] more options" nil)
+    (?q :quit "[q] quit" nil)))
 
 (defconst egg-action-function-alist
   '((:new-branch . egg-new-branch)
@@ -1381,12 +1382,93 @@ success."
     (:stage-file . egg-stage-file)
     (:stage-all  . egg-stage-workdir)
     (:diff-file  . egg-diff-file)
-    (:commit     . egg-commit-log-edit)))
+    (:commit     . egg-commit-log-edit)
+    (:quit 	 . (lambda () (message "do nothing now! later.") (ding) nil))))
 
 (defcustom egg-next-action-prompt-p t
   "Always prompt when trying to guess the next logical action ."
   :group 'egg
   :type 'boolean)
+
+(defconst egg-electrict-select-action-buffer 
+  (get-buffer-create "*Egg:Select Action*"))
+
+(defun egg-select-action-run ()
+  (interactive)
+  (let (action)
+    (save-excursion
+      (with-current-buffer egg-electrict-select-action-buffer
+	(beginning-of-line)
+	(when (boundp 'egg-electric-in-progress-p)
+	  (setq action (get-text-property (point) :action))
+	  (if action
+	      (throw 'egg-select-action action)
+	    (ding)))))))
+
+(defun egg-select-action-quit ()
+  (interactive)
+  (let (action)
+    (save-excursion
+      (with-current-buffer egg-electrict-select-action-buffer 
+	(beginning-of-line)
+	(when (boundp 'egg-electric-in-progress-p)
+	  (throw 'egg-select-action nil))))))
+
+(defconst egg-electric-select-action-map 
+  (let ((map (make-sparse-keymap "Egg:SelectAction")))
+    (define-key map "q" 'egg-select-action-quit)
+    (define-key map (kbd "RET") 'egg-select-action-run)
+    (define-key map (kbd "SPC") 'egg-select-action-run)
+    (define-key map (kbd "C-l") 'recenter)
+    map))
+
+(defun egg-electric-select-action (default desc)
+  (let ((egg-electric-in-progress-p t)
+	(old-buffer (current-buffer))
+	(buf egg-electrict-select-action-buffer)
+	(action-alist
+	 (delq nil (mapcar (lambda (entry)
+			     (if (cadddr entry)
+				 (cons (cadr entry)
+				       (cadddr entry))))
+			   egg-key-action-alist)))
+	action default-entry)
+    (setq default-entry (assq default action-alist))
+    (setq action-alist
+	  (cons default-entry (remq default-entry action-alist)))
+    (unwind-protect
+	(setq action
+	      (catch 'egg-select-action
+		(save-window-excursion
+		  (save-excursion
+		    (with-current-buffer buf
+		      (let ((inhibit-read-only t)
+			    text beg)
+			(erase-buffer)
+			(insert desc "\n\n")
+			(put-text-property (point-min) (point)
+					   'intangible t)
+			(setq beg (point))
+			(insert 
+			 (mapconcat
+			  (lambda (entry)
+			    (propertize (cdr entry)
+					:action (car entry)))
+			  action-alist
+			  "\n")
+			 "\n")
+			(goto-char beg)
+			(set-buffer-modified-p nil) 
+			(setq buffer-read-only t))
+		      (setq major-mode 'egg-select-action)
+		      (setq mode-name "Egg:Select")
+		      (use-local-map egg-electric-select-action-map)))
+		  (Electric-pop-up-window egg-electrict-select-action-buffer)
+		  (Electric-command-loop 'egg-select-action
+					 "select next action> "))))
+      (bury-buffer buf))
+    (when (and action (symbolp action))
+      action)))
 
 (defun egg-guess-next-action (file-is-modified-p
 			      wdir-is-modified-p
@@ -1401,41 +1483,14 @@ success."
 	  :new-branch
 	:commit))))
 
-(defun egg-get-all-alternatives (file-modified-p
-				 wdir-modified-p
-				 index-clean-p)
-  (let ((lst (list :new-branch :status)))
-    (when file-modified-p
-      (setq lst  (append lst (list :stage-file :diff-file :stage-all))))
-    (when wdir-modified-p
-      (add-to-list 'lst :stage-all))
-    (unless index-clean-p
-      (add-to-list 'lst :commit))
-    lst))
-
-(defun egg-get-some-alternatives (file-is-modified-p
-				  wdir-is-modified-p
-				  index-is-clean)
-  (if file-is-modified-p
-      '(:stage-file :diff-file :status :more-options)
-    ;; file is unchanged
-    (if wdir-is-modified-p
-	'(:stage-all :commit :status :more-options)
-      ;; wdir is clean
-      (if index-is-clean
-	  '(:new-branch :status :more-options)
-	'(:commit :status :more-options)))))
-
-(defun egg-build-key-prompt (prefix default alternatives &optional
-				    long-text-p)
-  (let ((text-idx (if long-text-p 2 1))
-	(action-desc-alist (mapcar 'cdr egg-key-action-alist)))
+(defun egg-build-key-prompt (prefix default alternatives)
+  (let ((action-desc-alist (mapcar 'cdr egg-key-action-alist)))
     (concat prefix " default: "
-	    (nth text-idx (assq default action-desc-alist))
-	  ". or "
+	    (nth 1 (assq default action-desc-alist))
+	  ". alternatives:  "
 	  (mapconcat 'identity 
 		     (mapcar (lambda (action)
-			       (nth text-idx (assq action action-desc-alist)))
+			       (nth 1 (assq action action-desc-alist)))
 			     (remq default alternatives)) ", "))))
 
 (defun egg-prompt-next-action (file-modified-p
@@ -1444,34 +1499,33 @@ success."
   (let ((default (egg-guess-next-action file-modified-p
 					wdir-modified-p
 					index-clean-p))
-	(all-alternatives (egg-get-all-alternatives file-modified-p
-						    wdir-modified-p
-						    index-clean-p))
-	(some-alternatives (egg-get-some-alternatives file-modified-p
-						      wdir-modified-p
-						      index-clean-p))
-	(long-text-p t)
-	key action min-alternatives alternatives a-list)
-    (setq min-alternatives (list default :status :more-options))
-    (setq a-list (list min-alternatives
-		       some-alternatives
-		       all-alternatives))
-    (setq alternatives (car a-list) a-list (cdr a-list))
+	desc key action alternatives)
+    (setq alternatives (list default :status :more-options))
     (while (null action)
       (setq key (read-key-sequence 
-		 (egg-build-key-prompt "What's next?"
-				       default alternatives
-				       long-text-p)))
-      (setq long-text-p nil)
+		 (egg-build-key-prompt "next action?"
+				       default alternatives)))
       (setq key (string-to-char key))
-      (cond ((memq key '(?\r ?\n ?\ ))
-	     (setq action default))
-	    ((eq key ??)
-	     (when a-list
-	       (setq alternatives (car a-list) a-list (cdr a-list))))
-	    (t (setq action (cadr (assq key egg-key-action-alist)))
-	       (unless action
-		 (ding)))))
+      (setq action 
+	    (if  (memq key '(?\r ?\n ?\ ))
+		default 
+	      (cadr (assq key egg-key-action-alist))))
+      (when (eq action :more-options)
+	(setq desc
+	      (format "%s %s\n%s %s\nINDEX %s"
+		      (buffer-file-name)
+		      (if file-modified-p 
+			  "contains unstaged changes"
+			"is not modified")
+		      (file-name-directory (egg-git-dir))
+		      (if wdir-modified-p
+			  "contains unstaged changes"
+			"has no unstaged changes")
+		      (if index-clean-p "is identical to HEAD"
+			"contains staged changes to commit")))
+	(setq action (egg-electric-select-action default desc)))
+      (when (null action)
+	(ding)))
     action))
 
 (defun egg-next-action (&optional ask-p)
