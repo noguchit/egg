@@ -1432,7 +1432,7 @@ success."
 				 (cons (cadr entry)
 				       (cadddr entry))))
 			   egg-key-action-alist)))
-	action default-entry)
+	action default-entry beg)
     (setq default-entry (assq default action-alist))
     (setq action-alist
 	  (cons default-entry (remq default-entry action-alist)))
@@ -1440,30 +1440,30 @@ success."
 	(setq action
 	      (catch 'egg-select-action
 		(save-window-excursion
-		  (save-excursion
-		    (with-current-buffer buf
-		      (let ((inhibit-read-only t)
-			    text beg)
-			(erase-buffer)
-			(insert desc "\n\n")
-			(put-text-property (point-min) (point)
-					   'intangible t)
-			(setq beg (point))
-			(insert 
-			 (mapconcat
-			  (lambda (entry)
-			    (propertize (cdr entry)
-					:action (car entry)))
-			  action-alist
-			  "\n")
-			 "\n")
-			(goto-char beg)
-			(set-buffer-modified-p nil) 
-			(setq buffer-read-only t))
-		      (setq major-mode 'egg-select-action)
-		      (setq mode-name "Egg:Select")
-		      (use-local-map egg-electric-select-action-map)))
+		  (with-current-buffer buf
+		    (let ((inhibit-read-only t))
+		      (erase-buffer)
+		      (insert desc "\n\n")
+		      (insert "select an action: \n\n")
+		      (put-text-property (point-min) (point)
+					 'intangible t)
+		      (setq beg (point))
+		      (insert 
+		       (mapconcat
+			(lambda (entry)
+			  (propertize (concat "- " (cdr entry))
+				      :action (car entry)))
+			action-alist
+			"\n")
+		       "\n")
+		      (goto-char beg)
+		      (set-buffer-modified-p nil) 
+		      (setq buffer-read-only t))
+		    (setq major-mode 'egg-select-action)
+		    (setq mode-name "Egg:Select")
+		    (use-local-map egg-electric-select-action-map)) 
 		  (Electric-pop-up-window egg-electrict-select-action-buffer)
+		  (goto-char beg)
 		  (Electric-command-loop 'egg-select-action
 					 "select next action> "))))
       (bury-buffer buf))
