@@ -187,17 +187,6 @@ ARGS is a list of arguments to pass to PROGRAM."
 		  (cons (cadr tmp) (car tmp))))
 	      lst))))
 
-(defun egg-all-refs (&optional raw-p)
-  "Get a list of all refs."
-  (append (egg-git-to-lines "rev-parse" "--symbolic"
-			    "--branches" "--tags" "--remotes")
-	  (delq nil
-		(mapcar 
-		 (lambda (head)
-		   (if (file-exists-p (concat (egg-git-dir) "/" head))
-		       head))
-		 '("HEAD" "ORIG_HEAD" "MERGE_HEAD" "FETCH_HEAD")))))
-
 (defsubst egg-rbranch-to-remote (rbranch)
   (and (stringp rbranch)
        (> (length rbranch) 0)
@@ -270,7 +259,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-git-dir ()
   (if (local-variable-p 'egg-git-dir)
       egg-git-dir
-    (set (make-local-variable 'egg-git-dir) (egg-read-git-dir))))
+    (set (make-local-variable 'egg-git-dir) (egg-read-git-dir))
+    (set (intern (concat "egg-" egg-git-dir "-HEAD")) " Egg")
+    egg-git-dir))
 
 (defsubst egg-buf-git-dir (buffer)
   (with-current-buffer buffer
@@ -282,11 +273,26 @@ ARGS is a list of arguments to pass to PROGRAM."
 	(egg-pick-file-contents (concat git-dir "/HEAD")
 				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2))))
 
+(defun egg-all-refs (&optional raw-p)
+  "Get a list of all refs."
+  (append (egg-git-to-lines "rev-parse" "--symbolic"
+			    "--branches" "--tags" "--remotes")
+	  (delq nil
+		(mapcar 
+		 (lambda (head)
+		   (if (file-exists-p (concat (egg-git-dir) "/" head))
+		       head))
+		 '("HEAD" "ORIG_HEAD" "MERGE_HEAD" "FETCH_HEAD")))))
+
 (defsubst egg-current-branch ()
-  (let* ((git-dir (egg-git-dir))) 
-    (if (stringp git-dir)
-	(egg-pick-file-contents (concat git-dir "/HEAD")
-				 "^ref: refs/heads/\\(.+\\)" 1))))
+  (let* ((git-dir (egg-git-dir))
+	 HEAD) 
+    (when (stringp git-dir)
+      (setq HEAD (egg-pick-file-contents (concat git-dir "/HEAD")
+					 "^ref: refs/heads/\\(.+\\)" 1))
+      (set (intern (concat "egg-" egg-git-dir "-HEAD"))
+	   (format " Egg:%s" (or HEAD "(Detached)")))
+      HEAD)))
 
 (defsubst egg-current-sha1 ()
   (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
@@ -840,7 +846,7 @@ success."
   (kill-all-local-variables)
   (setq buffer-read-only t)
   (setq major-mode 'egg-status-buffer-mode
-	mode-name  "Egg:Status"
+	mode-name  "Egg-Status"
 	mode-line-process ""
 	truncate-lines t)
   (use-local-map egg-status-buffer-mode-map)
@@ -1077,7 +1083,7 @@ success."
 (defvar egg-log-msg-text-beg nil)
 (defvar egg-log-msg-text-end nil)
 (defvar egg-log-msg-diff-beg nil)
-(define-derived-mode egg-log-msg-mode text-mode "Egg:LogMsg"
+(define-derived-mode egg-log-msg-mode text-mode "Egg-LogMsg"
   "Major mode for editing Git log message.\n\n
 \{egg-log-msg-mode-map}."
   (setq default-directory (file-name-directory (egg-git-dir)))
@@ -1170,7 +1176,7 @@ success."
 (define-egg-buffer commit "*%s-commit@%s*"
   (egg-log-msg-mode)
   (setq major-mode 'egg-commit-buffer-mode
-	mode-name "Egg:Commit"
+	mode-name "Egg-Commit"
 	mode-line-process "")
   (set (make-local-variable 'egg-buffer-refresh-func)
        'egg-commit-log-buffer-show-diffs)
@@ -1251,7 +1257,7 @@ success."
   (kill-all-local-variables)
   (setq buffer-read-only t)
   (setq major-mode 'egg-diff-buffer-mode
-	mode-name  "Egg:Diff"
+	mode-name  "Egg-Diff"
 	mode-line-process ""
 	truncate-lines t)
   (use-local-map egg-diff-buffer-mode-map)
@@ -1474,7 +1480,7 @@ success."
 		      (set-buffer-modified-p nil) 
 		      (setq buffer-read-only t))
 		    (setq major-mode 'egg-select-action)
-		    (setq mode-name "Egg:Select")
+		    (setq mode-name "Egg-Select")
 		    (use-local-map egg-electric-select-action-map)) 
 		  (Electric-pop-up-window egg-electrict-select-action-buffer)
 		  (goto-char beg)
@@ -1578,8 +1584,7 @@ success."
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
   (define-key map (kbd "=") 'egg-diff-file)
-  (define-key map (kbd "~") 'egg-file-version-other-window)
-  )
+  (define-key map (kbd "~") 'egg-file-version-other-window))
 
 (defcustom egg-mode-key-prefix "C-x v"
   "Prefix keystrokes for egg minor-mode commands."
@@ -1597,17 +1602,22 @@ in current buffer."
 			   (> arg 0)))
   (when egg-minor-mode
     (if (boundp 'vc-mode)
-	(set 'vc-mode nil))))
+	(set 'vc-mode nil))
+    (make-local-variable 'egg-minor-mode-name) 
+    (setq egg-minor-mode-name 
+	  (intern (concat "egg-" (egg-git-dir) "-HEAD")))))
 
 ;;;###autoload
 (defun egg-minor-mode-find-file-hook ()
-  (if (egg-is-in-git)
-      (egg-minor-mode 1)
-    (egg-minor-mode -1)))
+  (when (egg-is-in-git)
+    (make-local-variable 'egg-minor-mode)
+    (egg-minor-mode 1)))
+
+(defvar egg-minor-mode-name " Egg")
 
 (or (assq 'egg-minor-mode minor-mode-alist)
     (setq minor-mode-alist
-	  (cons '(egg-minor-mode " Egg") minor-mode-alist)))
+	  (cons '(egg-minor-mode egg-minor-mode-name) minor-mode-alist)))
 
 (setcdr (or (assq 'egg-minor-mode minor-mode-map-alist)
 	    (car (setq minor-mode-map-alist
