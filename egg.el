@@ -1418,32 +1418,64 @@ current file contains unstaged changes."
     (when (egg-sync-do-file file "git" nil nil (list "checkout" rev "--" file))
       (revert-buffer t t t))))
 
-(defun egg-file-version-other-window (&optional ask-p)
-  "Show other version of the current file in another window."
-  (interactive "P")
+(defun egg-file-get-other-version (&optional rev prompt same-mode-p)
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
-  (let* ((mode major-mode)
+  (let* ((file (buffer-file-name))
+	 (mode major-mode)
 	 (git-dir (egg-git-dir))
 	 (lbranch (egg-current-branch))
-	 (rbranch (and git-dir (egg-tracking-target lbranch)))
-	 (rev (if ask-p
-		  (egg-read-rev "show version: " rbranch ":0")
-		":0"))
+	 (rbranch (and git-dir (or (egg-tracking-target lbranch)
+				   rev ":0")))
+	 (prompt (or prompt (format "%s's version: " file)))
+	 (rev (or rev (egg-read-rev prompt rbranch ":0")))
 	 (canon-name (egg-git-to-string "ls-files" "--full-name" "--" 
-					(buffer-file-name)))
+					file))
 	 (git-name (concat rev ":" canon-name))
 	 (buf (get-buffer-create (concat "*" git-name "*"))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
 	(erase-buffer)
-	(call-process "git" nil buf nil "show" git-name)
-	(funcall mode)
+	(unless (= (call-process "git" nil buf nil "show" git-name)
+		   0)
+	  (error "Failed to get %s's version: %s" file rev))
+	(when (and (functionp mode) same-mode-p)
+	  (funcall mode))
 	(set-buffer-modified-p nil)
 	(setq buffer-read-only t)))
+    buf))
+
+(defun egg-file-version-other-window (&optional ask-p)
+  "Show other version of the current file in another window."
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let ((buf (egg-file-get-other-version 
+	      nil 
+	      (format "show %s's version:" (buffer-file-name))
+	      t)))
+    (unless (bufferp buf)
+      (error "Oops! can't get %s older version" (buffer-file-name)))
     (pop-to-buffer buf)))
 
-(defun egg-file-ediff () ())
+(defun egg-file-ediff (&optional ask-for-dst-p)
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let* ((file buffer-file-name)
+	 (dst-buf (if ask-for-dst-p
+		      (egg-file-get-other-version 
+		       nil
+		       (format "(ediff) %s's newer version: " file)
+		       t)
+		    (current-buffer)))
+	 (src-buf (egg-file-get-other-version 
+		       nil
+		       (format "(ediff) %s's older version: " file)
+		       t)))
+    (unless (and (bufferp dst-buf) (bufferp src-buf))
+      (error "Ooops!"))
+    (ediff-buffers dst-buf src-buf)))
 
 (defconst egg-key-action-alist 
   '((?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
