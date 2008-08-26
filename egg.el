@@ -147,11 +147,18 @@ Many Egg faces inherit from this one by default."
   "Face for highlighting the current item."
   :group 'egg)
 
-(defcustom egg-diff-init-hiding-mode nil
-  "Initial hiding mode for diff results."
+(defcustom egg-status-buffer-init-hiding-mode nil
+  "Initial hiding mode for status buffer."
   :group 'egg
   :type '(choice :tag "Initial Hiding Mode"
-		 (const :tag "Hide Nothing" nil)
+		 (const :tag "Show Everything" nil)
+		 (const :tag "Hide Everything" t)))
+
+(defcustom egg-commit-buffer-init-hiding-mode nil
+  "Initial hiding mode for commit log buffer."
+  :group 'egg
+  :type '(choice :tag "Initial Hiding Mode"
+		 (const :tag "Show Everything" nil)
 		 (const :tag "Hide Everything" t)))
 
 ;;;========================================================
@@ -810,7 +817,8 @@ success."
 
 (defun egg-sb-insert-repo-section ()
   (let ((head-info (egg-head))
-	(beg (point)))
+	(beg (point))
+	inv-beg)
     (insert (propertize (or (cdr head-info) 
 			    (format "Detached HEAD: %s"
 				    (egg-name-rev (car head-info))))
@@ -820,10 +828,12 @@ success."
 		"\n"
 		(propertize (egg-git-dir) 'face 'font-lock-constant-face)
 		"\n")
+    (setq inv-beg (1- (point)))
     (call-process "git" nil t nil
 		  "log" "--max-count=5"
 		  "--abbrev-commit" "--pretty=oneline")
-    (egg-delimit-section :section 'repo beg (point))))
+    (egg-delimit-section :section 'repo beg (point)
+			 inv-beg egg-section-map)))
 
 (defun egg-sb-insert-untracked-section ()
   (let ((beg (point)) inv-beg)
@@ -871,16 +881,29 @@ success."
     (define-key map (kbd "c") 'egg-commit-log-edit)
     map))
 
-(defun egg-status-buffer-redisplay (buf)
+(defun egg-buffer-hide-all ()
+  (let ((pos (point-min)))
+    (goto-char (setq pos (point-min)))
+    (while pos
+      (add-to-invisibility-spec (cons pos t))
+      (goto-char pos)
+      (setq pos (next-single-property-change (point)
+					     :navigation)))))
+
+(defun egg-status-buffer-redisplay (buf &optional init-p)
   (with-current-buffer buf
-    (let ((inhibit-read-only t))
+    (let ((inhibit-read-only t)
+	  (orig-pos (point)))
       (erase-buffer)
       (setq buffer-invisibility-spec nil)
       (egg-sb-insert-repo-section)
       (egg-sb-insert-unstaged-section "Unstaged Changes:")
       (egg-sb-insert-staged-section "Staged Changes:")
       (egg-sb-insert-untracked-section)
-      (goto-char (point-min)))))
+      
+      (when (and init-p egg-status-buffer-init-hiding-mode)
+	(egg-buffer-hide-all))
+      (goto-char orig-pos))))
 
 (define-egg-buffer status "*%s-status@%s*"
   "Major mode to display the egg status buffer."
@@ -901,7 +924,7 @@ success."
   (let ((buf (egg-get-status-buffer 'create)))
     (unless no-update-p
       (with-current-buffer buf
-	(egg-status-buffer-redisplay buf)))
+	(egg-status-buffer-redisplay buf 'init)))
     (display-buffer buf t)))
 
 ;;;========================================================
@@ -1201,7 +1224,7 @@ success."
   (interactive)
   (egg-log-msg-hist-cycle t))
 
-(defun egg-commit-log-buffer-show-diffs (buf)
+(defun egg-commit-log-buffer-show-diffs (buf &optional init-p)
   (with-current-buffer buf
     (let ((inhibit-read-only t) beg)
       (goto-char egg-log-msg-diff-beg)
@@ -1212,6 +1235,8 @@ success."
       (egg-sb-insert-untracked-section)
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
+      (when (and init-p egg-commit-buffer-init-hiding-mode)
+	(egg-buffer-hide-all))
       (force-window-update buf))))
 
 (define-egg-buffer commit "*%s-commit@%s*"
@@ -1253,7 +1278,7 @@ success."
 			'face 'font-lock-comment-face))
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
-    (egg-commit-log-buffer-show-diffs buf)
+    (egg-commit-log-buffer-show-diffs buf 'init)
     (goto-char egg-log-msg-text-beg)
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
