@@ -165,8 +165,10 @@ Many Egg faces inherit from this one by default."
 ;;; simple routines
 ;;;========================================================
 (defsubst egg-prepend (str prefix &rest other-properties)
-  (propertize str 'display 
-	      (apply 'propertize (concat prefix str) other-properties)))
+  (setq prefix (concat prefix (substring str 0 1)))
+  (setq str (apply 'propertize str other-properties))
+  (put-text-property 0 1 'display prefix str)
+  str)
 
 
 (defun egg-cmd-to-string-1 (program args)
@@ -719,9 +721,11 @@ success."
   (force-window-update (current-buffer)))
 
 (defun egg-section-cmd-toggle-hide-show-children (pos sect-type)
-  (interactive (list (previous-single-property-change (1+ (point)) :sect-type nil (point-min))
+  (interactive (list (previous-single-property-change (1+ (point))
+						      :navigation)
 		     (get-text-property (point) :sect-type)))
-
+  (unless pos
+    (setq pos (point)))
   (let ((end (next-single-property-change pos sect-type))
 	child-pos child-nav
 	currently-hidden)
