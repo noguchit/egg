@@ -1,7 +1,8 @@
-;;; egg -- a magit fork
+;;; egg -- Emacs Got Git
+;;; A magit fork
 
-;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2008  Linh Dang
+;; Copyright (C) 2008  Marius Vollmer
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -1677,6 +1678,7 @@ current file contains unstaged changes."
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-show-logs)
   (define-key map (kbd "o") 'egg-file-chekout-other-version)
+  (define-key map (kbd "s") 'egg-status)
   (define-key map (kbd "u") 'egg-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
@@ -1691,8 +1693,8 @@ current file contains unstaged changes."
 
 ;;;###autoload
 (defun egg-minor-mode (&optional arg)
-  "Turn-on egg-minor-mode which enable key bindings for egg
-in current buffer."
+  "Turn-on egg-minor-mode which would enable key bindings for
+egg in current buffer."
   (interactive "p")
   (setq egg-minor-mode (if (null arg)
 			     (not egg-minor-mode)
