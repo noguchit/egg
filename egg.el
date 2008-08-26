@@ -582,18 +582,29 @@ success."
 		     'face
 		     'egg-diff-none))
 
+(defun egg-compute-navigation (sect-type section beg end)
+  (let ((current-nav (get-text-property beg :navigation))
+	(desc (if (consp section)
+		  (car section)
+		section)))
+    (format "%s-%s" current-nav desc)))
+
 (defsubst egg-delimit-section (sect-type section beg end 
 					  &optional inv-beg
-					  keymap)
-  (put-text-property beg end :sect-type sect-type)
-  (put-text-property beg end sect-type section)
-  (put-text-property beg end :navigation beg)
-  (when (keymapp keymap)
-    (put-text-property beg end 'keymap keymap))
-  (when (integer-or-marker-p inv-beg) 
-    (let ((current-inv (get-text-property inv-beg 'invisible)))
-      (add-to-list 'current-inv beg t)
-      (put-text-property inv-beg (1- end) 'invisible current-inv))))
+					  keymap navigation)
+  (let ((nav (cond ((functionp navigation)
+		    (funcall navigation sect-type section beg end))
+		   ((null navigation) beg)
+		   (t navigation))))
+    (put-text-property beg end :sect-type sect-type)
+    (put-text-property beg end sect-type section)
+    (put-text-property beg end :navigation nav)
+    (when (keymapp keymap)
+      (put-text-property beg end 'keymap keymap))
+    (when (integer-or-marker-p inv-beg) 
+      (let ((current-inv (get-text-property inv-beg 'invisible)))
+	(add-to-list 'current-inv nav t)
+	(put-text-property inv-beg (1- end) 'invisible current-inv)))))
 
 (defun egg-decorate-diff-sequence (beg end diff-map hunk-map regexp
 					diff-re-no
@@ -624,7 +635,7 @@ success."
 		 (egg-delimit-section 
 		  :hunk (list (match-string-no-properties hunk-re-no) 
 			      sub-beg sub-end)
-		  sub-beg sub-end (match-end 0) hunk-map))
+		  sub-beg sub-end (match-end 0) hunk-map 'egg-compute-navigation))
 		((match-beginning diff-re-no) ;; diff
 		 (setq sub-end (or (egg-safe-search "^diff " end) end))
 		 (setq head-end (or (egg-safe-search "^@@" end) end))
@@ -632,7 +643,7 @@ success."
 		 (egg-delimit-section
 		  :diff (list (match-string-no-properties diff-re-no)
 			      sub-beg sub-end head-end)
-		  sub-beg sub-end (match-end 0) diff-map))
+		  sub-beg sub-end (match-end 0) diff-map 'egg-compute-navigation))
 		((match-beginning index-re-no) ;; index
 		 (egg-decorate-diff-index-line index-re-no))
 	      
@@ -700,28 +711,33 @@ success."
     (find-file file)
     (goto-line line)))
 
-(defun egg-section-cmd-toggle-hide-show (pos)
+(defun egg-section-cmd-toggle-hide-show (nav)
   (interactive (list (get-text-property (point) :navigation)))
-  (if (assq pos buffer-invisibility-spec)
-      (remove-from-invisibility-spec (cons pos t))
-    (add-to-invisibility-spec (cons pos t)))
+  (if (assoc nav buffer-invisibility-spec)
+      (remove-from-invisibility-spec (cons nav t))
+    (add-to-invisibility-spec (cons nav t)))
   (force-window-update (current-buffer)))
 
 (defun egg-section-cmd-toggle-hide-show-children (pos sect-type)
-  (interactive (list (get-text-property (point) :navigation)
+  (interactive (list (previous-single-property-change (1+ (point)) :sect-type nil (point-min))
 		     (get-text-property (point) :sect-type)))
 
   (let ((end (next-single-property-change pos sect-type))
-	child
+	child-pos child-nav
 	currently-hidden)
-    (setq child (next-single-property-change pos :navigation nil end))
-    (setq currently-hidden (and child
-				(assq child buffer-invisibility-spec)))
-    (setq child pos)
-    (while (< (setq child (next-single-property-change child :navigation nil end)) end)
+    (setq child-pos (next-single-property-change pos :navigation nil end))
+    (when child-pos
+      (setq child-nav (get-text-property child-pos :navigation))
+      (setq currently-hidden (and child-nav
+				  (assoc child-nav
+					 buffer-invisibility-spec))))
+    (setq child-pos pos)
+    (while (< (setq child-pos (next-single-property-change child-pos :navigation nil end))
+	      end)
+      (setq child-nav (get-text-property child-pos :navigation))
       (if currently-hidden
-	  (remove-from-invisibility-spec (cons child  t))
-	(add-to-invisibility-spec (cons child t))))
+	  (remove-from-invisibility-spec (cons child-nav  t))
+	(add-to-invisibility-spec (cons child-nav t))))
     (force-window-update (current-buffer))))
 
 (defun egg-diff-section-patch-string (&optional pos)
@@ -844,7 +860,7 @@ success."
     (call-process "git" nil t nil "ls-files" "--others" 
 		  "--exclude-standard")
     (egg-delimit-section :section 'untracked beg (point)
-			  inv-beg egg-section-map)))
+			  inv-beg egg-section-map 'untracked)))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg)
@@ -855,7 +871,7 @@ success."
 	   "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/"
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
-			  inv-beg egg-section-map)
+			  inv-beg egg-section-map 'unstaged)
     (egg-decorate-diff-section beg (point) "INDEX/" "WORKDIR/"
 				egg-unstaged-diff-section-map
 				egg-unstaged-hunk-section-map)))
@@ -870,7 +886,7 @@ success."
 	   "--src-prefix=HEAD/" "--dst-prefix=INDEX/"
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
-			  inv-beg egg-section-map)
+			  inv-beg egg-section-map 'staged)
     (egg-decorate-diff-section beg (point) "HEAD/" "INDEX/"
 				egg-staged-diff-section-map
 				egg-staged-hunk-section-map)))
@@ -1716,6 +1732,8 @@ current file contains unstaged changes."
   :type 'string
   :set 'egg-mode-key-prefix-set)
 
+(defvar egg-minor-mode-name " Egg")
+
 ;;;###autoload
 (defun egg-minor-mode (&optional arg)
   "Turn-on egg-minor-mode which would enable key bindings for
@@ -1736,8 +1754,6 @@ egg in current buffer."
   (when (egg-is-in-git)
     (make-local-variable 'egg-minor-mode)
     (egg-minor-mode 1)))
-
-(defvar egg-minor-mode-name " Egg")
 
 (or (assq 'egg-minor-mode minor-mode-alist)
     (setq minor-mode-alist
