@@ -853,14 +853,14 @@ success."
 		  "log" "--max-count=5"
 		  "--abbrev-commit" "--pretty=oneline")
     (egg-delimit-section :section 'repo beg (point)
-			 inv-beg egg-section-map)))
+			 inv-beg egg-section-map 'repo)))
 
 (defun egg-sb-insert-untracked-section ()
   (let ((beg (point)) inv-beg)
     (insert (egg-prepend "Untracked Files:" "\n\n" 
-			  'face 'egg-section-title)
-	    (progn (setq inv-beg (point))
-		   "\n"))
+			 'face 'egg-section-title)
+	    "\n")
+    (setq inv-beg (1- (point)))
     (call-process "git" nil t nil "ls-files" "--others" 
 		  "--exclude-standard")
     (egg-delimit-section :section 'untracked beg (point)
@@ -869,8 +869,8 @@ success."
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg)
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
-	    (progn (setq inv-beg (point))
-		   "\n"))
+	    "\n")
+    (setq inv-beg (1- (point)))
     (apply 'call-process "git" nil t nil "diff" "--no-color"  "-p"
 	   "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/"
 	   extra-diff-options)
@@ -884,8 +884,8 @@ success."
   (let ((beg (point)) inv-beg)
     (insert (egg-prepend title "\n\n"
 			  'face 'egg-section-title)
-	    (progn (setq inv-beg (point))
-		   "\n"))
+	    "\n")
+    (setq inv-beg (1- (point)))
     (apply 'call-process "git" nil t nil "diff" "--no-color" "--cached" "-p"
 	   "--src-prefix=HEAD/" "--dst-prefix=INDEX/"
 	   extra-diff-options)
