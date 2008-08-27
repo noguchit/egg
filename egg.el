@@ -1072,8 +1072,8 @@ success."
       (when (consp files)
 	(egg-revert-visited-files files)))))
 
-(defun egg-log-buffer ()
-  (or (get-buffer (concat " *egg-logs@" (egg-git-dir) "*"))
+(defun egg-cmd-log-buffer ()
+  (or (get-buffer (concat " *egg-cmd-logs@" (egg-git-dir) "*"))
       (let ((git-dir (egg-git-dir))
 	    (default-directory default-directory)
 	    dir)
@@ -1081,10 +1081,10 @@ success."
 	  (error "Can't find git dir in %s" default-directory))
 	(setq dir (file-name-nondirectory git-dir))
 	(setq default-directory dir)
-	(get-buffer-create (concat " *egg-logs@" git-dir "*")))))
+	(get-buffer-create (concat " *egg-cmd-logs@" git-dir "*")))))
 
-(defsubst egg-log (&rest strings)
-  (with-current-buffer (egg-log-buffer)
+(defsubst egg-cmd-log (&rest strings)
+  (with-current-buffer (egg-cmd-log-buffer)
     (goto-char (point-max))
     (cons (current-buffer)
 	  (prog1 (point)
@@ -1098,7 +1098,7 @@ success."
 	(forward-line 1)
 	(setq output (buffer-substring-no-properties 
 		      (point) (point-max)))))
-    (egg-log (format "RET:%d\n" ret))
+    (egg-cmd-log (format "RET:%d\n" ret))
     (if (listp accepted-codes)
 	(setq accepted-codes (cons 0 accepted-codes))
       (setq accepted-codes (list 0 accepted-codes)))
@@ -1113,8 +1113,8 @@ success."
 
 (defun egg-sync-do (program stdin accepted-codes args)
   (let (logger ret)
-    (setq logger (egg-log "RUN:" program " " (mapconcat 'identity args " ")
-			  (if stdin " <REGION\n" "\n")))
+    (setq logger (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
+			      (if stdin " <REGION\n" "\n")))
     (setq ret 
 	  (cond ((stringp stdin)
 		 (with-temp-buffer
@@ -1525,6 +1525,37 @@ success."
 ;;;========================================================
 ;;; log browsing
 ;;;========================================================
+(defconst egg-log-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:LogBuffer")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map "n" 'egg-log-buffer-next-ref)
+    (define-key map "p" 'egg-log-buffer-prev-ref)
+    map))
+
+(defun egg-log-buffer-next-ref (pos)
+  (interactive "d")
+  (let ((current-ref (get-text-property pos :ref))
+	(n-pos (next-single-property-change pos :ref))
+	n-ref)
+    (when n-pos
+      (setq n-ref (get-text-property n-pos :ref))
+      (if n-ref
+	  (goto-char n-pos)
+	(if (setq n-pos (next-single-property-change n-pos :ref))
+	    (goto-char n-pos))))))
+
+(defun egg-log-buffer-prev-ref (pos)
+  (interactive "d")
+  (let ((current-ref (get-text-property pos :ref))
+	(p-pos (previous-single-property-change pos :ref))
+	p-ref)
+    (when p-pos
+      (setq p-ref (get-text-property p-pos :ref))
+      (if (and p-ref (not (equal p-ref current-ref)))
+	  (goto-char p-pos)
+	(if (setq p-pos (previous-single-property-change p-pos :ref))
+	    (goto-char p-pos))))))
+
 (defun egg-log-buffer-insert-logs (buffer)
   (with-current-buffer buffer
     (let ((head-info (egg-head))
@@ -1558,13 +1589,13 @@ success."
 	mode-name  "Egg-Log"
 	mode-line-process ""
 	truncate-lines t)
-  (use-local-map egg-buffer-mode-map)
+  (use-local-map egg-log-buffer-mode-map)
   (set (make-local-variable 'egg-buffer-refresh-func)
        'egg-log-buffer-insert-logs)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
 
-(defun egg-git-log ()
+(defun egg-log ()
   (interactive)
   (let* ((git-dir (egg-git-dir))
 	 (dir (file-name-directory git-dir))
