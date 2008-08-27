@@ -1532,6 +1532,16 @@ success."
     (define-key map "p" 'egg-log-buffer-prev-ref)
     map))
 
+(defun egg-log-buffer-goto-pos (pos)
+  (goto-char pos)
+  (goto-char (line-beginning-position))
+  (let ((sha1 (get-text-property (point) :sha1)))
+    (when (stringp sha1)
+      (setq sha1 (substring sha1 0 6))
+      (save-match-data
+	(if (looking-at (concat "^.* \\(" sha1 "\\)"))
+	    (goto-char (match-beginning 1)))))))
+
 (defun egg-log-buffer-next-ref (pos)
   (interactive "d")
   (let ((current-ref (get-text-property pos :ref))
@@ -1540,9 +1550,9 @@ success."
     (when n-pos
       (setq n-ref (get-text-property n-pos :ref))
       (if n-ref
-	  (goto-char n-pos)
+	  (egg-log-buffer-goto-pos n-pos)
 	(if (setq n-pos (next-single-property-change n-pos :ref))
-	    (goto-char n-pos))))))
+	    (egg-log-buffer-goto-pos n-pos))))))
 
 (defun egg-log-buffer-prev-ref (pos)
   (interactive "d")
@@ -1552,9 +1562,9 @@ success."
     (when p-pos
       (setq p-ref (get-text-property p-pos :ref))
       (if (and p-ref (not (equal p-ref current-ref)))
-	  (goto-char p-pos)
+	  (egg-log-buffer-goto-pos p-pos)
 	(if (setq p-pos (previous-single-property-change p-pos :ref))
-	    (goto-char p-pos))))))
+	    (egg-log-buffer-goto-pos p-pos))))))
 
 (defun egg-log-buffer-insert-logs (buffer)
   (with-current-buffer buffer
