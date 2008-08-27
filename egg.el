@@ -369,7 +369,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 		    (match-string-no-properties 2 line))))
 	  (egg-git-to-lines "show-ref")))
 
-(defun egg-decorate-log ()
+(defun egg-decorate-log (&optional line-map)
   (let ((sha1-ref-alist (egg-sha1-ref-alist))
 	sha1 comment graph text-pattern short-sha1 ref re)
     (mapc (lambda (ref)
@@ -415,9 +415,14 @@ ARGS is a list of arguments to pass to PROGRAM."
 			   'face 'egg-graph))
       (put-text-property (line-beginning-position) (line-end-position)
 			 :sha1 sha1)
+      (put-text-property (line-beginning-position) (line-end-position)
+			 :navigation sha1)
+      (when line-map 
+	(put-text-property (line-beginning-position) (line-end-position)
+			   'keymap line-map))
       (when ref
 	(put-text-property (line-beginning-position) (line-end-position)
-			   :ref ref)))))
+			   :ref (substring-no-properties ref))))))
 
 (defsubst egg-current-branch ()
   (let* ((git-dir (egg-git-dir))
@@ -1363,7 +1368,7 @@ success."
 	 (head (or (cdr head-info) 
 		   (format "Detached HEAD! (%s)" (car head-info))))
 	 (inhibit-read-only inhibit-read-only))
-    (pop-to-buffer buf)
+    (pop-to-buffer buf t)
     (setq inhibit-read-only t)
     (erase-buffer)
     (set (make-local-variable 'egg-log-msg-action) 'egg-log-msg-commit)
@@ -1412,9 +1417,8 @@ success."
 	  (inhibit-read-only t)
 	  pos inv-beg)
       (erase-buffer)
-      (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
-	      (progn (setq inv-beg (point))
-		     "\n"))
+      (insert (propertize title 'face 'egg-section-title) "\n")
+      (setq inv-beg (point))
       (insert prologue "\n")
       (apply 'call-process "git" nil t nil "diff" args)
       (egg-delimit-section :section 'top-level (point-min) (point))
@@ -1517,6 +1521,58 @@ success."
   (completing-read prompt (nconc special-rev (egg-revs)) nil nil default))
 
 
+
+;;;========================================================
+;;; log browsing
+;;;========================================================
+(defun egg-log-buffer-insert-logs (buffer)
+  (with-current-buffer buffer
+    (let ((head-info (egg-head))
+	  (orig-pos (point))
+	  (inhibit-read-only t)
+	  inv-beg beg)
+      (erase-buffer)
+      (insert (propertize (or (cdr head-info) 
+			      (format "Detached HEAD: %s"
+				      (egg-name-rev (car head-info))))
+			  'face 'egg-branch) 
+	      "\n"
+	      (propertize (car head-info) 'face 'font-lock-string-face)
+	      "\n"
+	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
+	      "\n\n")
+      (setq beg (point))
+      (setq inv-beg (- beg 2))
+      (call-process "git" nil t nil "log"
+		    "--max-count=1000" "--graph" "--pretty=oneline")
+      (goto-char beg)
+      (egg-decorate-log)
+      (goto-char beg))))
+
+
+(define-egg-buffer log "*%s-log@%s*"
+  "Major mode to display the output of git log."
+  (kill-all-local-variables)
+  (setq buffer-read-only t)
+  (setq major-mode 'egg-log-buffer-mode
+	mode-name  "Egg-Log"
+	mode-line-process ""
+	truncate-lines t)
+  (use-local-map egg-buffer-mode-map)
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-log-buffer-insert-logs)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-log-buffer-mode-hook))
+
+(defun egg-git-log ()
+  (interactive)
+  (let* ((git-dir (egg-git-dir))
+	 (dir (file-name-directory git-dir))
+	 (buf (egg-get-log-buffer 'create)))
+    (with-current-buffer buf
+      (egg-log-buffer-insert-logs buf))
+    (pop-to-buffer buf t)))
+
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
@@ -1530,7 +1586,7 @@ success."
 	(src-rev (and ask-p (egg-read-rev "diff against: " "HEAD")))
 	buf)
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file))) 
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf t)))
 
 (defun egg-file-chekout-other-version (&optional confirm-p)
   "Checkout HEAD's version of the current file.
@@ -1587,7 +1643,7 @@ current file contains unstaged changes."
 	      t)))
     (unless (bufferp buf)
       (error "Oops! can't get %s older version" (buffer-file-name)))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf t)))
 
 (defun egg-file-ediff (&optional ask-for-dst-p)
   (interactive "P")
