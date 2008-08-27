@@ -369,60 +369,6 @@ ARGS is a list of arguments to pass to PROGRAM."
 		    (match-string-no-properties 2 line))))
 	  (egg-git-to-lines "show-ref")))
 
-(defun egg-decorate-log (&optional line-map)
-  (let ((sha1-ref-alist (egg-sha1-ref-alist))
-	sha1 comment graph text-pattern short-sha1 ref re)
-    (mapc (lambda (ref)
-	    (cond ((string= (nth 2 ref) "heads")
-		   (put-text-property 0 (length (cadr ref)) 
-				      'face 'egg-branch-mono
-				      (nth 1 ref)))
-		  ((string= (nth 2 ref) "tags")
-		   (put-text-property 0 (length (cadr ref)) 
-				      'face 'egg-tag-mono
-				      (nth 1 ref)))
-		  ((string= (nth 2 ref) "remotes")
-		   (when (string-match "\\`\\(.+/\\)\\(.+\\)\\'" (nth 1 ref))
-		     (put-text-property 0 (match-end 1) 
-					'face 'egg-remote-mono
-					(nth 1 ref))
-		     (put-text-property (match-beginning 2) (match-end 2) 
-					'face 'egg-branch-mono
-					(nth 1 ref))))))
-	  sha1-ref-alist) 
-    (while (re-search-forward "^\\(.*\\S-\\) +\\([0-9a-f]\\{40\\}\\) \\(.+\\)$" nil t)
-      (setq graph (match-string-no-properties 1)
-	    sha1 (match-string-no-properties 2)
-	    comment (match-string-no-properties 3)
-	    ref (cadr (assoc sha1 sha1-ref-alist)) 
-	    short-sha1 (substring sha1 0 6)
-	    text-pattern (if ref ref short-sha1))
-      (replace-match (concat (format "%-10s%20s " graph
-				     (or ref ""))
-			     (propertize short-sha1 'face
-					 'font-lock-constant-face)
-			     " "
-			     (propertize comment 'face 'egg-text-2))
-		     nil t)
-      (save-excursion 
-	(beginning-of-line)
-	(setq re (concat "^" (regexp-quote graph) " \\( +\\) " text-pattern))
-	(unless (looking-at re)
-	  (error "Ooops"))
-	(subst-char-in-region (match-beginning 1) (match-end 1)
-			      32  ?-)
-	(put-text-property (match-beginning 1) (match-end 1)
-			   'face 'egg-graph))
-      (put-text-property (line-beginning-position) (line-end-position)
-			 :sha1 sha1)
-      (put-text-property (line-beginning-position) (line-end-position)
-			 :navigation sha1)
-      (when line-map 
-	(put-text-property (line-beginning-position) (line-end-position)
-			   'keymap line-map))
-      (when ref
-	(put-text-property (line-beginning-position) (line-end-position)
-			   :ref (substring-no-properties ref))))))
 
 (defsubst egg-current-branch ()
   (let* ((git-dir (egg-git-dir))
@@ -1525,6 +1471,61 @@ success."
 ;;;========================================================
 ;;; log browsing
 ;;;========================================================
+(defun egg-decorate-log (&optional line-map)
+  (let ((sha1-ref-alist (egg-sha1-ref-alist))
+	sha1 comment graph text-pattern short-sha1 ref re beg end)
+    (mapc (lambda (ref)
+	    (cond ((string= (nth 2 ref) "heads")
+		   (put-text-property 0 (length (cadr ref)) 
+				      'face 'egg-branch-mono
+				      (nth 1 ref)))
+		  ((string= (nth 2 ref) "tags")
+		   (put-text-property 0 (length (cadr ref)) 
+				      'face 'egg-tag-mono
+				      (nth 1 ref)))
+		  ((string= (nth 2 ref) "remotes")
+		   (when (string-match "\\`\\(.+/\\)\\(.+\\)\\'" (nth 1 ref))
+		     (put-text-property 0 (match-end 1) 
+					'face 'egg-remote-mono
+					(nth 1 ref))
+		     (put-text-property (match-beginning 2) (match-end 2) 
+					'face 'egg-branch-mono
+					(nth 1 ref))))))
+	  sha1-ref-alist) 
+    (while (re-search-forward "^\\(.*\\S-\\) +\\([0-9a-f]\\{40\\}\\) \\(.+\\)$" nil t)
+      (setq graph (match-string-no-properties 1)
+	    sha1 (match-string-no-properties 2)
+	    comment (match-string-no-properties 3)
+	    ref (cadr (assoc sha1 sha1-ref-alist)) 
+	    short-sha1 (substring sha1 0 6)
+	    text-pattern (if ref ref short-sha1))
+      (replace-match (concat (format "%-10s%20s " graph
+				     (or ref ""))
+			     (propertize short-sha1 'face
+					 'font-lock-constant-face)
+			     " "
+			     (propertize comment 'face 'egg-text-2))
+		     nil t)
+      (save-excursion 
+	(beginning-of-line)
+	(setq re (concat "^" (regexp-quote graph) " \\( +\\) " text-pattern))
+	(unless (looking-at re)
+	  (error "Ooops"))
+	(subst-char-in-region (match-beginning 1) (match-end 1)
+			      32  ?-)
+	(put-text-property (match-beginning 1) (match-end 1)
+			   'face 'egg-graph))
+      (setq beg (line-beginning-position) 
+	    end (1+ (line-end-position)))
+      (put-text-property beg end :sha1 sha1)
+      (put-text-property beg end :navigation sha1)
+      (when line-map 
+	(put-text-property beg end 'keymap line-map))
+      (when ref
+	(put-text-property beg end :ref
+			   (substring-no-properties ref))))))
+
+
 (defconst egg-log-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:LogBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
@@ -1560,11 +1561,13 @@ success."
 	(p-pos (previous-single-property-change pos :ref))
 	p-ref)
     (when p-pos
+      (setq p-pos (1- p-pos))
       (setq p-ref (get-text-property p-pos :ref))
       (if (and p-ref (not (equal p-ref current-ref)))
 	  (egg-log-buffer-goto-pos p-pos)
-	(if (setq p-pos (previous-single-property-change p-pos :ref))
-	    (egg-log-buffer-goto-pos p-pos))))))
+	(when (setq p-pos (previous-single-property-change p-pos :ref))
+	  (setq p-pos (1- p-pos))
+	  (egg-log-buffer-goto-pos p-pos))))))
 
 (defun egg-log-buffer-insert-logs (buffer)
   (with-current-buffer buffer
