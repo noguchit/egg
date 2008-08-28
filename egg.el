@@ -1476,9 +1476,65 @@ success."
 ;;;========================================================
 ;;; log browsing
 ;;;========================================================
+(defun egg-max-ref-alist-len (sha1-ref-alist &optional max)
+  (let ((len 0)
+	(counter-alist (mapcar (lambda (sha1)
+				 (cons sha1 0)) 
+			       (delete-duplicates
+				(mapcar 'car sha1-ref-alist))))
+	(len-alist (mapcar (lambda (entry)
+			     (cons (nth 0 entry)
+				   (length (nth 1 entry))))
+			   sha1-ref-alist)))
+    (dolist (entry len-alist)
+      (let ((count (assoc (car entry) counter-alist)))
+	(setcdr count (+ (cdr count) (cdr entry)))
+	(if (> (cdr count) len)
+	    (setq len (cdr count)))))
+    (if (and (numberp max) (> len max))
+	max
+      len)))
+
+(defun egg-log-make-commit-line-1 (graph sha1 comment refs pref-max-len)
+  (let ((dashes (make-string (- pref-max-len 
+				(length graph)
+				1
+				(if refs (1+ (length refs)) 0)
+				1) ?-)))
+    (setq sha1 (substring sha1 0 6))
+    (put-text-property 0 (length dashes) 'face 'egg-graph dashes)
+    (put-text-property 0 (length sha1) 'face 'font-lock-constant-face
+		       sha1)
+    (put-text-property 0 (length comment) 'face 'egg-text-2 comment)
+    (concat graph " " dashes 
+	    (if refs (concat " " refs " ") " ")
+	    sha1 " " comment)))
+
+(defun egg-log-make-commit-line (graph sha1 comment ref-alist 
+				       prefix-max-len)
+  (let (refs refs-string refs-max-len line)
+    (dolist (ref-entry ref-alist)
+      (if (string= sha1 (car ref-entry))
+	  (add-to-list 'refs (nth 1 ref-entry))))
+    (if (null refs)
+	(egg-log-make-commit-line-1 graph sha1 comment refs-string
+				  prefix-max-len)
+      (setq refs-max-len (- prefix-max-len (length graph) 1 1))
+      (setq refs-string (mapconcat 'identity refs " "))
+      (if (> (length refs-string) refs-max-len) 
+	  (setq refs-string (concat (substring refs-string 0 -3)
+				  "...")))
+      (setq line
+	    (egg-log-make-commit-line-1 graph sha1 comment refs-string
+				      prefix-max-len))
+      (put-text-property 0 (length line) :ref (if (cdr refs) refs
+						(car refs)) line)
+      line)))
+
+
 (defun egg-decorate-log (&optional line-map)
   (let ((sha1-ref-alist (egg-sha1-ref-alist))
-	sha1 comment graph text-pattern short-sha1 ref re beg end)
+	max-refs-len sha1 comment graph beg end ref)
     (mapc (lambda (ref)
 	    (cond ((string= (nth 2 ref) "heads")
 		   (put-text-property 0 (length (cadr ref)) 
@@ -1497,38 +1553,28 @@ success."
 					'face 'egg-branch-mono
 					(nth 1 ref))))))
 	  sha1-ref-alist) 
+    (setq max-refs-len (egg-max-ref-alist-len sha1-ref-alist 40))
     (while (re-search-forward "^\\(.*\\S-\\) +\\([0-9a-f]\\{40\\}\\) \\(.+\\)$" nil t)
       (setq graph (match-string-no-properties 1)
 	    sha1 (match-string-no-properties 2)
-	    comment (match-string-no-properties 3)
-	    ref (cadr (assoc sha1 sha1-ref-alist)) 
-	    short-sha1 (substring sha1 0 6)
-	    text-pattern (if ref ref short-sha1))
-      (replace-match (concat (format "%-10s%20s " graph
-				     (or ref ""))
-			     (propertize short-sha1 'face
-					 'font-lock-constant-face)
-			     " "
-			     (propertize comment 'face 'egg-text-2))
+	    comment (match-string-no-properties 3))
+      (replace-match (egg-log-make-commit-line 
+		      graph sha1 comment
+		      sha1-ref-alist
+		      (if (> max-refs-len 54) 60 (+ 6 max-refs-len)))
 		     nil t)
-      (save-excursion 
-	(beginning-of-line)
-	(setq re (concat "^" (regexp-quote graph) " \\( +\\) " text-pattern))
-	(unless (looking-at re)
-	  (error "Ooops"))
-	(subst-char-in-region (match-beginning 1) (match-end 1)
-			      32  ?-)
-	(put-text-property (match-beginning 1) (match-end 1)
-			   'face 'egg-graph))
       (setq beg (line-beginning-position) 
 	    end (1+ (line-end-position)))
-      (put-text-property beg end :sha1 sha1)
+      (put-text-property beg end :commit sha1)
       (put-text-property beg end :navigation sha1)
       (when line-map 
 	(put-text-property beg end 'keymap line-map))
+      (setq ref (get-text-property beg :ref))
       (when ref
 	(put-text-property beg end :ref
-			   (substring-no-properties ref))))))
+			   (if (consp ref)
+			       (mapcar 'substring-no-properties ref)
+			     (substring-no-properties ref)))))))
 
 
 (defun egg-log-diff-cmd-visit-file (file sha1)
@@ -1575,7 +1621,7 @@ success."
 (defun egg-log-buffer-goto-pos (pos)
   (goto-char pos)
   (goto-char (line-beginning-position))
-  (let ((sha1 (get-text-property (point) :sha1)))
+  (let ((sha1 (get-text-property (point) :commit)))
     (when (stringp sha1)
       (setq sha1 (substring sha1 0 6))
       (save-match-data
@@ -1610,7 +1656,7 @@ success."
 
 (defun egg-log-buffer-do-insert-commit (pos)
   (save-excursion
-    (let ((sha1 (get-text-property pos :sha1))
+    (let ((sha1 (get-text-property pos :commit))
 	  (ref (get-text-property pos :ref))
 	  (nav (get-text-property pos :navigation))
 	  (inhibit-read-only t)
@@ -1647,7 +1693,7 @@ success."
   (interactive "d")
   (let* ((next (next-single-property-change pos :diff))
 	 (sha1 (and next (get-text-property next :commit))))
-    (unless (equal (get-text-property pos :sha1) sha1)
+    (unless (equal (get-text-property pos :commit) sha1)
       (egg-log-buffer-do-insert-commit pos))))
 
 (defun egg-log-buffer-insert-logs (buffer)
