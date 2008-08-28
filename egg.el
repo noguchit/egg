@@ -242,9 +242,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-git-ok (buffer &rest args)
   (= (apply 'call-process "git" nil buffer nil args) 0))
 
-(defsubst egg-wdir-clean () (egg-git-ok "diff" "--quiet"))
+(defsubst egg-wdir-clean () (egg-git-ok nil "diff" "--quiet"))
 (defsubst egg-file-updated (file) 
-  (egg-git-ok "diff" "--quiet" "--" file))
+  (egg-git-ok nil "diff" "--quiet" "--" file))
 (defsubst egg-index-empty () (egg-git-ok "diff" "--cached" "--quiet"))
 
 (defsubst egg-git-to-lines (&rest args)
