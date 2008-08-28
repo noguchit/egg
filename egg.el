@@ -523,10 +523,15 @@ success."
 ;;; Diff/Hunk
 ;;;========================================================
 
-(defconst egg-section-map 
-  (let ((map (make-sparse-keymap "Egg:Section")))
+(defconst egg-hide-show-map 
+  (let ((map (make-sparse-keymap "Egg:HideShow")))
     (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
     (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
+    map))
+
+(defconst egg-section-map 
+  (let ((map (make-sparse-keymap "Egg:Section")))
+    (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     map))
@@ -1526,6 +1531,40 @@ success."
 			   (substring-no-properties ref))))))
 
 
+(defun egg-log-diff-cmd-visit-file (file sha1)
+  (interactive (list (car (get-text-property (point) :diff))
+		     (get-text-property (point) :commit)))
+  (pop-to-buffer (egg-file-get-other-version file sha1 nil t)))
+
+(defun egg-log-diff-cmd-visit-file-other-window (file sha1)
+  (interactive (list (car (get-text-property (point) :diff))
+		     (get-text-property (point) :commit)))
+  (pop-to-buffer (egg-file-get-other-version file sha1 nil t) t))
+
+
+
+(defconst egg-log-map 
+  (let ((map (make-sparse-keymap "Egg:Log")))
+    (set-keymap-parent map egg-hide-show-map)
+    (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
+    map))
+
+(defconst egg-log-diff-map 
+  (let ((map (make-sparse-keymap "Egg:LogDiff")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
+    (define-key map (kbd "o") 'egg-log-diff-cmd-visit-file)
+    (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
+    map))
+
+(defconst egg-log-hunk-map 
+  (let ((map (make-sparse-keymap "Egg:LogHunk")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
+    (define-key map (kbd "o") 'egg-log-diff-cmd-visit-file)
+    (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
+    map))
+
 (defconst egg-log-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:LogBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
@@ -1569,8 +1608,7 @@ success."
 	  (setq p-pos (1- p-pos))
 	  (egg-log-buffer-goto-pos p-pos))))))
 
-(defun egg-log-buffer-insert-commit (pos)
-  (interactive "d")
+(defun egg-log-buffer-do-insert-commit (pos)
   (save-excursion
     (let ((sha1 (get-text-property pos :sha1))
 	  (ref (get-text-property pos :ref))
@@ -1594,8 +1632,8 @@ success."
       (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
       (egg-decorate-diff-section beg end nil nil 
-				 egg-diff-section-map
-				 egg-hunk-section-map)
+				 egg-log-diff-map
+				 egg-log-hunk-map)
       (goto-char beg)
       (setq end (next-single-property-change beg :diff))
       (put-text-property beg (+ 38 beg) 'face 'egg-diff-none)
@@ -1604,6 +1642,13 @@ success."
       (put-text-property (point) (+ 38 (point)) 'face 'egg-diff-none)
       (put-text-property (+ 38 (point)) end 'face 'egg-text-2)
       (set-buffer-modified-p nil))))
+
+(defun egg-log-buffer-insert-commit (pos)
+  (interactive "d")
+  (let* ((next (next-single-property-change pos :diff))
+	 (sha1 (and next (get-text-property next :commit))))
+    (unless (equal (get-text-property pos :sha1) sha1)
+      (egg-log-buffer-do-insert-commit pos))))
 
 (defun egg-log-buffer-insert-logs (buffer)
   (with-current-buffer buffer
@@ -1626,7 +1671,7 @@ success."
       (call-process "git" nil t nil "log"
 		    "--max-count=1000" "--graph" "--pretty=oneline")
       (goto-char beg)
-      (egg-decorate-log)
+      (egg-decorate-log egg-log-map)
       (goto-char beg))))
 
 
@@ -1647,7 +1692,7 @@ success."
 (defun egg-log ()
   (interactive)
   (let* ((git-dir (egg-git-dir))
-	 (dir (file-name-directory git-dir))
+	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
       (egg-log-buffer-insert-logs buf))
@@ -1685,11 +1730,8 @@ current file contains unstaged changes."
     (when (egg-sync-do-file file "git" nil nil (list "checkout" rev "--" file))
       (revert-buffer t t t))))
 
-(defun egg-file-get-other-version (&optional rev prompt same-mode-p)
-  (unless (buffer-file-name)
-    (error "Current buffer has no associated file!"))
-  (let* ((file (buffer-file-name))
-	 (mode major-mode)
+(defun egg-file-get-other-version (file &optional rev prompt same-mode-p)
+  (let* ((mode (assoc-default file auto-mode-alist 'string-match))
 	 (git-dir (egg-git-dir))
 	 (lbranch (egg-current-branch))
 	 (rbranch (and git-dir (or (egg-tracking-target lbranch)
@@ -1717,8 +1759,8 @@ current file contains unstaged changes."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
-  (let ((buf (egg-file-get-other-version 
-	      nil 
+  (let ((buf (egg-file-get-other-version
+	      (buffer-file-name) nil 
 	      (format "show %s's version:" (buffer-file-name))
 	      t)))
     (unless (bufferp buf)
@@ -1731,15 +1773,16 @@ current file contains unstaged changes."
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
 	 (dst-buf (if ask-for-dst-p
-		      (egg-file-get-other-version 
-		       nil
+		      (egg-file-get-other-version
+		       (buffer-file-name) nil
 		       (format "(ediff) %s's newer version: " file)
 		       t)
 		    (current-buffer)))
 	 (src-buf (egg-file-get-other-version 
-		       nil
-		       (format "(ediff) %s's older version: " file)
-		       t)))
+		   (buffer-file-name)
+		   nil
+		   (format "(ediff) %s's older version: " file)
+		   t)))
     (unless (and (bufferp dst-buf) (bufferp src-buf))
       (error "Ooops!"))
     (ediff-buffers dst-buf src-buf)))
