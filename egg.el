@@ -236,11 +236,11 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (substring str 0 -1)
 	str))))
 
-(defsubst egg-cmd-ok (program &rest args)
-  (= (apply 'call-process program nil nil nil args) 0))
+(defsubst egg-cmd-ok (program buffer &rest args)
+  (= (apply 'call-process program nil buffer nil args) 0))
 
-(defsubst egg-git-ok (&rest args)
-  (= (apply 'call-process "git" nil nil nil args) 0))
+(defsubst egg-git-ok (buffer &rest args)
+  (= (apply 'call-process "git" nil buffer nil args) 0))
 
 (defsubst egg-wdir-clean () (egg-git-ok "diff" "--quiet"))
 (defsubst egg-file-updated (file) 
@@ -1568,6 +1568,42 @@ success."
 	(when (setq p-pos (previous-single-property-change p-pos :ref))
 	  (setq p-pos (1- p-pos))
 	  (egg-log-buffer-goto-pos p-pos))))))
+
+(defun egg-log-buffer-insert-commit (pos)
+  (interactive "d")
+  (save-excursion
+    (let ((sha1 (get-text-property pos :sha1))
+	  (ref (get-text-property pos :ref))
+	  (nav (get-text-property pos :navigation))
+	  (inhibit-read-only t)
+	  beg end)
+      (goto-char pos)
+      (goto-char (1+ (line-end-position)))
+      (setq beg (point))
+      (unless (egg-git-ok t "log" "--max-count=1" "-p"
+			  (eval-when-compile
+			    (concat
+			     "--pretty=format:"
+			     (make-string 38 ? ) "%ai%n"
+			     (make-string 38 ? ) "%an%n%n"
+			     " %b%n" 
+			     ))
+			  sha1)
+	(error "error calling git log %s!" ref))
+      (setq end (point))
+      (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
+      (put-text-property beg end 'keymap egg-section-map)
+      (egg-decorate-diff-section beg end nil nil 
+				 egg-diff-section-map
+				 egg-hunk-section-map)
+      (goto-char beg)
+      (setq end (next-single-property-change beg :diff))
+      (put-text-property beg (+ 38 beg) 'face 'egg-diff-none)
+      (put-text-property (+ 38 beg) (line-end-position) 'face 'egg-text-2)
+      (forward-line 1)
+      (put-text-property (point) (+ 38 (point)) 'face 'egg-diff-none)
+      (put-text-property (+ 38 (point)) end 'face 'egg-text-2)
+      (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-logs (buffer)
   (with-current-buffer buffer
