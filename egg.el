@@ -649,6 +649,28 @@ success."
 	(add-to-list 'current-inv nav t)
 	(put-text-property inv-beg (1- end) 'invisible current-inv)))))
 
+(defun egg-make-hunk-info (name beg end)
+  (let ((b (make-marker))
+	(e (make-marker)))
+    (set-marker b beg)
+    (set-marker e end)
+    (set-marker-insertion-type b t)
+    (set-marker-insertion-type e nil)
+    (list name b e)))
+
+(defun egg-make-diff-info (name beg end head-end)
+  (let ((b (make-marker))
+	(e (make-marker))
+	(h (make-marker)))
+    (set-marker b beg)
+    (set-marker e end)
+    (set-marker h head-end)
+    (set-marker-insertion-type b t)
+    (set-marker-insertion-type e nil)
+    (set-marker-insertion-type h nil)
+    (list name b e h)))
+
+
 (defun egg-decorate-diff-sequence (beg end diff-map hunk-map regexp
 					diff-re-no
 					hunk-re-no
@@ -676,16 +698,18 @@ success."
 				   end))
 		 (egg-decorate-hunk-header hunk-re-no)
 		 (egg-delimit-section 
-		  :hunk (list (match-string-no-properties hunk-re-no) 
-			      sub-beg sub-end)
+		  :hunk (egg-make-hunk-info 
+			 (match-string-no-properties hunk-re-no)
+			 sub-beg sub-end)
 		  sub-beg sub-end (match-end 0) hunk-map 'egg-compute-navigation))
 		((match-beginning diff-re-no) ;; diff
 		 (setq sub-end (or (egg-safe-search "^diff " end) end))
 		 (setq head-end (or (egg-safe-search "^@@" end) end))
 		 (egg-decorate-diff-header diff-re-no)
 		 (egg-delimit-section
-		  :diff (list (match-string-no-properties diff-re-no)
-			      sub-beg sub-end head-end)
+		  :diff (egg-make-diff-info
+			 (match-string-no-properties diff-re-no)
+			 sub-beg sub-end head-end)
 		  sub-beg sub-end (match-end 0) diff-map 'egg-compute-navigation))
 		((match-beginning index-re-no) ;; index
 		 (egg-decorate-diff-index-line index-re-no))
@@ -2047,7 +2071,7 @@ current file contains unstaged changes."
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
-  (define-key map (kbd "l") 'egg-show-logs)
+  (define-key map (kbd "l") 'egg-log)
   (define-key map (kbd "o") 'egg-file-chekout-other-version)
   (define-key map (kbd "s") 'egg-status)
   (define-key map (kbd "u") 'egg-cancel-modifications)
