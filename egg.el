@@ -26,6 +26,7 @@
 
 (require 'cl)
 (require 'electric)
+(require 'thingatpt)
 
 (defgroup egg nil
   "Controlling Git from Emacs."
@@ -1650,12 +1651,20 @@ success."
     (pop-to-buffer (egg-file-get-other-version file sha1 nil t) t)
     (goto-line line)))
 
+(defun egg-log-buffer-checkout-commit (pos)
+  (interactive "d")
+  (let* ((commit (get-text-property pos :commit))
+	 (refs (get-text-property pos :ref))
+	 (def (if (stringp refs) refs (car (last refs)))))
+    (egg-do-checkout (completing-read "checkout: " (egg-all-refs)
+				      nil nil (or def commit)))))
 
 
 (defconst egg-log-map 
   (let ((map (make-sparse-keymap "Egg:Log")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
+    (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     map))
 
 (defconst egg-log-diff-map 
@@ -1776,7 +1785,7 @@ success."
       (setq beg (point))
       (setq inv-beg (- beg 2))
       (call-process "git" nil t nil "log"
-		    "--max-count=1000" "--graph" "--pretty=oneline")
+		    "--max-count=1000" "--graph" "--pretty=oneline" "--all")
       (goto-char beg)
       (egg-decorate-log egg-log-map)
       (goto-char beg))))
