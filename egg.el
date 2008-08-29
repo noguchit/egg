@@ -372,25 +372,26 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defun egg-decorate-ref (full-name)
   (save-match-data
-    (if (not (string-match
+    (let (name type)
+      (if (not (string-match
 	      "\\`refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'"
 	      full-name))
 	full-name
-      (cond ((string= (match-string-no-properties 1 full-name) "heads")
-	     (propertize (match-string-no-properties 2 full-name)
-			 'face 'egg-branch-mono))
-	    ((string= (match-string-no-properties 1 full-name) "tags")
-	     (propertize (match-string-no-properties 2 full-name)
-			 'face 'egg-tag-mono))
-	    ((string= (match-string-no-properties 1 full-name) "remotes")
-	     (concat (propertize
-		      (file-name-directory 
-		       (match-string-no-properties 2 full-name))
-		      'face 'egg-remote-mono)
-		     (propertize 
-		      (file-name-nondirectory 
-		       (match-string-no-properties 2 full-name))
-		      'face 'egg-branch-mono)))))))
+	(setq name (match-string-no-properties 2 full-name)
+	      type (match-string-no-properties 1 full-name))
+	(cond ((string= type "heads")
+	       (propertize name 'face 'egg-branch-mono
+			   :ref (cons name :head)))
+	      ((string= type "tags")
+	       (propertize name 'face 'egg-tag-mono
+			   :ref (cons name :tag)))
+	      ((string= type "remotes")
+	       (propertize
+		(concat (propertize (file-name-directory name)
+				    'face 'egg-remote-mono)
+			(propertize (file-name-nondirectory name)
+				    'face 'egg-branch-mono))
+		:ref (cons name :remote))))))))
 
 (defsubst egg-current-branch ()
   (let* ((git-dir (egg-git-dir))
@@ -983,10 +984,10 @@ success."
 				egg-staged-diff-section-map
 				egg-staged-hunk-section-map)))
 
-(defun egg-checkout-ref ()
-  (interactive)
+(defun egg-checkout-ref (&optional default)
+  (interactive (list (car (get-text-property (point) :ref))))
   (egg-do-checkout (completing-read "checkout: " (egg-all-refs)
-				    nil nil "HEAD")))
+				    nil nil (or default "HEAD"))))
 
 (defconst egg-status-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
@@ -1616,10 +1617,7 @@ success."
       (when line-map 
 	(put-text-property beg end 'keymap line-map))
       (when ref
-	(put-text-property beg end :ref
-			   (if (consp ref)
-			       (mapcar 'substring-no-properties ref)
-			     (substring-no-properties ref))))
+	(put-text-property beg end :references ref))
       (when (string= sha1 head-sha1)
 	(overlay-put ov 'face 'region)
 	(overlay-put ov 'evaporate t)
@@ -1653,10 +1651,12 @@ success."
 (defun egg-log-buffer-checkout-commit (pos)
   (interactive "d")
   (let* ((commit (get-text-property pos :commit))
-	 (refs (get-text-property pos :ref))
-	 (def (if (stringp refs) refs (car (last refs)))))
-    (egg-do-checkout (completing-read "checkout: " (egg-all-refs)
-				      nil nil (or def commit)))))
+	 (refs (get-text-property pos :references))
+	 (first-head (if (stringp refs) refs (car (last refs))))
+	 (ref-at-point (car (get-text-property pos :ref))))
+    (egg-do-checkout 
+     (completing-read "checkout: " (egg-all-refs) nil nil 
+		      (or ref-at-point first-head commit)))))
 
 
 (defconst egg-log-map 
@@ -1699,34 +1699,34 @@ success."
 
 (defun egg-log-buffer-next-ref (pos)
   (interactive "d")
-  (let ((current-ref (get-text-property pos :ref))
-	(n-pos (next-single-property-change pos :ref))
+  (let ((current-ref (get-text-property pos :references))
+	(n-pos (next-single-property-change pos :references))
 	n-ref)
     (when n-pos
-      (setq n-ref (get-text-property n-pos :ref))
+      (setq n-ref (get-text-property n-pos :references))
       (if n-ref
 	  (egg-log-buffer-goto-pos n-pos)
-	(if (setq n-pos (next-single-property-change n-pos :ref))
+	(if (setq n-pos (next-single-property-change n-pos :references))
 	    (egg-log-buffer-goto-pos n-pos))))))
 
 (defun egg-log-buffer-prev-ref (pos)
   (interactive "d")
-  (let ((current-ref (get-text-property pos :ref))
-	(p-pos (previous-single-property-change pos :ref))
+  (let ((current-ref (get-text-property pos :references))
+	(p-pos (previous-single-property-change pos :references))
 	p-ref)
     (when p-pos
       (setq p-pos (1- p-pos))
-      (setq p-ref (get-text-property p-pos :ref))
+      (setq p-ref (get-text-property p-pos :references))
       (if (and p-ref (not (equal p-ref current-ref)))
 	  (egg-log-buffer-goto-pos p-pos)
-	(when (setq p-pos (previous-single-property-change p-pos :ref))
+	(when (setq p-pos (previous-single-property-change p-pos :references))
 	  (setq p-pos (1- p-pos))
 	  (egg-log-buffer-goto-pos p-pos))))))
 
 (defun egg-log-buffer-do-insert-commit (pos)
   (save-excursion
     (let ((sha1 (get-text-property pos :commit))
-	  (ref (get-text-property pos :ref))
+	  (ref (get-text-property pos :references))
 	  (nav (get-text-property pos :navigation))
 	  (inhibit-read-only t)
 	  (indent-column egg-log-buffer-comment-column)
