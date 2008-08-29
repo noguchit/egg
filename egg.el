@@ -249,8 +249,8 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-index-empty () (egg-git-ok "diff" "--cached" "--quiet"))
 
 (defsubst egg-git-to-lines (&rest args)
-  (split-string (substring (egg-cmd-to-string-1 "git" args) 0 -1)
-		"\n"))
+  (save-match-data
+    (split-string (egg-cmd-to-string-1 "git" args))))
 
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
@@ -261,19 +261,19 @@ ARGS is a list of arguments to pass to PROGRAM."
   (let ((lst (egg-git-to-lines "rev-parse" "--symbolic" "--remotes")))
     (if raw-p lst
       (mapcar (lambda (full-name)
-		(let ((tmp (split-string full-name "/")))
+		(let ((tmp (save-match-data (split-string full-name "/"))))
 		  (cons (cadr tmp) (car tmp))))
 	      lst))))
 
 (defsubst egg-rbranch-to-remote (rbranch)
   (and (stringp rbranch)
        (> (length rbranch) 0)
-       (car (split-string rbranch "/"))))
+       (car (save-match-data (split-string rbranch "/")))))
 
 (defsubst egg-rbranch-name (rbranch)
   (and (stringp rbranch) 
        (> (length rbranch) 0)
-       (cadr (split-string rbranch "/"))))
+       (cadr (save-match-data (split-string rbranch "/")))))
 
 (defsubst egg-push-refspec (lbranch rbranch)
    (setq rbranch (egg-rbranch-name rbranch))
@@ -419,10 +419,12 @@ ARGS is a list of arguments to pass to PROGRAM."
 			   1))
 
 (defsubst egg-config-section (type &optional name)
-  (mapcar 
-   (lambda (line) (split-string line "[ =]+" t))
-   (split-string (or (egg-config-section-raw type name) "")
-		 "[\t\n]+" t)))
+  (save-match-data
+    (mapcar 
+     (lambda (line) 
+       (split-string line "[ =]+" t))
+     (split-string (or (egg-config-section-raw type name) "")
+		   "[\t\n]+" t))))
 
 (defun egg-config-get-all (file type)
   (interactive "fFilename: ")
@@ -762,7 +764,9 @@ success."
 
 (defun egg-hunk-compute-line-no (hunk-header hunk-beg)
   (let ((limit (line-end-position))
-	(line (string-to-number (nth 2 (split-string hunk-header "[ @,\+,-]+" t))))
+	(line (string-to-number 
+	       (nth 2 (save-match-data
+			(split-string hunk-header "[ @,\+,-]+" t)))))
 	(adjust 0))
     (save-excursion
       (goto-char hunk-beg)
@@ -1159,7 +1163,7 @@ success."
   (if (consp output) (setq output (cdr output)))
   (when (and (stringp output) (> (length output) 1))
     (when (numberp line-no)
-      (when (setq output (split-string output "\n" t))
+      (when (setq output (save-match-data (split-string output "\n" t)))
 	(cond ((< line-no 0)
 	       (setq line-no (1+ line-no))
 	       (setq output (nth line-no (nreverse output))))
@@ -1561,9 +1565,11 @@ success."
 
 (defun egg-decorate-log (&optional line-map)
   (let ((max-prefix-len 0) dummy-0
+	(head-sha1 (egg-current-sha1)) 
+	(ov (make-overlay (point-min) (point-min) nil t))
 	info-alist sha1 comment graph beg end ref ref-string)
     (save-excursion
-      (while (re-search-forward "^\\([*|\\\\/]+\\) \\([a-f0-9]+\\) \\(?:(\\([^)]+\\)) \\)?\\(.+\\)" nil t)
+      (while (re-search-forward "^\\([^a-f0-9\n]+\\) \\([a-f0-9]+\\) \\(?:(\\([^)]+\\)) \\)?\\(.+\\)" nil t)
 	(setq dummy-0 (match-string-no-properties 0))
 	(setq graph (match-string-no-properties 1))
 	(setq sha1 (match-string-no-properties 2))
@@ -1584,29 +1590,37 @@ success."
 	(setq info-alist (cons (list (line-number-at-pos (match-beginning 0))
 				     graph sha1
 				     ref-string
-				     comment)
+				     comment
+				     ref)
 			       info-alist))))
-;;;     (setq max-prefix-len 50)
-    (setq max-prefix-len (min max-prefix-len 60))
+    (setq max-prefix-len (min max-prefix-len 50))
     (dolist (info (nreverse info-alist))
+      (setq graph (nth 1 info)
+	    sha1 (nth 2 info)
+	    ref-string (nth 3 info)
+	    comment (nth 4 info)
+	    ref (nth 5 info))
       (goto-line (car info))
       (delete-region (line-beginning-position) (line-end-position))
-      (insert (egg-log-make-commit-line (nth 1 info)
-					(nth 2 info)
-					(nth 3 info)
-					(nth 4 info)
-					max-prefix-len)))
-    (setq beg (line-beginning-position) 
-	  end (1+ (line-end-position)))
-    (put-text-property beg end :commit sha1)
-    (put-text-property beg end :navigation sha1)
-    (when line-map 
-      (put-text-property beg end 'keymap line-map))
-    (when ref
-      (put-text-property beg end :ref
-			 (if (consp ref)
-			     (mapcar 'substring-no-properties ref)
-			   (substring-no-properties ref))))))
+      (insert (egg-log-make-commit-line graph sha1 ref-string
+					comment max-prefix-len))
+
+      (setq beg (line-beginning-position) 
+	    end (1+ (line-end-position)))
+      (put-text-property beg end :commit sha1)
+      (put-text-property beg end :navigation sha1)
+      
+      (when line-map 
+	(put-text-property beg end 'keymap line-map))
+      (when ref
+	(put-text-property beg end :ref
+			   (if (consp ref)
+			       (mapcar 'substring-no-properties ref)
+			     (substring-no-properties ref))))
+      (when (string= sha1 head-sha1)
+	(overlay-put ov 'face 'region)
+	(overlay-put ov 'evaporate t)
+	(move-overlay ov beg end)))))
 
 
 (defun egg-log-diff-cmd-visit-file (file sha1)
