@@ -1259,23 +1259,29 @@ success."
     (if (egg-sync-do "git" nil nil (list "checkout" rev))
 	(egg-revert-all-visited-files))))
 
-(defun egg-do-tag (&optional rev prompt)
+(defun egg-do-tag (&optional rev prompt force)
   (let ((all-refs (egg-all-refs))
 	(name (read-string (or prompt "new tag name: ")))
 	(rev (or rev "HEAD")))
-    (when (member name all-refs)
+    (when (and (not force) (member name all-refs))
       (error "referene %s already existed!" name))
-    (egg-git-ok nil "tag" name rev)))
+    (if force
+	(egg-git-ok nil "tag" "-f" name rev)
+      (egg-git-ok nil "tag" name rev))))
 
-(defun egg-do-create-branch (&optional rev chekout prompt)
+(defun egg-do-create-branch (&optional rev chekout prompt force)
   (let ((all-refs (egg-all-refs))
 	(name (read-string (or prompt "create new branch: ")))
 	(rev (or rev "HEAD")))
-    (when (member name all-refs)
+    (when (and (not force) (member name all-refs))
       (error "referene %s already existed!" name))
     (if (null chekout)
-	(egg-git-ok nil "branch" name rev)
-      (egg-sync-0 "checkout" "-b" name rev))))
+	(if force 
+	    (egg-git-ok nil "branch" "-f" name rev)
+	  (egg-git-ok nil "branch" name rev))
+      (if force
+	  (egg-sync-0 "checkout" "-b" "-f" name rev)
+	(egg-sync-0 "checkout" "-b" name rev)))))
 
 (defun egg-rm-ref (&optional force name prompt default)
   (let* ((all-refs (egg-all-refs))
@@ -1705,29 +1711,31 @@ success."
    (completing-read "checkout: " (egg-all-refs) nil nil 
 		    (egg-log-buffer-get-rev-at pos))))
 
-(defun egg-log-buffer-tag-commit (pos)
-  (interactive "d")
+(defun egg-log-buffer-tag-commit (pos &optional force)
+  (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos)))
-    (when (egg-do-tag rev (format "tag %s with name: " rev))
+    (when (egg-do-tag rev (format "tag %s with name: " rev) force)
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
-(defun egg-log-buffer-create-new-branch (force pos)
-  (interactive "P\nd")
+(defun egg-log-buffer-create-new-branch (pos &optional force)
+  (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos)))
     (when (egg-do-create-branch
 	   rev nil
-	   (format "create new brach at %s with name: " rev))
+	   (format "create new brach at %s with name: " rev) 
+	   force)
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
-(defun egg-log-buffer-start-new-branch (force pos)
-  (interactive "P\nd")
+(defun egg-log-buffer-start-new-branch (pos &optional force)
+  (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos)))
     (when (egg-do-create-branch
 	   rev 'checkout
-	   (format "start new brach at %s with name: " rev)))))
+	   (format "start new brach at %s with name: " rev)
+	   force))))
 
-(defun egg-log-buffer-rm-ref (force pos)
-  (interactive "P\nd")
+(defun egg-log-buffer-rm-ref (pos &optional force)
+  (interactive "d\nP")
   (let ((refs (get-text-property pos :references))
 	(ref-at-point (car (get-text-property pos :ref)))
 	victim)
