@@ -649,26 +649,15 @@ success."
 	(add-to-list 'current-inv nav t)
 	(put-text-property inv-beg (1- end) 'invisible current-inv)))))
 
-(defun egg-make-hunk-info (name beg end)
-  (let ((b (make-marker))
-	(e (make-marker)))
-    (set-marker b beg)
-    (set-marker e end)
-    (set-marker-insertion-type b t)
-    (set-marker-insertion-type e nil)
-    (list name b e)))
+(defsubst egg-make-hunk-info (name beg end diff)
+  (let ((b (nth 1 diff)))
+    (list name (- beg b) (- end b))))
 
-(defun egg-make-diff-info (name beg end head-end)
-  (let ((b (make-marker))
-	(e (make-marker))
-	(h (make-marker)))
+(defsubst egg-make-diff-info (name beg end head-end)
+  (let ((b (make-marker)))
     (set-marker b beg)
-    (set-marker e end)
-    (set-marker h head-end)
     (set-marker-insertion-type b t)
-    (set-marker-insertion-type e nil)
-    (set-marker-insertion-type h nil)
-    (list name b e h)))
+    (list name b (- end beg) (- head-end beg))))
 
 
 (defun egg-decorate-diff-sequence (beg end diff-map hunk-map regexp
@@ -680,7 +669,7 @@ success."
 					none-re-no)
   (save-match-data
     (save-excursion
-      (let (sub-beg sub-end head-end)
+      (let (sub-beg sub-end head-end last-diff-info)
 	(goto-char beg)
 	(while (re-search-forward regexp end t)
 	  (setq sub-beg (match-beginning 0))
@@ -700,16 +689,17 @@ success."
 		 (egg-delimit-section 
 		  :hunk (egg-make-hunk-info 
 			 (match-string-no-properties hunk-re-no)
-			 sub-beg sub-end)
+			 sub-beg sub-end last-diff-info)
 		  sub-beg sub-end (match-end 0) hunk-map 'egg-compute-navigation))
 		((match-beginning diff-re-no) ;; diff
 		 (setq sub-end (or (egg-safe-search "^diff " end) end))
 		 (setq head-end (or (egg-safe-search "^@@" end) end))
 		 (egg-decorate-diff-header diff-re-no)
 		 (egg-delimit-section
-		  :diff (egg-make-diff-info
-			 (match-string-no-properties diff-re-no)
-			 sub-beg sub-end head-end)
+		  :diff (setq last-diff-info
+			      (egg-make-diff-info
+			       (match-string-no-properties diff-re-no)
+			       sub-beg sub-end head-end))
 		  sub-beg sub-end (match-end 0) diff-map 'egg-compute-navigation))
 		((match-beginning index-re-no) ;; index
 		 (egg-decorate-diff-index-line index-re-no))
@@ -762,18 +752,24 @@ success."
 	(setq adjust (1+ adjust))))
     (+ line adjust)))
 
+(defsubst egg-hunk-info-at (pos)
+  (let* ((diff-info (get-text-property pos :diff))
+	 (head-beg (nth 1 diff-info))
+	 (hunk-info (get-text-property pos :hunk))
+	 (hunk-beg (+ (nth 1 hunk-info) head-beg))
+	 (hunk-end (+ (nth 2 hunk-info) head-beg)))
+    (list (car diff-info) (car hunk-info) hunk-beg hunk-end)))
+
 (defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg
 					     &rest ignored)
-  (interactive (cons (car (get-text-property (point) :diff))
-		     (get-text-property (point) :hunk)))
+  (interactive (egg-hunk-info-at (point)))
   (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
     (find-file file)
     (goto-line line)))
 
 (defun egg-hunk-section-cmd-visit-file-other-window (file hunk-header hunk-beg
 							  &rest ignored)
-  (interactive (cons (car (get-text-property (point) :diff))
-		     (get-text-property (point) :hunk)))
+  (interactive (egg-hunk-info-at (point)))
   (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
     (find-file file)
     (goto-line line)))
@@ -810,17 +806,20 @@ success."
     (force-window-update (current-buffer))))
 
 (defun egg-diff-section-patch-string (&optional pos)
-  (let ((diff-info (get-text-property (or pos (point)) :diff)))
-    (buffer-substring-no-properties (nth 1 diff-info)
-				    (nth 2 diff-info))))
+  (let* ((diff-info (get-text-property (or pos (point)) :diff))
+	 (beg (nth 1 diff-info))
+	 (end (+ (nth 2 diff-info) beg)))
+    (buffer-substring-no-properties beg end)))
 
 (defun egg-hunk-section-patch-string (&optional pos)
-  (let ((diff-info (get-text-property (or pos (point)) :diff))
-	(hunk-info (get-text-property (or pos (point)) :hunk)))
-    (concat (buffer-substring-no-properties (nth 1 diff-info)
-					    (nth 3 diff-info))
-	    (buffer-substring-no-properties (nth 1 hunk-info)
-					    (nth 2 hunk-info)))))
+  (let* ((diff-info (get-text-property (or pos (point)) :diff))
+	 (head-beg (nth 1 diff-info))
+	 (head-end (+ (nth 3 diff-info) head-beg))
+	 (hunk-info (get-text-property (or pos (point)) :hunk))
+	 (hunk-beg (+ (nth 1 hunk-info) head-beg))
+	 (hunk-end (+ (nth 2 hunk-info) head-beg)))
+    (concat (buffer-substring-no-properties head-beg head-end)
+	    (buffer-substring-no-properties hunk-beg hunk-end))))
 
 ;;;========================================================
 ;;; Buffer
