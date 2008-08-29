@@ -540,7 +540,6 @@ success."
   (let ((map (make-sparse-keymap "Egg:Diff")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
-    (define-key map (kbd "o") 'egg-diff-section-cmd-visit-file)
     (define-key map (kbd "f") 'egg-diff-section-cmd-visit-file)
     map))
 
@@ -566,7 +565,6 @@ success."
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
-    (define-key map (kbd "o") 'egg-hunk-section-cmd-visit-file)
     (define-key map (kbd "f") 'egg-hunk-section-cmd-visit-file)
     map))
 
@@ -959,10 +957,16 @@ success."
 				egg-staged-diff-section-map
 				egg-staged-hunk-section-map)))
 
+(defun egg-checkout-ref ()
+  (interactive)
+  (egg-do-checkout (completing-read "checkout: " (egg-all-refs)
+				    nil nil "HEAD")))
+
 (defconst egg-status-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
     (define-key map (kbd "c") 'egg-commit-log-edit)
+    (define-key map (kbd "o") 'egg-checkout-ref)
     map))
 
 (defun egg-buffer-hide-all ()
@@ -1217,6 +1221,12 @@ success."
     (when (egg-sync-do "git" nil nil (list "add" "-u"))
 	(message "staged all tracked files's modifications"))))
 
+
+(defun egg-do-checkout (rev)
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir)))
+    (if (egg-sync-do "git" nil nil (list "checkout" rev))
+	(egg-revert-all-visited-files))))
 
 ;;;========================================================
 ;;; log message
@@ -1652,7 +1662,6 @@ success."
   (let ((map (make-sparse-keymap "Egg:LogDiff")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
-    (define-key map (kbd "o") 'egg-log-diff-cmd-visit-file)
     (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
     map))
 
@@ -1660,7 +1669,6 @@ success."
   (let ((map (make-sparse-keymap "Egg:LogHunk")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
-    (define-key map (kbd "o") 'egg-log-hunk-cmd-visit-file)
     (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
     map))
 
