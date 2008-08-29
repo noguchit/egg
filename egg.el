@@ -370,6 +370,27 @@ ARGS is a list of arguments to pass to PROGRAM."
 		    (match-string-no-properties 2 line))))
 	  (egg-git-to-lines "show-ref")))
 
+(defun egg-decorate-ref (full-name)
+  (save-match-data
+    (if (not (string-match
+	      "\\`refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'"
+	      full-name))
+	full-name
+      (cond ((string= (match-string-no-properties 1 full-name) "heads")
+	     (propertize (match-string-no-properties 2 full-name)
+			 'face 'egg-branch-mono))
+	    ((string= (match-string-no-properties 1 full-name) "tags")
+	     (propertize (match-string-no-properties 2 full-name)
+			 'face 'egg-tag-mono))
+	    ((string= (match-string-no-properties 1 full-name) "remotes")
+	     (concat (propertize
+		      (file-name-directory 
+		       (match-string-no-properties 2 full-name))
+		      'face 'egg-remote-mono)
+		     (propertize 
+		      (file-name-nondirectory 
+		       (match-string-no-properties 2 full-name))
+		      'face 'egg-branch-mono)))))))
 
 (defsubst egg-current-branch ()
   (let* ((git-dir (egg-git-dir))
@@ -394,7 +415,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 				   (if name (format "\\[%s \"%s\"\\]" type name)
 				     (format "\\[%s\\]" type))
 				   "\n"
-				   "\\(\\(:?\t.+\n\\)+\\)")
+				   "\\(\\(?:\t.+\n\\)+\\)")
 			   1))
 
 (defsubst egg-config-section (type &optional name)
@@ -682,7 +703,7 @@ success."
 		 (put-text-property (match-beginning 0) (match-end 0)
 				    'face 'egg-diff-none))
 		((match-beginning hunk-re-no) ;; hunk
-		 (setq sub-end (or (egg-safe-search "^\\(:?diff\\|@@\\)" end)
+		 (setq sub-end (or (egg-safe-search "^\\(?:diff\\|@@\\)" end)
 				   end))
 		 (egg-decorate-hunk-header hunk-re-no)
 		 (egg-delimit-section 
@@ -747,7 +768,7 @@ success."
       (goto-char hunk-beg)
       (forward-line 1)
       (end-of-line)
-      (while (re-search-forward "^\\(:?\\+\\| \\).*" limit t)
+      (while (re-search-forward "^\\(?:\\+\\| \\).*" limit t)
 	(setq adjust (1+ adjust))))
     (+ line adjust)))
 
@@ -1510,26 +1531,6 @@ success."
 ;;;========================================================
 ;;; log browsing
 ;;;========================================================
-(defun egg-ref-alist-len-alist (sha1-ref-alist)
-  (let ((counter-alist (mapcar (lambda (sha1)
-				 (cons sha1 -1)) 
-			       (delete-duplicates
-				(mapcar 'car sha1-ref-alist))))
-	(len-alist (mapcar (lambda (entry)
-			     (cons (nth 0 entry)
-				   (length (nth 1 entry))))
-			   sha1-ref-alist)))
-    (dolist (entry len-alist)
-      (let ((count (assoc (car entry) counter-alist)))
-	(setcdr count (+ (cdr count) 1 (cdr entry)))))
-    counter-alist))
-
-
-(defsubst egg-max-ref-alist-len (sha1-ref-alist &optional max)
-   (min (apply 'max
-	       (mapcar 'cdr (egg-ref-alist-len-alist sha1-ref-alist)))
-	(if (numberp max) max 100000)))
-
 (defun egg-log-make-commit-line-1 (graph sha1 comment refs pref-max-len)
   (let ((dashes (make-string (- pref-max-len 
 				(length graph)
@@ -1544,87 +1545,68 @@ success."
 	    (if refs (concat " " refs " ") " ")
 	    sha1 " " comment)))
 
-(defun egg-log-make-commit-line (graph sha1 comment ref-alist 
+(defun egg-log-make-commit-line (graph sha1 refs-string comment 
 				       prefix-max-len)
-  (let (refs refs-string refs-max-len line)
-    (dolist (ref-entry ref-alist)
-      (if (string= sha1 (car ref-entry))
-	  (add-to-list 'refs (nth 1 ref-entry))))
-    (if (null refs)
-	(egg-log-make-commit-line-1 graph sha1 comment refs-string
-				  prefix-max-len)
+  (if (null refs-string)
+      (egg-log-make-commit-line-1 graph sha1 comment nil prefix-max-len)
+    (let (refs-max-len)
       (setq refs-max-len (- prefix-max-len (length graph) 1 1 1))
-      (setq refs-string (mapconcat 'identity refs " "))
       (if (> (length refs-string) refs-max-len) 
 	  (setq refs-string (concat (substring refs-string 
 					       0 (- refs-max-len 3))
-				  "...")))
-      (setq line
-	    (egg-log-make-commit-line-1 graph sha1 comment refs-string
-				      prefix-max-len))
-      (put-text-property 0 (length line) :ref (if (cdr refs) refs
-						(car refs)) line)
-      line)))
+				    "...")))
+      (egg-log-make-commit-line-1 graph sha1 comment refs-string
+				      prefix-max-len))))
 
 
 (defun egg-decorate-log (&optional line-map)
-  (let ((sha1-ref-alist (egg-sha1-ref-alist))
-	(max-prefix-len 0)
-	sha1-reflen-alist max-refs-len
-	sha1 comment graph beg end ref)
-    (setq sha1-reflen-alist (egg-ref-alist-len-alist sha1-ref-alist))
-    (mapc (lambda (ref)
-	    (cond ((string= (nth 2 ref) "heads")
-		   (put-text-property 0 (length (cadr ref)) 
-				      'face 'egg-branch-mono
-				      (nth 1 ref)))
-		  ((string= (nth 2 ref) "tags")
-		   (put-text-property 0 (length (cadr ref)) 
-				      'face 'egg-tag-mono
-				      (nth 1 ref)))
-		  ((string= (nth 2 ref) "remotes")
-		   (when (string-match "\\`\\(.+/\\)\\(.+\\)\\'" (nth 1 ref))
-		     (put-text-property 0 (match-end 1) 
-					'face 'egg-remote-mono
-					(nth 1 ref))
-		     (put-text-property (match-beginning 2) (match-end 2) 
-					'face 'egg-branch-mono
-					(nth 1 ref))))))
-	  sha1-ref-alist) 
+  (let ((max-prefix-len 0) dummy-0
+	info-alist sha1 comment graph beg end ref ref-string)
     (save-excursion
-      (while (re-search-forward "^\\([^a-f0-9]+\\) \\([a-f0-9]+\\) " nil t)
-	  (setq sha1 (match-string-no-properties 2))
-	  (setq max-prefix-len
-		(max (+ (- (match-end 1) (match-beginning 1))
-			1
-			(or (assoc-default sha1 sha1-reflen-alist) 0)
-			1
-			1)
-		     max-prefix-len))))
+      (while (re-search-forward "^\\([*|\\\\/]+\\) \\([a-f0-9]+\\) \\(?:(\\([^)]+\\)) \\)?\\(.+\\)" nil t)
+	(setq dummy-0 (match-string-no-properties 0))
+	(setq graph (match-string-no-properties 1))
+	(setq sha1 (match-string-no-properties 2))
+	(setq ref (if (match-beginning 3)
+		      (mapcar 'egg-decorate-ref
+			      (save-match-data
+				(split-string (match-string-no-properties 3) "[, ]+" t)))))
+	(setq ref-string (and ref (mapconcat 'identity ref " ")))
+	(setq ref (and ref (mapcar 'substring-no-properties ref)))
+	(setq comment (match-string-no-properties 4))
+	(setq max-prefix-len
+	      (max (+ (length graph)
+		      1
+		      (if (match-beginning 3)
+			  (+ (length ref-string) 2)
+			1))
+		   max-prefix-len))
+	(setq info-alist (cons (list (line-number-at-pos (match-beginning 0))
+				     graph sha1
+				     ref-string
+				     comment)
+			       info-alist))))
+;;;     (setq max-prefix-len 50)
     (setq max-prefix-len (min max-prefix-len 60))
-    (setq max-refs-len (egg-max-ref-alist-len sha1-ref-alist
-					      (- max-prefix-len 4)))
-    (while (re-search-forward "^\\(.*\\S-\\) +\\([0-9a-f]\\{40\\}\\) \\(.+\\)$" nil t)
-      (setq graph (match-string-no-properties 1)
-	    sha1 (match-string-no-properties 2)
-	    comment (match-string-no-properties 3))
-      (replace-match (egg-log-make-commit-line 
-		      graph sha1 comment
-		      sha1-ref-alist
-		      max-prefix-len)
-		     nil t)
-      (setq beg (line-beginning-position) 
-	    end (1+ (line-end-position)))
-      (put-text-property beg end :commit sha1)
-      (put-text-property beg end :navigation sha1)
-      (when line-map 
-	(put-text-property beg end 'keymap line-map))
-      (setq ref (get-text-property beg :ref))
-      (when ref
-	(put-text-property beg end :ref
-			   (if (consp ref)
-			       (mapcar 'substring-no-properties ref)
-			     (substring-no-properties ref)))))))
+    (dolist (info (nreverse info-alist))
+      (goto-line (car info))
+      (delete-region (line-beginning-position) (line-end-position))
+      (insert (egg-log-make-commit-line (nth 1 info)
+					(nth 2 info)
+					(nth 3 info)
+					(nth 4 info)
+					max-prefix-len)))
+    (setq beg (line-beginning-position) 
+	  end (1+ (line-end-position)))
+    (put-text-property beg end :commit sha1)
+    (put-text-property beg end :navigation sha1)
+    (when line-map 
+      (put-text-property beg end 'keymap line-map))
+    (when ref
+      (put-text-property beg end :ref
+			 (if (consp ref)
+			     (mapcar 'substring-no-properties ref)
+			   (substring-no-properties ref))))))
 
 
 (defun egg-log-diff-cmd-visit-file (file sha1)
@@ -1785,7 +1767,8 @@ success."
       (setq beg (point))
       (setq inv-beg (- beg 2))
       (call-process "git" nil t nil "log"
-		    "--max-count=1000" "--graph" "--pretty=oneline" "--all")
+		    "--max-count=1000" "--graph" "--topo-order"
+		    "--pretty=oneline" "--decorate" "--all")
       (goto-char beg)
       (egg-decorate-log egg-log-map)
       (goto-char beg))))
