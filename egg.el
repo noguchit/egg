@@ -1626,6 +1626,20 @@ success."
 		     (get-text-property (point) :commit)))
   (pop-to-buffer (egg-file-get-other-version file sha1 nil t) t))
 
+(defun egg-log-hunk-cmd-visit-file (sha1 file hunk-header hunk-beg &rest ignored)
+  (interactive (cons (get-text-property (point) :commit)
+		     (egg-hunk-info-at (point))))
+  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
+    (pop-to-buffer (egg-file-get-other-version file sha1 nil t))
+    (goto-line line)))
+
+(defun egg-log-hunk-cmd-visit-file-other-window (sha1 file hunk-header hunk-beg &rest ignored)
+  (interactive (cons (get-text-property (point) :commit)
+		     (egg-hunk-info-at (point))))
+  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
+    (pop-to-buffer (egg-file-get-other-version file sha1 nil t) t)
+    (goto-line line)))
+
 
 
 (defconst egg-log-map 
@@ -1645,9 +1659,9 @@ success."
 (defconst egg-log-hunk-map 
   (let ((map (make-sparse-keymap "Egg:LogHunk")))
     (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
-    (define-key map (kbd "o") 'egg-log-diff-cmd-visit-file)
-    (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
+    (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
+    (define-key map (kbd "o") 'egg-log-hunk-cmd-visit-file)
+    (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
     map))
 
 (defconst egg-log-buffer-mode-map
