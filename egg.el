@@ -1535,6 +1535,8 @@ success."
 ;;;========================================================
 ;;; log browsing
 ;;;========================================================
+(defvar egg-log-buffer-comment-column nil)
+
 (defun egg-log-make-commit-line-1 (graph sha1 comment refs pref-max-len)
   (let ((dashes (make-string (- pref-max-len 
 				(length graph)
@@ -1594,6 +1596,7 @@ success."
 				     ref)
 			       info-alist))))
     (setq max-prefix-len (min max-prefix-len 50))
+    (setq egg-log-buffer-comment-column (+ max-prefix-len 1 6 1))
     (dolist (info (nreverse info-alist))
       (setq graph (nth 1 info)
 	    sha1 (nth 2 info)
@@ -1726,18 +1729,19 @@ success."
 	  (ref (get-text-property pos :ref))
 	  (nav (get-text-property pos :navigation))
 	  (inhibit-read-only t)
+	  (indent-column egg-log-buffer-comment-column)
+	  (indent-spaces (make-string egg-log-buffer-comment-column ? ))
 	  beg end)
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
       (unless (egg-git-ok t "log" "--max-count=1" "-p"
-			  (eval-when-compile
-			    (concat
+			  (concat
 			     "--pretty=format:"
-			     (make-string 38 ? ) "%ai%n"
-			     (make-string 38 ? ) "%an%n%n"
-			     " %b%n" 
-			     ))
+			     indent-spaces "%ai%n"
+			     indent-spaces "%an%n%n"
+			     "%b%n" 
+			     ) 
 			  sha1)
 	(error "error calling git log %s!" ref))
       (setq end (point))
@@ -1748,11 +1752,12 @@ success."
 				 egg-log-hunk-map)
       (goto-char beg)
       (setq end (next-single-property-change beg :diff))
-      (put-text-property beg (+ 38 beg) 'face 'egg-diff-none)
-      (put-text-property (+ 38 beg) (line-end-position) 'face 'egg-text-2)
+      (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
+      (put-text-property (+  indent-column beg) (line-end-position)
+			 'face 'egg-text-2)
       (forward-line 1)
-      (put-text-property (point) (+ 38 (point)) 'face 'egg-diff-none)
-      (put-text-property (+ 38 (point)) end 'face 'egg-text-2)
+      (put-text-property (point) (+ indent-column (point)) 'face 'egg-diff-none)
+      (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
@@ -1799,6 +1804,7 @@ success."
   (use-local-map egg-log-buffer-mode-map)
   (set (make-local-variable 'egg-buffer-refresh-func)
        'egg-log-buffer-insert-logs)
+  (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
 
