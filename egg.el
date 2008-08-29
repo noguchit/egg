@@ -1255,6 +1255,33 @@ success."
     (if (egg-sync-do "git" nil nil (list "checkout" rev))
 	(egg-revert-all-visited-files))))
 
+(defun egg-do-tag (&optional rev prompt)
+  (let ((all-refs (egg-all-refs))
+	(name (read-string (or prompt "new tag name: ")))
+	(rev (or rev "HEAD")))
+    (when (member name all-refs)
+      (error "referene %s already existed!" name))
+    (egg-git-ok nil "tag" name rev)))
+
+(defun egg-rm-ref (&optional force name prompt default)
+  (let* ((all-refs (egg-all-refs))
+	 (name (or name (completing-read (or prompt "remove ref: ")
+					 all-refs nil nil
+					 default)))
+	 (full-name (egg-git-to-string "show-ref" name))
+	 type)
+    (unless (stringp full-name)
+      (error "Cannot find reference %s!" name))
+    (save-match-data
+      (setq type (nth 1 (split-string 
+			 (cadr (split-string full-name nil t)) "/+" t)))
+      (cond ((string-equal "tags" type)
+	     (egg-git-ok nil "tag" "-d" name))
+	    ((string-equal "heads" type)
+	     (egg-git-ok nil "branch" (if force "-D" "-d") name))
+	    ((string-equal "remotes" type)
+	     (egg-git-ok nil "branch" (if force "-rD" "-rd") name))))))
+
 ;;;========================================================
 ;;; log message
 ;;;========================================================
@@ -1658,12 +1685,34 @@ success."
      (completing-read "checkout: " (egg-all-refs) nil nil 
 		      (or ref-at-point first-head commit)))))
 
+(defun egg-log-buffer-tag-commit (pos)
+  (interactive "d")
+  (let ((commit (get-text-property pos :commit))
+	(head-sha1 (egg-current-sha1)))
+    (if (string= head-sha1 commit)
+	(setq commit "HEAD"))
+    (when (egg-do-tag commit (format "tag %s with name: " commit))
+      (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-log-buffer-rm-ref (pos)
+  (interactive "d")
+  (let ((refs (get-text-property pos :references))
+	(ref-at-point (car (get-text-property pos :ref)))
+	victim)
+    (unless ref-at-point
+      (setq ref-at-point (last refs)))
+    (setq victim (completing-read "remove reference: " refs
+				  nil nil ref-at-point))
+    (when (egg-rm-ref nil victim)
+      (funcall egg-buffer-refresh-func (current-buffer)))))
 
 (defconst egg-log-map 
   (let ((map (make-sparse-keymap "Egg:Log")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
+    (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
+    (define-key map (kbd "d") 'egg-log-buffer-rm-ref)
     map))
 
 (defconst egg-log-diff-map 
@@ -1686,6 +1735,7 @@ success."
     (define-key map "n" 'egg-log-buffer-next-ref)
     (define-key map "p" 'egg-log-buffer-prev-ref)
     map))
+
 
 (defun egg-log-buffer-goto-pos (pos)
   (goto-char pos)
