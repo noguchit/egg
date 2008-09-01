@@ -252,7 +252,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defsubst egg-git-to-lines (&rest args)
   (save-match-data
-    (split-string (egg-cmd-to-string-1 "git" args))))
+    (split-string (egg-cmd-to-string-1 "git" args) "[\n]+")))
 
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
@@ -372,6 +372,15 @@ ARGS is a list of arguments to pass to PROGRAM."
 		    (match-string-no-properties 2 line))))
 	  (egg-git-to-lines "show-ref")))
 
+(defun egg-ref-type-alist ()
+  (mapcar (lambda (line)
+	    (when (string-match "\\`\\(?:\\S-+\\) refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(.+\\)\\'" line)
+	      (cons (match-string-no-properties 4 line)
+		    (cond ((match-beginning 1) :head)
+			  ((match-beginning 2) :tag)
+			  ((match-beginning 3) :remote)))))
+	  (egg-git-to-lines "show-ref")))
+
 (defun egg-decorate-ref (full-name)
   (save-match-data
     (let (name type)
@@ -449,6 +458,12 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-config-get-all-branches ()
   (egg-config-get-all (concat (egg-git-dir) "/config") "branch"))
 
+(defsubst egg-config-get-all-remotes ()
+  (egg-config-get-all (concat (egg-git-dir) "/config") "remote"))
+
+(defsubst egg-config-get-all-remote-names ()
+  (mapcar 'car (egg-config-get-all-remotes)))
+
 (defsubst egg-config-get (type attr &optional name)
   (and (egg-git-dir)
        (cadr (assoc attr (egg-config-section type name)))))
@@ -480,6 +495,23 @@ ARGS is a list of arguments to pass to PROGRAM."
 	    ((eq :name-only mode) rbranch)
 	    (t (cons rbranch remote))))))
 
+(defun egg-revs ()
+  (apply 'nconc 
+	 (mapcar (lambda (ref)
+		   (cons ref 
+			 (mapcar (lambda (suffix)
+			     (concat ref suffix))
+				 '("^" "^^" "^^^" "^^^^" "^^^^^"
+				   "~0" "~1" "~2" "~3" "~4" "~5"))))
+		 (egg-all-refs))))
+
+(defun egg-read-rev (prompt &optional default special-rev)
+  (unless (listp special-rev)
+    (setq special-rev (list special-rev)))
+  (completing-read prompt (nconc special-rev (egg-revs)) nil nil default))
+
+(defun egg-read-remote (prompt &optional default)
+  (completing-read prompt (egg-config-get-all-remote-names) nil t default))
 
 ;;;========================================================
 ;;; Async Git process
@@ -521,6 +553,10 @@ success."
       (process-put proc :cmds (cons "git" args))
       (set-process-sentinel proc #'egg-process-sentinel))))
 
+(defvar egg-async-process nil)
+(defvar egg-async-cmds nil)
+(defvar egg-async-exit-msg nil)
+
 (defun egg-process-sentinel (proc msg)
   (let ((exit-code (process-get proc :accepted-code))
 	(accepted-msg (process-get proc :accepted-msg))
@@ -543,7 +579,15 @@ success."
       (re-search-backward "^EGG-GIT-CMD:" nil t)
       (narrow-to-region (point) (point-max))
       (if (functionp callback-func)
-	  (apply callback-func proc cmds callback-args)))))
+	  (let ((egg-async-process proc)
+		(egg-async-cmds cmds)
+		(egg-async-exit-msg msg)) 
+	    (apply callback-func callback-args))))))
+
+(defsubst egg-buffer-async-do (accepted-code &rest args)
+  (egg-async-do accepted-code 
+		(cons egg-buffer-refresh-func (list (current-buffer)))
+		args))
 
 
 ;;;========================================================
@@ -997,6 +1041,7 @@ success."
     (define-key map (kbd "c") 'egg-commit-log-edit)
     (define-key map (kbd "o") 'egg-checkout-ref)
     (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "S") 'egg-stage-all-files)
     map))
 
 (defun egg-buffer-hide-all ()
@@ -1565,22 +1610,6 @@ success."
     info))
 
 
-(defun egg-revs ()
-  (apply 'nconc 
-	 (mapcar (lambda (ref)
-		   (cons ref 
-			 (mapcar (lambda (suffix)
-			     (concat ref suffix))
-				 '("^" "^^" "^^^" "^^^^" "^^^^^"
-				   "~0" "~1" "~2" "~3" "~4" "~5"))))
-		 (egg-all-refs))))
-
-(defun egg-read-rev (prompt &optional default special-rev)
-  (unless (listp special-rev)
-    (setq special-rev (list special-rev)))
-  (completing-read prompt (nconc special-rev (egg-revs)) nil nil default))
-
-
 
 ;;;========================================================
 ;;; log browsing
@@ -1781,6 +1810,46 @@ success."
 				  nil nil ref-at-point))
     (when (egg-rm-ref force victim)
       (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-log-buffer-push-to-remote (pos &optional non-ff)
+  (interactive "d\nP")
+  (let* ((ref-at-point (get-text-property pos :ref))
+	 (lref (car ref-at-point))
+	 (type (cdr ref-at-point))
+	 rref tracking remote spec)
+    (unless ref-at-point
+      (error "Nothing to push here!"))
+    (cond ((eq type :remote)		;; delete a remote head
+	   (setq rref (file-name-nondirectory lref))
+	   (setq remote (directory-file-name
+			 (file-name-directory lref)))
+	   (setq lref ""))
+	  ((eq type :head)
+	   (setq tracking (egg-tracking-target lref :remote))
+	   (if (consp tracking)
+	       (setq rref (car tracking) remote (cdr tracking))
+	     (setq remote (egg-read-remote
+			   (format "push branch %s to remote: " lref)))
+	     (setq rref (read-string 
+			 (format "push branch % to %s as: " lref remote)
+				     lref))))
+	  ((eq type :tag)
+	   (setq remote (egg-read-remote "push to remote: "))
+	   (setq rref (read-string 
+		       (format "remote tag to push at (on %s): " remote)
+		       lref))
+	   (setq lref (read-string 
+		       (format "local tag to push at %s/%s (empty mean delete the remote tag) : "
+			       remote rref)
+		       rref))))
+    (unless (> (length lref) 0)
+      (unless (y-or-n-p (format "delete %s/%s? " remote rref))
+	(message "cancel removal of %s/%s" remote rref)
+	(setq remote nil rref nil lref nil)))
+    (when (and remote rref lref)
+      (setq spec (concat lref ":" rref))
+      (egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") 
+			   remote spec))))
 
 (defun egg-log-buffer-goto-pos (pos)
   (goto-char pos)
