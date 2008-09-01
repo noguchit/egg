@@ -246,6 +246,8 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-wdir-clean () (egg-git-ok nil "diff" "--quiet"))
 (defsubst egg-file-updated (file) 
   (egg-git-ok nil "diff" "--quiet" "--" file))
+(defsubst egg-file-committed (file) 
+  (egg-git-ok nil "diff" "--quiet" "HEAD" "--" file))
 (defsubst egg-index-empty () (egg-git-ok "diff" "--cached" "--quiet"))
 
 (defsubst egg-git-to-lines (&rest args)
@@ -1269,13 +1271,13 @@ success."
 	(egg-git-ok nil "tag" "-f" name rev)
       (egg-git-ok nil "tag" name rev))))
 
-(defun egg-do-create-branch (&optional rev chekout prompt force)
+(defun egg-do-create-branch (&optional rev checkout prompt force)
   (let ((all-refs (egg-all-refs))
 	(name (read-string (or prompt "create new branch: ")))
 	(rev (or rev "HEAD")))
     (when (and (not force) (member name all-refs))
       (error "referene %s already existed!" name))
-    (if (null chekout)
+    (if (null checkout)
 	(if force 
 	    (egg-git-ok nil "branch" "-f" name rev)
 	  (egg-git-ok nil "branch" name rev))
@@ -1584,6 +1586,40 @@ success."
 ;;; log browsing
 ;;;========================================================
 (defvar egg-log-buffer-comment-column nil)
+(defconst egg-log-map 
+  (let ((map (make-sparse-keymap "Egg:Log")))
+    (set-keymap-parent map egg-hide-show-map)
+    (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
+    (define-key map (kbd "B") 'egg-log-buffer-create-new-branch)
+    (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
+    (define-key map (kbd "d") 'egg-log-buffer-rm-ref)
+    (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
+    (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
+    map))
+
+(defconst egg-log-diff-map 
+  (let ((map (make-sparse-keymap "Egg:LogDiff")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
+    (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
+    map))
+
+(defconst egg-log-hunk-map 
+  (let ((map (make-sparse-keymap "Egg:LogHunk")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
+    (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
+    map))
+
+(defconst egg-log-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:LogBuffer")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map "n" 'egg-log-buffer-next-ref)
+    (define-key map "s" 'egg-status)
+    (define-key map "p" 'egg-log-buffer-prev-ref)
+    map))
+
+
 
 (defun egg-log-make-commit-line-1 (graph sha1 comment refs pref-max-len)
   (let ((dashes (make-string (- pref-max-len 
@@ -1722,7 +1758,7 @@ success."
   (let ((rev (egg-log-buffer-get-rev-at pos)))
     (when (egg-do-create-branch
 	   rev nil
-	   (format "create new brach at %s with name: " rev) 
+	   (format "create new branch at %s with name: " rev) 
 	   force)
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
@@ -1731,7 +1767,7 @@ success."
   (let ((rev (egg-log-buffer-get-rev-at pos)))
     (when (egg-do-create-branch
 	   rev 'checkout
-	   (format "start new brach at %s with name: " rev)
+	   (format "start new branch at %s with name: " rev)
 	   force))))
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
@@ -1745,40 +1781,6 @@ success."
 				  nil nil ref-at-point))
     (when (egg-rm-ref force victim)
       (funcall egg-buffer-refresh-func (current-buffer)))))
-
-(defconst egg-log-map 
-  (let ((map (make-sparse-keymap "Egg:Log")))
-    (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
-    (define-key map (kbd "B") 'egg-log-buffer-create-new-branch)
-    (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
-    (define-key map (kbd "d") 'egg-log-buffer-rm-ref)
-    (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
-    (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
-    map))
-
-(defconst egg-log-diff-map 
-  (let ((map (make-sparse-keymap "Egg:LogDiff")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
-    (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
-    map))
-
-(defconst egg-log-hunk-map 
-  (let ((map (make-sparse-keymap "Egg:LogHunk")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
-    (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
-    map))
-
-(defconst egg-log-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:LogBuffer")))
-    (set-keymap-parent map egg-buffer-mode-map)
-    (define-key map "n" 'egg-log-buffer-next-ref)
-    (define-key map "s" 'egg-status)
-    (define-key map "p" 'egg-log-buffer-prev-ref)
-    map))
-
 
 (defun egg-log-buffer-goto-pos (pos)
   (goto-char pos)
@@ -1925,22 +1927,42 @@ success."
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file))) 
     (pop-to-buffer buf t)))
 
-(defun egg-file-chekout-other-version (&optional confirm-p)
+(defun egg-file-checkout-other-version (&optional no-confirm)
   "Checkout HEAD's version of the current file.
 if CONFIRM-P was not null, then ask for confirmation if the
 current file contains unstaged changes."
-  (interactive)
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let* ((file (buffer-file-name))
+	 (file-modified-p (not (egg-file-committed (buffer-file-name))))
+	 rev)
+    (when file-modified-p
+      (unless (y-or-n-p (format "ignored uncommitted changes in %s? " file))
+	(error "File %s contains uncommitted changes!" file)))
+    (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
+    (when (egg-sync-do-file file "git" nil nil (list "checkout" rev "--" file))
+      (revert-buffer t t t))))
+
+(defun egg-file-cancel-modifications (&optional no-confirm)
+  "Checkout INDEX's version of the current file.
+if CONFIRM-P was not null, then ask for confirmation if the
+current file contains unstaged changes."
+  (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file (buffer-file-name))
 	 (file-modified-p (not (egg-file-updated (buffer-file-name))))
 	 rev)
-    (when file-modified-p
+    (when (and file-modified-p (not no-confirm))
       (unless (y-or-n-p (format "ignored unstaged changes in %s? " file))
 	(error "File %s contains unstaged changes!" file)))
-    (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
-    (when (egg-sync-do-file file "git" nil nil (list "checkout" rev "--" file))
+    (when (egg-sync-do-file file "git" nil nil (list "checkout" "--" file))
       (revert-buffer t t t))))
+
+(defun egg-start-new-branch ()
+  (interactive)
+  (egg-do-create-branch nil 'checkout "start new branch with name: "))
 
 (defun egg-file-get-other-version (file &optional rev prompt same-mode-p)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
@@ -2010,7 +2032,7 @@ current file contains unstaged changes."
     (?q :quit "[q] quit" nil)))
 
 (defconst egg-action-function-alist
-  '((:new-branch . egg-checkout-new-branch)
+  '((:new-branch . egg-start-new-branch)
     (:status     . egg-status)
     (:stage-file . egg-file-stage-current-file)
     (:stage-all  . egg-stage-all-files)
@@ -2193,14 +2215,14 @@ current file contains unstaged changes."
 
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-blame)
-  (define-key map (kbd "b") 'egg-checkout-new-branch)
+  (define-key map (kbd "b") 'egg-start-new-branch)
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-log)
-  (define-key map (kbd "o") 'egg-file-chekout-other-version)
+  (define-key map (kbd "o") 'egg-file-checkout-other-version)
   (define-key map (kbd "s") 'egg-status)
-  (define-key map (kbd "u") 'egg-cancel-modifications)
+  (define-key map (kbd "u") 'egg-file-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
   (define-key map (kbd "=") 'egg-file-diff)
