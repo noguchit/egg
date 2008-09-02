@@ -252,11 +252,15 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defsubst egg-git-to-lines (&rest args)
   (save-match-data
-    (split-string (egg-cmd-to-string-1 "git" args) "[\n]+")))
+    (split-string (egg-cmd-to-string-1 "git" args) "[\n]+" t)))
 
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
   (egg-git-to-lines "rev-parse" "--symbolic" "--branches"))
+
+(defsubst egg-local-refs ()
+  "Get a list of local refs. E.g. (\"master\", \"wip1\")."
+  (egg-git-to-lines "rev-parse" "--symbolic" "--branches" "--tags"))
 
 (defun egg-remote-branches (&optional raw-p)
   "Get a list of remote branches. E.g. (\"origin/master\", \"joe/fork1\")."
@@ -1809,6 +1813,20 @@ success."
     (setq victim (completing-read "remove reference: " refs
 				  nil nil ref-at-point))
     (when (egg-rm-ref force victim)
+      (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-log-buffer-push-to-local (pos &optional non-ff)
+  (interactive "d\nP")
+  (let* ((src (car (get-text-property pos :ref)))
+	 dst type)
+    (unless src
+      (error "Nothing to push here!"))
+    (setq dst (completing-read (format "use %s to update: " src) 
+			       (egg-local-refs) nil t))
+    (when (egg-show-git-output
+	   (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
+		       (concat src ":" dst))
+	   -1 "GIT-PUSH")
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
