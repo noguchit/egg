@@ -262,10 +262,10 @@ ARGS is a list of arguments to pass to PROGRAM."
   "Get a list of local refs. E.g. (\"master\", \"wip1\")."
   (egg-git-to-lines "rev-parse" "--symbolic" "--branches" "--tags"))
 
-(defun egg-remote-branches (&optional raw-p)
+(defun egg-remote-branches (&optional raw)
   "Get a list of remote branches. E.g. (\"origin/master\", \"joe/fork1\")."
   (let ((lst (egg-git-to-lines "rev-parse" "--symbolic" "--remotes")))
-    (if raw-p lst
+    (if raw lst
       (mapcar (lambda (full-name)
 		(let ((tmp (save-match-data (split-string full-name "/"))))
 		  (cons (cadr tmp) (car tmp))))
@@ -357,7 +357,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 	(egg-pick-file-contents (concat git-dir "/HEAD")
 				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2))))
 
-(defun egg-all-refs (&optional raw-p)
+(defun egg-all-refs ()
   "Get a list of all refs."
   (append (egg-git-to-lines "rev-parse" "--symbolic"
 			    "--branches" "--tags" "--remotes")
@@ -926,7 +926,7 @@ success."
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     map))
 
-(defun egg-get-buffer (fmt create-p)
+(defun egg-get-buffer (fmt create)
   (let* ((git-dir (egg-git-dir))
 	 (dir (file-name-directory git-dir))
 	 (dir-name (file-name-nondirectory
@@ -934,7 +934,7 @@ success."
 	 (buf-name (format fmt dir-name git-dir))
 	 (default-directory dir)
 	 (buf (get-buffer buf-name)))
-    (unless (or (bufferp buf) (not create-p))
+    (unless (or (bufferp buf) (not create))
       (setq buf (get-buffer-create buf-name)))
     buf))
 
@@ -949,8 +949,8 @@ success."
        (defun ,buffer-mode-sym ()
 	 ,@body)
 
-       (defun ,get-buffer-sym (&optional create-p)
-	 (let ((buf (egg-get-buffer ,name-fmt create-p)))
+       (defun ,get-buffer-sym (&optional create)
+	 (let ((buf (egg-get-buffer ,name-fmt create)))
 	   (when (bufferp buf)
 	     (with-current-buffer buf
 	       (unless (eq major-mode ',buffer-mode-sym)
@@ -1057,7 +1057,7 @@ success."
       (setq pos (next-single-property-change (point)
 					     :navigation)))))
 
-(defun egg-status-buffer-redisplay (buf &optional init-p)
+(defun egg-status-buffer-redisplay (buf &optional init)
   (with-current-buffer buf
     (let ((inhibit-read-only t)
 	  (orig-pos (point)))
@@ -1068,7 +1068,7 @@ success."
       (egg-sb-insert-staged-section "Staged Changes:")
       (egg-sb-insert-untracked-section)
       
-      (when (and init-p egg-status-buffer-init-hiding-mode)
+      (when (and init egg-status-buffer-init-hiding-mode)
 	(egg-buffer-hide-all))
       (goto-char orig-pos))))
 
@@ -1086,10 +1086,10 @@ success."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-status-buffer-mode-hook))
 
-(defun egg-status (&optional no-update-p)
+(defun egg-status (&optional no-update)
   (interactive "P")
   (let ((buf (egg-get-status-buffer 'create)))
-    (unless no-update-p
+    (unless no-update
       (with-current-buffer buf
 	(egg-status-buffer-redisplay buf 'init)))
     (display-buffer buf t)))
@@ -1403,7 +1403,7 @@ success."
     (message "Please enter a log message!")
     (ding)))
 
-(defun egg-log-msg-hist-cycle (&optional forward-p)
+(defun egg-log-msg-hist-cycle (&optional forward)
   "Cycle through message log history."
   (let ((len (ring-length egg-log-msg-ring)))
     (cond ((<= len 0) 
@@ -1418,12 +1418,12 @@ success."
 	  (t (delete-region egg-log-msg-text-beg egg-log-msg-text-end)
 	     (setq egg-log-msg-ring-idx
 		   (if (null egg-log-msg-ring-idx)
-		       (if forward-p 
+		       (if forward 
 			   ;; 1st-time + fwd = oldest
 			   (ring-minus1 0 len)
 			 ;; 1st-time + bwd = newest
 		       0)
-		     (if forward-p 
+		     (if forward 
 			 ;; newer
 			 (ring-minus1 egg-log-msg-ring-idx len)
 		       ;; older
@@ -1441,7 +1441,7 @@ success."
   (interactive)
   (egg-log-msg-hist-cycle t))
 
-(defun egg-commit-log-buffer-show-diffs (buf &optional init-p)
+(defun egg-commit-log-buffer-show-diffs (buf &optional init)
   (with-current-buffer buf
     (let ((inhibit-read-only t) beg)
       (goto-char egg-log-msg-diff-beg)
@@ -1452,7 +1452,7 @@ success."
       (egg-sb-insert-untracked-section)
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
-      (when (and init-p egg-commit-buffer-init-hiding-mode)
+      (when (and init egg-commit-buffer-init-hiding-mode)
 	(egg-buffer-hide-all))
       (force-window-update buf))))
 
@@ -2029,14 +2029,14 @@ success."
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
-(defun egg-file-diff (&optional ask-p)
+(defun egg-file-diff (&optional ask)
   "Diff the current file in another window."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let ((git-file (egg-git-to-string "ls-files" "--full-name" "--" 
 				     (buffer-file-name)))
-	(src-rev (and ask-p (egg-read-rev "diff against: " "HEAD")))
+	(src-rev (and ask (egg-read-rev "diff against: " "HEAD")))
 	buf)
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file))) 
     (pop-to-buffer buf t)))
@@ -2049,9 +2049,9 @@ current file contains unstaged changes."
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file (buffer-file-name))
-	 (file-modified-p (not (egg-file-committed (buffer-file-name))))
+	 (file-modified (not (egg-file-committed (buffer-file-name))))
 	 rev)
-    (when file-modified-p
+    (when file-modified
       (unless (y-or-n-p (format "ignored uncommitted changes in %s? " file))
 	(error "File %s contains uncommitted changes!" file)))
     (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
@@ -2066,9 +2066,9 @@ current file contains unstaged changes."
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file (buffer-file-name))
-	 (file-modified-p (not (egg-file-updated (buffer-file-name))))
+	 (file-modified (not (egg-file-updated (buffer-file-name))))
 	 rev)
-    (when (and file-modified-p (not no-confirm))
+    (when (and file-modified (not no-confirm))
       (unless (y-or-n-p (format "ignored unstaged changes in %s? " file))
 	(error "File %s contains unstaged changes!" file)))
     (when (egg-sync-do-file file "git" nil nil (list "checkout" "--" file))
@@ -2078,7 +2078,7 @@ current file contains unstaged changes."
   (interactive)
   (egg-do-create-branch nil 'checkout "start new branch with name: "))
 
-(defun egg-file-get-other-version (file &optional rev prompt same-mode-p)
+(defun egg-file-get-other-version (file &optional rev prompt same-mode)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
 	 (git-dir (egg-git-dir))
 	 (lbranch (egg-current-branch))
@@ -2096,13 +2096,13 @@ current file contains unstaged changes."
 	(unless (= (call-process "git" nil buf nil "show" git-name)
 		   0)
 	  (error "Failed to get %s's version: %s" file rev))
-	(when (and (functionp mode) same-mode-p)
+	(when (and (functionp mode) same-mode)
 	  (funcall mode))
 	(set-buffer-modified-p nil)
 	(setq buffer-read-only t)))
     buf))
 
-(defun egg-file-version-other-window (&optional ask-p)
+(defun egg-file-version-other-window ()
   "Show other version of the current file in another window."
   (interactive "P")
   (unless (buffer-file-name)
@@ -2115,12 +2115,12 @@ current file contains unstaged changes."
       (error "Oops! can't get %s older version" (buffer-file-name)))
     (pop-to-buffer buf t)))
 
-(defun egg-file-ediff (&optional ask-for-dst-p)
+(defun egg-file-ediff (&optional ask-for-dst)
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
-	 (dst-buf (if ask-for-dst-p
+	 (dst-buf (if ask-for-dst
 		      (egg-file-get-other-version
 		       (buffer-file-name) nil
 		       (format "(ediff) %s's newer version: " file)
@@ -2154,8 +2154,8 @@ current file contains unstaged changes."
     (:commit     . egg-commit-log-edit)
     (:quit 	 . (lambda () (message "do nothing now! later.") (ding) nil))))
 
-(defcustom egg-next-action-prompt-p t
-  "Always prompt when trying to guess the next logical action ."
+(defcustom egg-confirm-next-action t
+  "Always prompt for confirmation while guessing the next logical action ."
   :group 'egg
   :type 'boolean)
 
@@ -2244,13 +2244,13 @@ current file contains unstaged changes."
     (when (and action (symbolp action))
       action)))
 
-(defun egg-guess-next-action (file-is-modified-p
-			      wdir-is-modified-p
+(defun egg-guess-next-action (file-is-modified
+			      wdir-is-modified
 			      index-is-clean)
-  (if file-is-modified-p
+  (if file-is-modified
       :stage-file 
     ;; file is unchanged
-    (if wdir-is-modified-p
+    (if wdir-is-modified
 	:stage-all
       ;; wdir is clean
       (if index-is-clean
@@ -2267,12 +2267,12 @@ current file contains unstaged changes."
 			       (nth 1 (assq action action-desc-alist)))
 			     (remq default alternatives)) ", "))))
 
-(defun egg-prompt-next-action (file-modified-p
-			       wdir-modified-p
-			       index-clean-p)
-  (let ((default (egg-guess-next-action file-modified-p
-					wdir-modified-p
-					index-clean-p))
+(defun egg-prompt-next-action (file-modified
+			       wdir-modified
+			       index-clean)
+  (let ((default (egg-guess-next-action file-modified
+					wdir-modified
+					index-clean))
 	desc key action alternatives)
     (setq alternatives (list default :status :more-options))
     (while (null action)
@@ -2288,34 +2288,34 @@ current file contains unstaged changes."
 	(setq desc
 	      (format "%s %s\n%s %s\nINDEX %s"
 		      (buffer-file-name)
-		      (if file-modified-p 
+		      (if file-modified 
 			  "contains unstaged changes"
 			"is not modified")
 		      (file-name-directory (egg-git-dir))
-		      (if wdir-modified-p
+		      (if wdir-modified
 			  "contains unstaged changes"
 			"has no unstaged changes")
-		      (if index-clean-p "is identical to HEAD"
+		      (if index-clean "is identical to HEAD"
 			"contains staged changes to commit")))
 	(setq action (egg-electric-select-action default desc)))
       (when (null action)
 	(ding)))
     action))
 
-(defun egg-next-action (&optional ask-p)
+(defun egg-next-action (&optional ask)
   (interactive "P")
   (save-some-buffers nil 'egg-is-in-git)
-  (let ((file-modified-p (not (egg-file-updated (buffer-file-name))))
-	(wdir-modified-p (not (egg-wdir-clean)))
-	(index-clean-p (egg-index-empty))
+  (let ((file-modified (not (egg-file-updated (buffer-file-name))))
+	(wdir-modified (not (egg-wdir-clean)))
+	(index-clean (egg-index-empty))
 	action default)
-     (setq action (if (or ask-p egg-next-action-prompt-p)
-		      (egg-prompt-next-action file-modified-p
-					      wdir-modified-p
-					      index-clean-p)
-		    (egg-guess-next-action file-modified-p
-					   wdir-modified-p
-					   index-clean-p)))
+     (setq action (if (or ask egg-confirm-next-action)
+		      (egg-prompt-next-action file-modified
+					      wdir-modified
+					      index-clean)
+		    (egg-guess-next-action file-modified
+					   wdir-modified
+					   index-clean)))
      
      (funcall (cdr (assq action egg-action-function-alist)))))
 
