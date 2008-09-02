@@ -1932,6 +1932,15 @@ success."
       (egg-log-buffer-do-insert-commit pos))))
 
 (defun egg-log-buffer-insert-logs (buffer)
+  ;; in process buffer
+  (when (and (processp egg-async-process)
+	     (equal (current-buffer) (process-buffer egg-async-process)))
+    (goto-char (point-min))
+    (save-match-data
+      (when (re-search-forward "^To \\(.+\\)\n\\(.+\\)$" nil t)
+	(message "%s: %s" (match-string-no-properties 1)
+		 (match-string-no-properties 2)))))
+  ;; update log buffer
   (with-current-buffer buffer
     (let ((head-info (egg-head))
 	  (orig-pos (point))
