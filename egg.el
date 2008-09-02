@@ -1815,6 +1815,22 @@ success."
     (when (egg-rm-ref force victim)
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
+(defun egg-log-buffer-fetch-remote-ref (pos)
+  (interactive "d")
+  (let* ((ref-at-point (get-text-property pos :ref))
+	 (ref (car ref-at-point))
+	 (type (cdr ref-at-point))
+	 name remote)
+    (unless (eq type :remote)
+      (error "Nothing to fetch from here!"))
+    (setq name (file-name-nondirectory ref)
+	  remote (directory-file-name
+		  (file-name-directory ref)))
+    (when (and remote name)
+      (egg-buffer-async-do nil "fetch" remote 
+			   (format "refs/heads/%s:refs/remotes/%s"
+				   name ref)))))
+
 (defun egg-log-buffer-push-to-local (pos &optional non-ff)
   (interactive "d\nP")
   (let* ((src (car (get-text-property pos :ref)))
@@ -1953,11 +1969,13 @@ success."
   ;; in process buffer
   (when (and (processp egg-async-process)
 	     (equal (current-buffer) (process-buffer egg-async-process)))
-    (goto-char (point-min))
-    (save-match-data
-      (when (re-search-forward "^To \\(.+\\)\n\\(.+\\)$" nil t)
-	(message "%s: %s" (match-string-no-properties 1)
-		 (match-string-no-properties 2)))))
+    (or 
+     (save-excursion
+       (goto-char (point-min))
+       (save-match-data
+	 (when (re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
+	   (message "%s: %s" (match-string-no-properties 1)
+		    (match-string-no-properties 2)))))))
   ;; update log buffer
   (with-current-buffer buffer
     (let ((head-info (egg-head))
