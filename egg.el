@@ -1335,23 +1335,21 @@ success."
 	(egg-sync-0 "checkout" "-b" name rev)))))
 
 (defun egg-rm-ref (&optional force name prompt default)
-  (let* ((all-refs (egg-all-refs))
+  (let* ((refs-alist (egg-ref-type-alist))
 	 (name (or name (completing-read (or prompt "remove ref: ")
-					 all-refs nil nil
+					 refs-alist nil t
 					 default)))
-	 (full-name (egg-git-to-string "show-ref" name))
-	 type)
-    (unless (stringp full-name)
+	 (type (cdr (assoc name refs-alist))))
+    (unless (and name type)
       (error "Cannot find reference %s!" name))
-    (save-match-data
-      (setq type (nth 1 (split-string 
-			 (cadr (split-string full-name nil t)) "/+" t)))
-      (cond ((string-equal "tags" type)
-	     (egg-git-ok nil "tag" "-d" name))
-	    ((string-equal "heads" type)
-	     (egg-git-ok nil "branch" (if force "-D" "-d") name))
-	    ((string-equal "remotes" type)
-	     (egg-git-ok nil "branch" (if force "-rD" "-rd") name))))))
+    (egg-show-git-output
+     (cond ((eq :tag type)
+	    (egg-sync-0 "tag" "-vd" name))
+	   ((eq :head type)
+	    (egg-sync-0 "branch" (if force "-vD" "-vd") name))
+	   ((eq :remote type)
+	    (egg-sync-0 "branch" (if force "-vrD" "-vrd") name)))
+     -1)))
 
 ;;;========================================================
 ;;; log message
@@ -1628,6 +1626,8 @@ success."
     (define-key map (kbd "d") 'egg-log-buffer-rm-ref)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
+    (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
+    (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
     map))
 
 (defconst egg-log-diff-map 
