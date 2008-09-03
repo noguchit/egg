@@ -1651,17 +1651,33 @@ success."
 ;;; log browsing
 ;;;========================================================
 (defvar egg-log-buffer-comment-column nil)
-(defconst egg-log-map 
-  (let ((map (make-sparse-keymap "Egg:Log")))
+(defconst egg-log-commit-map 
+  (let ((map (make-sparse-keymap "Egg:LogCommit")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "B") 'egg-log-buffer-create-new-branch)
     (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
-    (define-key map (kbd "d") 'egg-log-buffer-rm-ref)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
+    map))
+
+(defconst egg-log-ref-map 
+  (let ((map (make-sparse-keymap "Egg:LogRef")))
+    (set-keymap-parent map egg-log-commit-map)
+    (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
     (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
+    map))
+
+(defconst egg-log-local-ref-map 
+  (let ((map (make-sparse-keymap "Egg:LogLocalRef")))
+    (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
+    map))
+
+(defconst egg-log-remote-ref-map 
+  (let ((map (make-sparse-keymap "Egg:LogRemoteRef")))
+    (set-keymap-parent map egg-log-ref-map)
+    (define-key map (kbd "d") 'egg-log-buffer-fetch-remote-ref)
     map))
 
 (defconst egg-log-diff-map 
@@ -1686,14 +1702,14 @@ success."
     (define-key map "p" 'egg-log-buffer-prev-ref)
     map))
 
-(defun egg-decorate-log (&optional line-map)
+(defun egg-decorate-log (&optional line-map head-map tag-map remote-map)
   (let ((start (point))
 	(head-sha1 (egg-current-sha1)) 
 	(ov (make-overlay (point-min) (point-min) nil t))
 	(dec-ref-alist (egg-full-ref-decorated-alist
-			'egg-branch-mono line-map
-			'egg-tag-mono line-map
-			'egg-remote-mono 'egg-branch-mono line-map))
+			'egg-branch-mono head-map 
+			'egg-tag-mono tag-map
+			'egg-remote-mono 'egg-branch-mono remote-map))
 	(ref-alist (egg-full-ref-alist))
 	(ref-string-len 0) 
 	(dashes-len 0)
@@ -1753,9 +1769,11 @@ success."
 
 	(goto-char (match-beginning 2))
 	
-	(insert-and-inherit
-	 (concat (propertize (make-string dashes-len ?-)
-			     'face 'egg-graph)
+	(insert
+	 (concat (apply 'propertize 
+			(make-string dashes-len ?-)
+			(nconc (list 'face 'egg-graph)
+			       line-props))
 		 (if refs
 		     (concat separator ref-string separator)
 			separator)))
@@ -2033,12 +2051,49 @@ success."
 		    "--max-count=100000" "--graph" "--topo-order"
 		    "--pretty=oneline" "--decorate")
       (goto-char beg)
-      (egg-decorate-log egg-log-map)
+      (egg-decorate-log egg-log-commit-map 
+			egg-log-local-ref-map
+			egg-log-local-ref-map
+			egg-log-remote-ref-map)
       (goto-char beg))))
 
 
 (define-egg-buffer log "*%s-log@%s*"
-  "Major mode to display the output of git log."
+  "Major mode to display the output of git log.\\<egg-log-buffer-mode-map>
+Each line with a shorten sha1 representing a commit in the repo's history.
+\\[egg-log-buffer-next-ref] move the cursor to the next commit with a ref
+\\[egg-log-buffer-prev-ref] move the cursor to the previous commit line with a ref.
+\\[egg-buffer-cmd-refresh] refresh the display of the log buffer
+\\[egg-status] shows the repo's current status.
+
+\\{egg-log-buffer-mode-map}
+
+Each line representing a commit has extra keybindings:\\<egg-log-commit-map>
+\\[egg-log-buffer-insert-commit] fetch and show the commit's details.
+\\[egg-section-cmd-toggle-hide-show] hide/show the current commit's details
+\\[egg-section-cmd-toggle-hide-show-children] hide all the sub-blocks of the current commit's details.
+\\[egg-log-buffer-create-new-branch] create a new branch starting from the current commit.
+\\[egg-log-buffer-start-new-branch] start in a new branch from the current commit.
+\\[egg-log-buffer-checkout-commit] checkout the current commit.
+\\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit.
+
+\\{egg-log-commit-map}
+
+Each ref on the commit line has extra extra keybindings:\\<egg-log-ref-map>
+\\[egg-log-buffer-rm-ref] delete the ref under the cursor.
+\\[egg-log-buffer-push-to-local] update another local ref using the ref under the cursor.
+
+Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-local-ref-map>
+\\[egg-log-buffer-push-to-remote] upload to a remote the ref under the cursor.
+  for a remote-tracking local branch this would updating the tracking target.
+  for other local refs this  means uploading (or deleting) the local value
+   of the ref to the remote repository.
+
+Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-ref-map>
+\\[egg-log-buffer-fetch-remote-ref] download the new value of the ref from the remote repo.
+."
+
+
   (kill-all-local-variables)
   (setq buffer-read-only t)
   (setq major-mode 'egg-log-buffer-mode
