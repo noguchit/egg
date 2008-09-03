@@ -2443,7 +2443,20 @@ current file contains unstaged changes."
 ;;;###autoload
 (defun egg-minor-mode (&optional arg)
   "Turn-on egg-minor-mode which would enable key bindings for
-egg in current buffer."
+egg in current buffer.\\<egg-minor-mode-map>
+\\[egg-start-new-branch] start a new branch from the current HEAD.
+\\[egg-status] shows the repo's current status
+\\[egg-commit-log-edit] start editing the commit message for the current staged changes.
+\\[egg-file-stage-current-file] stage new changes of the current file 
+\\[egg-log] shows repo's history 
+\\[egg-file-checkout-other-version] checkout another version of the current file 
+\\[egg-file-cancel-modifications] delete unstaged modifications in the current file
+\\[egg-next-action] perform the next logical action
+\\[egg-file-diff] compare file with index or other commits
+\\[egg-file-version-other-window] show other version of the current file.
+
+\\{egg-minor-mode-map}
+"
   (interactive "p")
   (setq egg-minor-mode (if (null arg)
 			     (not egg-minor-mode)
