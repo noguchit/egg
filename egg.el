@@ -1651,6 +1651,9 @@ success."
 ;;; log browsing
 ;;;========================================================
 (defvar egg-log-buffer-comment-column nil)
+(defvar egg-log-buffer-git-log-args
+  '("--max-count=100000" "--graph" "--topo-order"
+    "--pretty=oneline" "--decorate"))
 (defconst egg-log-commit-map 
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
     (set-keymap-parent map egg-hide-show-map)
@@ -2047,9 +2050,9 @@ success."
 	      "\n\n")
       (setq beg (point))
       (setq inv-beg (- beg 2))
-      (call-process "git" nil t nil "log"
-		    "--max-count=100000" "--graph" "--topo-order"
-		    "--pretty=oneline" "--decorate")
+
+      (apply 'call-process "git" nil t nil "log"
+	     egg-log-buffer-git-log-args)
       (goto-char beg)
       (egg-decorate-log egg-log-commit-map 
 			egg-log-local-ref-map
@@ -2107,12 +2110,21 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
 
-(defun egg-log ()
-  (interactive)
+(defun egg-log (&optional all)
+  (interactive "P")
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
+      (when all
+	(make-local-variable 'egg-log-buffer-git-log-args)
+	(if all
+	    (unless (member "--all" egg-log-buffer-git-log-args)
+	      (setq egg-log-buffer-git-log-args
+		    (cons "--all" egg-log-buffer-git-log-args)))
+	  (when (member  "--all" egg-log-buffer-git-log-args)
+	    (setq egg-log-buffer-git-log-args
+		  (delete "--all" egg-log-buffer-git-log-args)))))
       (egg-log-buffer-insert-logs buf))
     (pop-to-buffer buf t)))
 
