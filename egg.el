@@ -1686,55 +1686,6 @@ success."
     (define-key map "p" 'egg-log-buffer-prev-ref)
     map))
 
-
-
-(defun egg-log-make-commit-line-1 (graph sha1 comment refs pref-max-len)
-  (let ((dashes (make-string (- pref-max-len 
-				(length graph)
-				1
-				(if refs (1+ (length refs)) 0)) ?-)))
-    (setq sha1 (substring sha1 0 6))
-    (put-text-property 0 (length dashes) 'face 'egg-graph dashes)
-    (put-text-property 0 (length sha1) 'face 'font-lock-constant-face
-		       sha1)
-    (put-text-property 0 (length comment) 'face 'egg-text-2 comment)
-    (concat graph " " dashes 
-	    (if refs (concat " " refs " ") " ")
-	    sha1 " " comment)))
-
-(defun egg-log-make-commit-line (graph sha1 refs-string comment 
-				       prefix-max-len)
-  (if (null refs-string)
-      (egg-log-make-commit-line-1 graph sha1 comment nil prefix-max-len)
-    (let (refs-max-len)
-      (setq refs-max-len (- prefix-max-len (length graph) 1 1 1))
-      (if (> (length refs-string) refs-max-len) 
-	  (setq refs-string (concat (substring refs-string 
-					       0 (- refs-max-len 3))
-				    "...")))
-      (egg-log-make-commit-line-1 graph sha1 comment refs-string
-				      prefix-max-len))))
-
-(defun egg-decorate-ref-alist (alist)
-  (mapcar (lambda (ref-type)
-	    (let ((name (car ref-type))
-		  (type (cdr ref-type))
-		  remote)
-	    (cond  ((eq type :type)
-		    (propertize name 'face 'egg-branch-mono
-				:ref ref-type))
-		   ((eq type :ref)
-		    (propertize name 'face 'egg-tag-mono
-				:ref ref-type))
-		   ((string= type "remotes")
-		    (propertize
-		     (concat (propertize (file-name-directory name)
-					 'face 'egg-remote-mono)
-			     (propertize (file-name-nondirectory name)
-					 'face 'egg-branch-mono))
-		     :ref (cons name :remote))))))
-	alist))
-
 (defun egg-decorate-log (&optional line-map)
   (let ((start (point))
 	(head-sha1 (egg-current-sha1)) 
@@ -1801,10 +1752,14 @@ success."
 	(setq min-dashes-len (min min-dashes-len dashes-len))
 
 	(goto-char (match-beginning 2))
-	(insert-and-inherit (make-string dashes-len ?-))
-	(when refs 
-	  (insert-and-inherit separator ref-string))
-	(insert-and-inherit separator)
+	
+	(insert-and-inherit
+	 (concat (propertize (make-string dashes-len ?-)
+			     'face 'egg-graph)
+		 (if refs
+		     (concat separator ref-string separator)
+			separator)))
+	
 	(when (string= sha1 head-sha1)
 	  (overlay-put ov 'face 'region)
 	  (overlay-put ov 'evaporate t)
