@@ -385,6 +385,49 @@ ARGS is a list of arguments to pass to PROGRAM."
 			  ((match-beginning 3) :remote)))))
 	  (egg-git-to-lines "show-ref")))
 
+(defun egg-full-ref-decorated-alist (head-face head-keymap
+					       tag-face tag-keymap
+					       remote-site-face remote-rname-face remote-keymap)
+  (mapcar (lambda (line)
+	    (when (string-match "\\`\\(?:\\S-+\\) \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n]+\\)\\)\\'" line)
+	      (let ((full-name (match-string-no-properties 1 line))
+		    (name (match-string-no-properties 5 line))
+		    (remote (and (match-end 6)
+				 (match-string-no-properties 6 line)))
+		    (rname (and (match-end 6)
+				(substring-no-properties line 
+							 (match-end 6) 
+							 (match-end 5))))) 
+		(cond ((match-beginning 2) (cons full-name
+						 (propertize name 
+							     'face head-face 
+							     'keymap head-keymap
+							     :ref (cons name :head))))
+		      ((match-beginning 3) (cons full-name
+						 (propertize name 
+							     'face tag-face 
+							     'keymap tag-keymap
+							     :ref (cons name :tag))))
+		      ((match-beginning 4) (cons full-name
+						 (concat
+						  (propertize remote
+							     'face remote-site-face
+							     'keymap remote-keymap
+							     :ref (cons name :remote))
+						  (propertize rname
+							     'face remote-rname-face
+							     'keymap remote-keymap
+							     :ref (cons name :remote)))))))))
+	  (egg-git-to-lines "show-ref")))
+
+(defun egg-full-ref-alist ()
+  (mapcar (lambda (line)
+	    (when (string-match "\\`\\(?:\\S-+\\) \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(.+\\)\\)\\'" line)
+	      (let ((full-name (match-string-no-properties 1 line))
+		    (name (match-string-no-properties 5 line)))
+		(cons full-name name))))
+	  (egg-git-to-lines "show-ref")))
+
 (defun egg-decorate-ref (full-name)
   (save-match-data
     (let (name type)
@@ -1681,8 +1724,110 @@ success."
       (egg-log-make-commit-line-1 graph sha1 comment refs-string
 				      prefix-max-len))))
 
+(defun egg-decorate-ref-alist (alist)
+  (mapcar (lambda (ref-type)
+	    (let ((name (car ref-type))
+		  (type (cdr ref-type))
+		  remote)
+	    (cond  ((eq type :type)
+		    (propertize name 'face 'egg-branch-mono
+				:ref ref-type))
+		   ((eq type :ref)
+		    (propertize name 'face 'egg-tag-mono
+				:ref ref-type))
+		   ((string= type "remotes")
+		    (propertize
+		     (concat (propertize (file-name-directory name)
+					 'face 'egg-remote-mono)
+			     (propertize (file-name-nondirectory name)
+					 'face 'egg-branch-mono))
+		     :ref (cons name :remote))))))
+	alist))
 
+;; (re-search-forward "^[ \\\\/*|]+ [0-9a-f]+ ")
 (defun egg-decorate-log (&optional line-map)
+  (let ((start (point))
+	(head-sha1 (egg-current-sha1)) 
+	(ov (make-overlay (point-min) (point-min) nil t))
+	(dec-ref-alist (egg-full-ref-decorated-alist
+			'egg-branch-mono line-map
+			'egg-tag-mono line-map
+			'egg-remote-mono 'egg-branch-mono line-map))
+	(ref-alist (egg-full-ref-alist))
+	(ref-string-len 0) 
+	(dashes-len 0)
+	(min-dashes-len 300)
+	ref-sep ref-string refs full-refs sha1
+	line-props graph-len beg end)
+    (save-excursion
+      (while (re-search-forward "^\\([ \\\\/*|]+\\) \\([0-9a-f]+\\) \\((\\(?:tag: \\)?\\([^)]+\\)) \\)?\\(.+\\)$" nil t)
+	(setq beg (match-beginning 0)
+	      end (1+ (match-end 0)))
+	(setq graph-len (- (match-end 1) (match-beginning 1)))
+	(setq sha1 (match-string-no-properties 2))
+	(setq full-refs (if (match-beginning 4)
+			    (save-match-data
+			      (split-string 
+			       (match-string-no-properties 4) "[, ]+" t))))
+	(setq refs (mapcar (lambda (full-ref-name) 
+			     (cdr (assoc full-ref-name ref-alist)))
+			   full-refs))
+
+	;; common line decorations
+	(setq line-props (list :navigation sha1 :commit sha1))
+
+	(if line-map
+	    (setq line-props (nconc (list 'keymap line-map)
+				    line-props)))
+	(when refs
+	  (setq line-props (nconc (list :references refs)
+				  line-props)))
+
+	
+	(setq ref-sep (apply 'propertize " " line-props))
+	(setq ref-string (if full-refs
+			     (mapconcat (lambda (full-ref-name)
+					  (cdr (assoc full-ref-name dec-ref-alist)))
+					full-refs ref-sep)))
+	(setq ref-string-len (if ref-string (length ref-string)))
+
+	;; entire line
+	(add-text-properties beg end line-props)
+
+	;; comment
+	(put-text-property (match-beginning 5) (match-end 5) 
+			   'face 'egg-text-2)
+	;; delete refs list (they're already parsed)
+	(when (match-beginning 3)
+	  (delete-region (match-beginning 3) (match-end 3)))
+
+	;; shorten sha
+ 	(delete-region (+ (match-beginning 2) 8) (match-end 2))
+	(put-text-property (match-beginning 2) (+ (match-beginning 2) 8)
+			   'face 'font-lock-constant-face)
+	
+	(setq dashes-len (- 300 graph-len 1 
+			    (if refs (1+ ref-string-len) 0)))
+	(setq min-dashes-len (min min-dashes-len dashes-len))
+
+	(goto-char (match-beginning 2))
+	(insert-char ?- dashes-len 'inherit)
+	(when refs 
+	  (insert-and-inherit ref-sep ref-string))
+	(insert-and-inherit ref-sep)
+	(when (string= sha1 head-sha1)
+	  (overlay-put ov 'face 'region)
+	  (overlay-put ov 'evaporate t)
+	  (move-overlay ov beg (1+ (line-end-position)))))
+      
+      (goto-char start)
+      (setq min-dashes-len (1- min-dashes-len))
+      (when (> min-dashes-len 0)
+	(let ((re (format "^[^\n-]+ \\(-\\{%d\\}\\)" min-dashes-len)))
+	  (while (re-search-forward re nil t)
+	    (delete-region (match-beginning 1) (match-end 1))))))))
+
+(defun egg-decorate-log-old (&optional line-map)
   (let ((max-prefix-len 0) dummy-0
 	(head-sha1 (egg-current-sha1)) 
 	(ov (make-overlay (point-min) (point-min) nil t))
@@ -1712,7 +1857,7 @@ success."
 				     comment
 				     ref)
 			       info-alist))))
-    (setq max-prefix-len (min max-prefix-len 50))
+;;;     (setq max-prefix-len (min max-prefix-len 60))
     (setq egg-log-buffer-comment-column (+ max-prefix-len 1 6 1))
     (dolist (info (nreverse info-alist))
       (setq graph (nth 1 info)
@@ -1978,6 +2123,7 @@ success."
 		    (match-string-no-properties 2)))))))
   ;; update log buffer
   (with-current-buffer buffer
+    (buffer-disable-undo buffer)
     (let ((head-info (egg-head))
 	  (orig-pos (point))
 	  (inhibit-read-only t)
@@ -1995,8 +2141,8 @@ success."
       (setq beg (point))
       (setq inv-beg (- beg 2))
       (call-process "git" nil t nil "log"
-		    "--max-count=1000" "--graph" "--topo-order"
-		    "--pretty=oneline" "--decorate" "--all")
+		    "--max-count=100000" "--graph" "--topo-order"
+		    "--pretty=oneline" "--decorate")
       (goto-char beg)
       (egg-decorate-log egg-log-map)
       (goto-char beg))))
