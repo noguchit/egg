@@ -135,6 +135,15 @@ Many Egg faces inherit from this one by default."
   "Face for diff file headers."
   :group 'egg)
 
+(defface egg-unmerged-diff-file-header
+  '((((class color) (background light))
+     :foreground "Red" :inherit egg-diff-file-header)
+    (((class color) (background dark))
+     :foreground "Orange" :inherit egg-diff-file-header)
+    (t :weight bold))
+  "Face for unmerged diff file headers."
+  :group 'egg)
+
 (defface egg-diff-hunk-header
   '((((class color) (background light))
      :background "grey85")
@@ -164,6 +173,14 @@ Many Egg faces inherit from this one by default."
      :foreground "red")
     (((class color) (background dark))
      :foreground "OrangeRed"))
+  "Face for lines in a diff that have been deleted."
+  :group 'egg)
+
+(defface egg-diff-conflict
+  '((((class color) (background light))
+     :foreground "Blue")
+    (((class color) (background dark))
+     :foreground "Orange"))
   "Face for lines in a diff that have been deleted."
   :group 'egg)
 
@@ -738,6 +755,12 @@ success."
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
     map))
 
+(defconst egg-unmerged-diff-section-map 
+  (let ((map (make-sparse-keymap "Egg:Diff")))
+    (set-keymap-parent map egg-unstaged-diff-section-map)
+    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff3)
+    map))
+
 (defconst egg-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-section-map)
@@ -780,6 +803,14 @@ success."
 		     (propertize (concat "\n" (match-string-no-properties no))
 				 'face
 				 'egg-diff-file-header)))
+
+(defun egg-decorate-unmerged-diff-header (no)
+  (put-text-property (match-beginning 0)
+		     (match-end 0)
+		     'display
+		     (propertize (concat "\n" (match-string-no-properties no))
+				 'face
+				 'egg-unmerged-diff-file-header)))
 
 (defun egg-decorate-diff-index-line (no)
   (put-text-property (1- (match-beginning 0))
@@ -835,13 +866,15 @@ success."
     (list name b (- end beg) (- head-end beg))))
 
 
-(defun egg-decorate-diff-sequence (beg end diff-map hunk-map regexp
+(defun egg-decorate-diff-sequence (beg end diff-map hunk-map unmerged-map
+				       regexp
 					diff-re-no
 					hunk-re-no
 					index-re-no
 					del-re-no
 					add-re-no
-					none-re-no)
+					none-re-no
+					unmerged-re-no)
   (save-match-data
     (save-excursion
       (let (sub-beg sub-end head-end last-diff-info)
@@ -876,6 +909,16 @@ success."
 			       (match-string-no-properties diff-re-no)
 			       sub-beg sub-end head-end))
 		  sub-beg sub-end (match-end 0) diff-map 'egg-compute-navigation))
+		((match-beginning unmerged-re-no) ;; unmerged
+		 (setq sub-end (or (egg-safe-search "^diff " end) end))
+		 (setq head-end (or (egg-safe-search "^@@" end) end))
+		 (egg-decorate-unmerged-diff-header unmerged-re-no)
+		 (egg-delimit-section
+		  :diff (setq last-diff-info
+			      (egg-make-diff-info
+			       (match-string-no-properties unmerged-re-no)
+			       sub-beg sub-end head-end))
+		  sub-beg sub-end (match-end 0) unmerged-map 'egg-compute-navigation))
 		((match-beginning index-re-no) ;; index
 		 (egg-decorate-diff-index-line index-re-no))
 	      
@@ -883,9 +926,9 @@ success."
 	  )	  ;; while
 	nil))))
 
-(defun egg-decorate-diff-section (beg end &optional diff-src-prefix
+(defun egg-decorate-diff-section-1 (beg end &optional diff-src-prefix
 				       diff-dst-prefix
-				       diff-map hunk-map
+				       diff-map hunk-map unmerged-map
 				       a-rev b-rev)
   (let ((a (or diff-src-prefix "a/"))
 	(b (or diff-dst-prefix "b/"))
@@ -901,12 +944,20 @@ success."
 		  "index \\(.+\\)\\|"			;3 index
 		  "\\(-.*\\)\\|"			;4 del
 		  "\\(\\+.*\\)\\|"			;5 add
-		  "\\( .*\\)"				;6 none
+		  "\\( .*\\)\\|" 			;6 none
+		  "diff --cc \\(.+\\)" 			;7 umerged
 		  "\\)$"))
-    (egg-decorate-diff-sequence beg end diff-map hunk-map
-				 regexp 1 2 3 4 5 6)))
+    (egg-decorate-diff-sequence beg end diff-map hunk-map unmerged-map
+				 regexp 1 2 3 4 5 6 7)))
 
-
+(defsubst egg-decorate-diff-section (beg end &optional diff-src-prefix
+				      diff-dst-prefix
+				      diff-map hunk-map
+				      a-rev b-rev)
+  (egg-decorate-diff-section-1 beg end diff-src-prefix
+			       diff-dst-prefix diff-map hunk-map diff-map
+			       a-rev b-rev))
+  
 (defun egg-diff-section-cmd-visit-file (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
@@ -914,6 +965,11 @@ success."
 (defun egg-diff-section-cmd-visit-file-other-window (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file-other-window file))
+
+(defun egg-diff-section-cmd-ediff3 (file)
+  (interactive (list (car (get-text-property (point) :diff))))
+  (find-file file)
+  (egg-resolve-merge-with-ediff))
 
 (defun egg-hunk-compute-line-no (hunk-header hunk-beg)
   (let ((limit (line-end-position))
@@ -1115,9 +1171,10 @@ success."
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
-    (egg-decorate-diff-section beg (point) "INDEX/" "WORKDIR/"
+    (egg-decorate-diff-section-1 beg (point) "INDEX/" "WORKDIR/"
 				egg-unstaged-diff-section-map
-				egg-unstaged-hunk-section-map)))
+				egg-unstaged-hunk-section-map
+				egg-unmerged-diff-section-map)))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg)
@@ -1328,7 +1385,8 @@ success."
 	       (setq output (nth line-no output)))
 	      (t (setq output nil)))))
     (when (stringp output)
-      (message "%s> %s" prefix output))))
+      (message "%s> %s" prefix output)
+      t)))
 
 (defun egg-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
@@ -1433,6 +1491,14 @@ success."
       (if force
 	  (egg-sync-0 "checkout" "-b" "-f" name rev)
 	(egg-sync-0 "checkout" "-b" name rev)))))
+
+(defun egg-do-move-head (rev &optional update-wdir update-index)
+  (when (egg-show-git-output
+	 (cond (update-wdir (egg-sync-0 "reset" "--hard" rev))
+	       (update-index (egg-sync-0 "reset" rev))
+	       (t (egg-sync-0 "reset" "--soft" rev)))
+	 -1 "GIT-RESET")
+    (if update-wdir (egg-revert-all-visited-files))))
 
 (defun egg-rm-ref (&optional force name prompt default)
   (let* ((refs-alist (egg-ref-type-alist))
@@ -1728,6 +1794,7 @@ success."
     (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
+    (define-key map (kbd "m") 'egg-log-buffer-move-head)
     map))
 
 (defconst egg-log-ref-map 
@@ -1885,7 +1952,7 @@ success."
     (pop-to-buffer (egg-file-get-other-version file sha1 nil t) t)
     (goto-line line)))
 
-(defun egg-log-buffer-get-rev-at (pos)
+(defun egg-log-buffer-get-rev-at (pos &optional symbolic)
   (let* ((commit (get-text-property pos :commit))
 	 (refs (get-text-property pos :references))
 	 (first-head (if (stringp refs) refs (car (last refs))))
@@ -1893,7 +1960,8 @@ success."
 	 (head-sha1 (egg-get-current-sha1)))
     (if (string= head-sha1 commit) 
 	"HEAD"
-      (or ref-at-point first-head commit))))
+      (or ref-at-point first-head 
+	  (if symbolic (egg-name-rev commit) commit)))))
 
 (defun egg-log-buffer-checkout-commit (pos)
   (interactive "d")
@@ -1923,6 +1991,19 @@ success."
 	   rev 'checkout
 	   (format "start new branch at %s with name: " rev)
 	   force))))
+
+(defun egg-log-buffer-move-head (pos &optional strict-level)
+  (interactive "d\np")
+  (let* ((rev (egg-name-rev (egg-log-buffer-get-rev-at pos t)))
+	 (update-index (> strict-level 3))
+	 (update-wdir (> strict-level 15))
+	 (prompt (format "move HEAD to %s%s? " rev
+			 (cond (update-wdir " (and update workdir)")
+			       (update-index " (and update index)")
+			       (t "")))))
+    (if (y-or-n-p prompt)
+	(egg-do-move-head rev update-wdir update-index))))
+
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
   (interactive "d\nP")
@@ -2574,6 +2655,7 @@ egg in current buffer.\\<egg-minor-mode-map>
 	 (listp (symbol-value 'vc-handled-backends)))
     (set 'vc-handled-backends
 	 (delq 'Git (symbol-value 'vc-handled-backends))))
+
 
 (add-hook 'find-file-hook 'egg-git-dir)
 (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
