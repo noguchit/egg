@@ -254,6 +254,26 @@ ARGS is a list of arguments to pass to PROGRAM."
   (save-match-data
     (split-string (egg-cmd-to-string-1 "git" args) "[\n]+" t)))
 
+(defsubst egg-file-git-name (file)
+  (car (egg-git-to-lines "ls-files" "--full-name" "--" file)))
+
+(defsubst egg-buf-git-name (&optional buf)
+  (egg-file-git-name (buffer-file-name buf)))
+
+(defsubst egg-files-git-name (files)
+  (delete-duplicates 
+   (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)
+   :test 'string-equal))
+
+(defun egg-unmerged-files ()
+  (delete-duplicates 
+   (mapcar 'car 
+	   (mapcar 'last
+		   (mapcar
+		    'split-string
+		    (egg-git-to-lines "ls-files" "--full-name" "-u"))))
+   :test 'string-equal))
+
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
   (egg-git-to-lines "rev-parse" "--symbolic" "--branches"))
@@ -306,14 +326,21 @@ ARGS is a list of arguments to pass to PROGRAM."
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (goto-char (point-min))
-    (let (lst beg)
+    (let ((beg (point-min)) 
+	  (end (point-max))
+	  lst)
       (save-match-data
-	(while (re-search-forward start-re nil t)
+	(while (and (> end beg)
+		    (not (eobp))
+		    (re-search-forward start-re nil t))
 	  (setq beg (match-beginning 0))
 	  (when (re-search-forward end-re nil t)
-	    (setq lst (cons (buffer-substring-no-properties 
-			     beg (match-beginning 0))
-			    lst)))))
+	    (setq end (match-beginning 0))
+	    (if (> end beg)
+		(setq lst (cons (buffer-substring-no-properties 
+				 beg (match-beginning 0))
+				lst)))
+	    (goto-char end))))
       lst)))
 
 (defun egg-file-as-string (file-name)
@@ -451,31 +478,72 @@ ARGS is a list of arguments to pass to PROGRAM."
 				    'face 'egg-branch-mono))
 		:ref (cons name :remote))))))))
 
-(defsubst egg-current-branch ()
-  (let* ((git-dir (egg-git-dir))
-	 HEAD) 
-    (when (stringp git-dir)
-      (setq HEAD (egg-pick-file-contents (concat git-dir "/HEAD")
-					 "^ref: refs/heads/\\(.+\\)" 1))
-      (set (intern (concat "egg-" egg-git-dir "-HEAD"))
-	   (format " Egg:%s" (or HEAD "(Detached)")))
-      HEAD)))
+(defsubst egg-get-symbolic-HEAD (&optional file)
+  (setq file (or file (concat (egg-git-dir) "/HEAD")))
+  (egg-pick-file-contents file
+			  "^ref: refs/heads/\\(.+\\)"
+			  1))
 
-(defsubst egg-current-sha1 ()
+(defsubst egg-get-current-sha1 ()
   (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
 
-(defsubst egg-head ()
+(defsubst egg-set-mode-info (state)
+  (set (intern (concat "egg-" egg-git-dir "-HEAD"))
+       (format " Git:%s" (cond ((plist-get state :merge-heads)
+				"(merging)")
+			       ((plist-get state :branch)
+				(plist-get state :branch))
+			       (t "(detached)")))))
+
+(defun egg-repo-state ()
+  (let* ((git-dir (egg-git-dir))
+	 (head-file (concat git-dir "/HEAD"))
+	 (merge-file (concat git-dir "/MERGE_HEAD"))
+	 (branch (egg-get-symbolic-HEAD head-file))
+	 (sha1 (egg-get-current-sha1))
+	 (merge-heads
+	  (mapcar 'egg-name-rev 
+		  (if (file-readable-p merge-file)
+		      (egg-pick-file-records merge-file "^" "$"))))
+	 (state (list :branch branch :sha1 sha1 :merge-heads merge-heads)))
+    (egg-set-mode-info state)
+    state))
+
+(defsubst egg-current-branch (&optional state)
+  (plist-get (or state (egg-repo-state)) :branch))
+
+(defsubst egg-current-sha1 (&optional state)
+  (plist-get (or state (egg-repo-state)) :sha1))
+
+(defsubst egg-head (&optional state)
   (if (egg-git-dir)
-      (cons (egg-current-sha1) (egg-current-branch))))
+      (let ((state (or state (egg-repo-state))))
+	(cons (egg-current-sha1 state) 
+	      (egg-current-branch state)))))
+
+(defun egg-pretty-head-string (&optional state)
+  (let* ((state (or state (egg-repo-state)))
+	 (branch (plist-get state :branch))
+	 (merge-heads (plist-get state :merge-heads))
+	 (sha1 (plist-get state :sha1)))
+    (cond ((and branch merge-heads)
+	   (concat "Merging: " branch " <- "
+		   (mapconcat 'identity merge-heads ",")))
+	  (merge-heads 
+	   (concat "Merging: (detached HEAD:" (egg-name-rev sha1) ") <- "
+		   (mapconcat 'identity merge-heads ",")))
+	  (branch branch)
+	  (t (concat "Detached HEAD: " (egg-name-rev sha1))))))
+
 
 (defun egg-config-section-raw (type &optional name)
   (egg-pick-file-contents (concat (egg-git-dir) "/config")
-			   (concat "^"
-				   (if name (format "\\[%s \"%s\"\\]" type name)
-				     (format "\\[%s\\]" type))
-				   "\n"
-				   "\\(\\(?:\t.+\n\\)+\\)")
-			   1))
+			  (concat "^"
+				  (if name (format "\\[%s \"%s\"\\]" type name)
+				    (format "\\[%s\\]" type))
+				  "\n"
+				  "\\(\\(?:\t.+\n\\)+\\)")
+			  1))
 
 (defsubst egg-config-section (type &optional name)
   (save-match-data
@@ -500,7 +568,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 		      (split-string str "[\t\n]+" t))
 		    (egg-pick-file-records file
 					   (concat "^\\[" type " \"")
-					   "^\\[")))))
+					   "^\\[\\|\\'")))))
 
 (defsubst egg-config-get-all-branches ()
   (egg-config-get-all (concat (egg-git-dir) "/config") "branch"))
@@ -1009,13 +1077,11 @@ success."
 ;;;========================================================
 
 (defun egg-sb-insert-repo-section ()
-  (let ((head-info (egg-head))
-	(beg (point))
-	inv-beg)
-    (insert (propertize (or (cdr head-info) 
-			    (format "Detached HEAD: %s"
-				    (egg-name-rev (car head-info))))
-			'face 'egg-branch) 
+  (let* ((head-info (egg-head))
+	 (beg (point))
+	 (rev-name (egg-name-rev (car head-info)))
+	 inv-beg)
+    (insert (propertize (egg-pretty-head-string) 'face 'egg-branch) 
 		"\n"
 		(propertize (car head-info) 'face 'font-lock-string-face)
 		"\n"
@@ -1707,7 +1773,7 @@ success."
 
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map)
   (let ((start (point))
-	(head-sha1 (egg-current-sha1)) 
+	(head-sha1 (egg-get-current-sha1)) 
 	(ov (make-overlay (point-min) (point-min) nil t))
 	(dec-ref-alist (egg-full-ref-decorated-alist
 			'egg-branch-mono head-map 
@@ -1824,7 +1890,7 @@ success."
 	 (refs (get-text-property pos :references))
 	 (first-head (if (stringp refs) refs (car (last refs))))
 	 (ref-at-point (car (get-text-property pos :ref)))
-	 (head-sha1 (egg-current-sha1)))
+	 (head-sha1 (egg-get-current-sha1)))
     (if (string= head-sha1 commit) 
 	"HEAD"
       (or ref-at-point first-head commit))))
@@ -2116,15 +2182,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
-      (when all
-	(make-local-variable 'egg-log-buffer-git-log-args)
-	(if all
-	    (unless (member "--all" egg-log-buffer-git-log-args)
-	      (setq egg-log-buffer-git-log-args
-		    (cons "--all" egg-log-buffer-git-log-args)))
-	  (when (member  "--all" egg-log-buffer-git-log-args)
+      (make-local-variable 'egg-log-buffer-git-log-args)
+      (if all
+	  (unless (member "--all" egg-log-buffer-git-log-args)
 	    (setq egg-log-buffer-git-log-args
-		  (delete "--all" egg-log-buffer-git-log-args)))))
+		  (cons "--all" egg-log-buffer-git-log-args)))
+	(when (member  "--all" egg-log-buffer-git-log-args)
+	  (setq egg-log-buffer-git-log-args
+		(delete "--all" egg-log-buffer-git-log-args)))) 
       (egg-log-buffer-insert-logs buf))
     (pop-to-buffer buf t)))
 
@@ -2136,8 +2201,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
-  (let ((git-file (egg-git-to-string "ls-files" "--full-name" "--" 
-				     (buffer-file-name)))
+  (let ((git-file (egg-buf-git-name))
 	(src-rev (and ask (egg-read-rev "diff against: " "HEAD")))
 	buf)
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file))) 
@@ -2188,8 +2252,7 @@ current file contains unstaged changes."
 				   rev ":0")))
 	 (prompt (or prompt (format "%s's version: " file)))
 	 (rev (or rev (egg-read-rev prompt rbranch ":0")))
-	 (canon-name (egg-git-to-string "ls-files" "--full-name" "--" 
-					file))
+	 (canon-name (egg-file-git-name file))
 	 (git-name (concat rev ":" canon-name))
 	 (buf (get-buffer-create (concat "*" git-name "*"))))
     (with-current-buffer buf
@@ -2204,13 +2267,13 @@ current file contains unstaged changes."
 	(setq buffer-read-only t)))
     buf))
 
-(defun egg-file-version-other-window ()
+(defun egg-file-version-other-window (&optional ask)
   "Show other version of the current file in another window."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let ((buf (egg-file-get-other-version
-	      (buffer-file-name) nil 
+	      (buffer-file-name) (if ask nil ":0")
 	      (format "show %s's version:" (buffer-file-name))
 	      t)))
     (unless (bufferp buf)
@@ -2236,6 +2299,17 @@ current file contains unstaged changes."
     (unless (and (bufferp dst-buf) (bufferp src-buf))
       (error "Ooops!"))
     (ediff-buffers dst-buf src-buf)))
+
+(defun egg-resolve-merge-with-ediff (&optional what)
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let* ((file buffer-file-name)
+	 (ours (egg-file-get-other-version file ":2" nil t))
+	 (theirs (egg-file-get-other-version file ":3" nil t)))
+    (unless (and (bufferp ours) (bufferp theirs))
+      (error "Ooops!"))
+    (ediff-buffers3 ours (current-buffer) theirs)))
 
 (defconst egg-key-action-alist 
   '((?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
@@ -2450,7 +2524,7 @@ current file contains unstaged changes."
   :type 'string
   :set 'egg-mode-key-prefix-set)
 
-(defvar egg-minor-mode-name " Egg")
+(defvar egg-minor-mode-name " Git")
 
 ;;;###autoload
 (defun egg-minor-mode (&optional arg)
