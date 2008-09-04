@@ -26,7 +26,7 @@
 
 (require 'cl)
 (require 'electric)
-(require 'thingatpt)
+(require 'ediff)
 
 (defgroup egg nil
   "Controlling Git from Emacs."
@@ -796,40 +796,23 @@ success."
       (and (re-search-forward re limit t)
 	   (match-beginning (or no 0))))))
 
-(defun egg-decorate-diff-header (no)
-  (put-text-property (match-beginning 0)
-		     (match-end 0)
-		     'display
-		     (propertize (concat "\n" (match-string-no-properties no))
-				 'face
-				 'egg-diff-file-header)))
+(defsubst egg-decorate-diff-header (beg end line-beg line-end)
+  (put-text-property line-beg beg 'display "\n")
+  (put-text-property end line-end 'display "    ")
+  (put-text-property beg end 'face 'egg-diff-file-header))
 
-(defun egg-decorate-unmerged-diff-header (no)
-  (put-text-property (match-beginning 0)
-		     (match-end 0)
-		     'display
-		     (propertize (concat "\n" (match-string-no-properties no))
-				 'face
-				 'egg-unmerged-diff-file-header)))
+(defsubst egg-decorate-cc-diff-header (beg end line-beg line-end)
+  (put-text-property line-beg beg 'display "\n")
+  (put-text-property end line-end 'display " ")
+  (put-text-property beg end 'face 'egg-unmerged-diff-file-header))
 
-(defun egg-decorate-diff-index-line (no)
-  (put-text-property (1- (match-beginning 0))
-		     (match-end 0)
-		     'display
-		     (propertize 
-		      (concat "\t-- "
-			      (match-string-no-properties no))
-		      'face 'egg-diff-none)))
+(defsubst egg-decorate-diff-index-line (beg end line-beg line-end)
+  (put-text-property (1- line-beg) beg 'display "-- ")
+  (put-text-property beg end 'face 'egg-diff-none))
 
-(defun egg-decorate-hunk-header (no)
-  (put-text-property (match-beginning no)
-		     (match-end no)
-		     'face
-		     'egg-diff-hunk-header)
-  (put-text-property (match-end no)
-		     (match-end 0)
-		     'face
-		     'egg-diff-none))
+(defsubst egg-decorate-hunk-header (beg end line-beg line-end)
+  (put-text-property beg end 'face 'egg-diff-hunk-header)
+  (put-text-property end line-end 'face 'egg-diff-none))
 
 (defun egg-compute-navigation (sect-type section beg end)
   (let ((current-nav (get-text-property beg :navigation))
@@ -865,66 +848,132 @@ success."
     (set-marker-insertion-type b t)
     (list name b (- end beg) (- head-end beg))))
 
+(defun egg-decorate-diff-sequence (&rest args)
+  (let* ((beg		(plist-get args	:begin))
+	 (end		(plist-get args	:end))
+	 (diff-map 	(plist-get args	:diff-map))
+	 (hunk-map 	(plist-get args	:hunk-map))
+	 (cc-diff-map 	(plist-get args	:cc-diff-map))
+	 (cc-hunk-map 	(plist-get args	:cc-hunk-map))
+	 (a 		(plist-get args	:src-prefix))
+	 (b 		(plist-get args	:dst-prefix))
 
-(defun egg-decorate-diff-sequence (beg end diff-map hunk-map unmerged-map
-				       regexp
-					diff-re-no
-					hunk-re-no
-					index-re-no
-					del-re-no
-					add-re-no
-					none-re-no
-					unmerged-re-no)
-  (save-match-data
-    (save-excursion
-      (let (sub-beg sub-end head-end last-diff-info)
+	 (diff-no	1)
+	 (cc-diff-no	2)
+	 (hunk-no	3)
+	 (cc-hunk-no	4)
+	 (src-no 	5)
+	 (dst-no 	6)
+	 (index-no	7)
+	 (conf-beg-no	8)
+	 (conf-div-no	9)
+	 (conf-end-no	10)
+	 (del-no 	11)
+	 (add-no 	12)
+	 (none-no	13)
+
+	 (regexp
+	  (concat "^\\(?:"
+		  "diff --git " a ".+" b "\\(.+\\)\\|"	;1 diff header
+		  "diff --cc \\(.+\\)\\|"		;2 cc-diff header
+		  "\\(@@ .+@@\\).*\\|"			;3 hunk
+		  "\\(@@@ .+@@@\\).*\\|"		;4 cc-hunk
+		  "--- " a "\\(.+\\)\\|"		;5 src
+		  "\\+\\+\\+ " b "\\(.+\\)\\|"		;6 dst
+		  "index \\(.+\\)\\|"			;7 index
+		  "++<<<<<<< \\(.+\\)\\|"		;8 conflict start
+		  "\\(++=======\\)\\|"			;9 conflict div
+		  "++>>>>>>> \\(.+\\)\\|"		;10 conflict end
+		  "\\(-.*\\)\\|"			;11 del
+		  "\\(\\+.*\\)\\|"			;12 add
+		  "\\( .*\\)"				;13 none
+		  "\\)$"))
+
+	 (hunk-end-re "^\\(?:diff\\|@@\\)")
+	 (diff-end-re "^diff ")
+	 
+	 sub-beg sub-end head-end m-b-0 m-e-0 m-b-x m-e-x 
+	 last-diff last-cc)
+
+    (save-match-data
+      (save-excursion
 	(goto-char beg)
 	(while (re-search-forward regexp end t)
-	  (setq sub-beg (match-beginning 0))
-	  (cond ((match-beginning del-re-no) ;; del
-		 (put-text-property (match-beginning 0) (match-end 0)
-				    'face 'egg-diff-del))
-		((match-beginning add-re-no) ;; add
-		 (put-text-property (match-beginning 0) (match-end 0)
-				    'face 'egg-diff-add))
-		((match-beginning none-re-no) ;; unchanged
-		 (put-text-property (match-beginning 0) (match-end 0)
-				    'face 'egg-diff-none))
-		((match-beginning hunk-re-no) ;; hunk
-		 (setq sub-end (or (egg-safe-search "^\\(?:diff\\|@@\\)" end)
+	  (setq sub-beg (match-beginning 0)
+		m-b-0 sub-beg
+		m-e-0 (match-end 0)) 
+	  (cond ((match-beginning del-no) ;; del
+		 (put-text-property m-b-0 m-e-0 'face 'egg-diff-del))
+
+		((match-beginning add-no) ;; add
+		 (put-text-property m-b-0 m-e-0 'face 'egg-diff-add))
+
+		((match-beginning none-no) ;; unchanged
+		 (put-text-property m-b-0 m-e-0 'face 'egg-diff-none))
+
+		((match-beginning hunk-no) ;; hunk
+		 (setq m-b-x (match-beginning hunk-no)
+		       m-e-x (match-end hunk-no)
+		       sub-end (or (egg-safe-search hunk-end-re end)
 				   end))
-		 (egg-decorate-hunk-header hunk-re-no)
+		 (egg-decorate-hunk-header m-b-x m-e-x m-b-0 m-e-0)
 		 (egg-delimit-section 
 		  :hunk (egg-make-hunk-info 
-			 (match-string-no-properties hunk-re-no)
-			 sub-beg sub-end last-diff-info)
-		  sub-beg sub-end (match-end 0) hunk-map 'egg-compute-navigation))
-		((match-beginning diff-re-no) ;; diff
-		 (setq sub-end (or (egg-safe-search "^diff " end) end))
-		 (setq head-end (or (egg-safe-search "^@@" end) end))
-		 (egg-decorate-diff-header diff-re-no)
+			 (match-string-no-properties hunk-no)
+			 sub-beg sub-end last-diff)
+		  sub-beg sub-end m-e-0 hunk-map 
+		  'egg-compute-navigation))
+
+		((match-beginning cc-hunk-no) ;; cc-hunk
+		 (setq m-b-x (match-beginning cc-hunk-no)
+		       m-e-x (match-end cc-hunk-no)
+		       sub-end (or (egg-safe-search hunk-end-re end)
+				   end))
+		 (egg-decorate-hunk-header m-b-x m-e-x m-b-0 m-e-0)
+		 (egg-delimit-section 
+		  :hunk (egg-make-hunk-info 
+			 (match-string-no-properties cc-hunk-no)
+			 sub-beg sub-end last-cc)
+		  sub-beg sub-end m-e-0 cc-hunk-map 
+		  'egg-compute-navigation))
+
+		((match-beginning diff-no) ;; diff
+		 (setq m-b-x (match-beginning diff-no)
+		       m-e-x (match-end diff-no)
+		       sub-end (or (egg-safe-search diff-end-re end) end)
+		       head-end (or (egg-safe-search "^@@" end) end))
+		 (egg-decorate-diff-header m-b-x m-e-x m-b-0 m-e-0)
 		 (egg-delimit-section
-		  :diff (setq last-diff-info
+		  :diff (setq last-diff
 			      (egg-make-diff-info
-			       (match-string-no-properties diff-re-no)
+			       (match-string-no-properties diff-no)
 			       sub-beg sub-end head-end))
-		  sub-beg sub-end (match-end 0) diff-map 'egg-compute-navigation))
-		((match-beginning unmerged-re-no) ;; unmerged
-		 (setq sub-end (or (egg-safe-search "^diff " end) end))
-		 (setq head-end (or (egg-safe-search "^@@" end) end))
-		 (egg-decorate-unmerged-diff-header unmerged-re-no)
+		  sub-beg sub-end m-e-0 diff-map 'egg-compute-navigation))
+
+		((match-beginning cc-diff-no) ;; cc-diff
+		 (setq m-b-x (match-beginning cc-diff-no)
+		       m-e-x (match-end cc-diff-no)
+		       sub-end (or (egg-safe-search diff-end-re end) end)
+		       head-end (or (egg-safe-search "^@@@" end) end))
+		 (egg-decorate-cc-diff-header m-b-x m-e-x m-b-0 m-e-0)
 		 (egg-delimit-section
-		  :diff (setq last-diff-info
+		  :diff (setq last-cc
 			      (egg-make-diff-info
-			       (match-string-no-properties unmerged-re-no)
+			       (match-string-no-properties diff-no)
 			       sub-beg sub-end head-end))
-		  sub-beg sub-end (match-end 0) unmerged-map 'egg-compute-navigation))
-		((match-beginning index-re-no) ;; index
-		 (egg-decorate-diff-index-line index-re-no))
-	      
+		  sub-beg sub-end m-e-0 cc-diff-map
+		  'egg-compute-navigation))
+
+		((match-beginning index-no) ;; index
+		 (setq m-b-x (match-beginning index-no)
+		       m-e-x (match-end index-no))
+		 (egg-decorate-diff-index-line m-b-x m-e-x m-b-0 m-b-0))
 		) ;; cond
-	  )	  ;; while
-	nil))))
+	  ) ;; while
+	) ;; save-excursion
+      ) ;;; save -match-data
+
+    nil))
 
 (defun egg-decorate-diff-section-1 (beg end &optional diff-src-prefix
 				       diff-dst-prefix
@@ -937,18 +986,13 @@ success."
       (put-text-property beg end :a-revision a-rev))
     (when (stringp b-rev)
       (put-text-property beg end :b-revision b-rev))
-    (setq regexp
-	  (concat "^\\(?:"
-		  "diff --git " a "\\(.+\\) " b ".+\\|" ;1 file
-		  "\\(@@ .+@@\\).*\\|"			;2 hunk
-		  "index \\(.+\\)\\|"			;3 index
-		  "\\(-.*\\)\\|"			;4 del
-		  "\\(\\+.*\\)\\|"			;5 add
-		  "\\( .*\\)\\|" 			;6 none
-		  "diff --cc \\(.+\\)" 			;7 umerged
-		  "\\)$"))
-    (egg-decorate-diff-sequence beg end diff-map hunk-map unmerged-map
-				 regexp 1 2 3 4 5 6 7)))
+    (egg-decorate-diff-sequence :begin beg :end end
+				:diff-map diff-map
+				:hunk-map hunk-map
+				:cc-diff-map unmerged-map
+				:cc-hunk-map hunk-map
+				:src-prefix a
+				:dst-prefix b)))
 
 (defsubst egg-decorate-diff-section (beg end &optional diff-src-prefix
 				      diff-dst-prefix
