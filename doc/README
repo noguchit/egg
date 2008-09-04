@@ -1,4 +1,4 @@
-LGit is an experimental clone of Magit
+Egg is an experimental clone of Magit
 
 MAGIT:
 ======
@@ -9,13 +9,13 @@ as an extension to Emacs by Marius Voller.
 Please find his code at: http://zagadka.vm.bytemark.co.uk/magit
 
 
-LGIT:
+EGG:
 =====
 
-The design and most ideas in LGit was borrowed/stolen from Magit.
+The design and most ideas in Egg was borrowed/stolen from Magit.
 
-LGit is Magit pushed to the side of flash UI while Magit was more about
+Egg is Magit pushed to the side of flash UI while Magit was more about
 functionalites.
 
 
-This is the probably the END.
+The END.
