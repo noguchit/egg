@@ -871,7 +871,7 @@ success."
     (set-marker-insertion-type b t)
     (list name b (- end beg) (- head-end beg))))
 
-(defun egg-decorate-diff-sequence (&rest args)
+(defun egg-decorate-diff-sequence (args)
   (let* ((beg		(plist-get args	:begin))
 	 (end		(plist-get args	:end))
 	 (diff-map 	(plist-get args	:diff-map))
@@ -1031,26 +1031,7 @@ success."
 
     nil))
 
-(defun egg-decorate-diff-section-1 (beg end &optional diff-src-prefix
-				       diff-dst-prefix
-				       diff-map hunk-map unmerged-map
-				       a-rev b-rev)
-  (let ((a (or diff-src-prefix "a/"))
-	(b (or diff-dst-prefix "b/"))
-	regexp)
-    (when (stringp a-rev)
-      (put-text-property beg end :a-revision a-rev))
-    (when (stringp b-rev)
-      (put-text-property beg end :b-revision b-rev))
-    (egg-decorate-diff-sequence :begin beg :end end
-				:diff-map diff-map
-				:hunk-map hunk-map
-				:cc-diff-map unmerged-map
-				:cc-hunk-map hunk-map
-				:src-prefix a
-				:dst-prefix b)))
-
-(defun egg-decorate-diff-section-2 (&rest args)
+(defun egg-decorate-diff-section (&rest args)
   (let ((beg (plist-get args	 :begin))
 	(end (plist-get args	 :end))
 	(a   (or (plist-get args :src-prefix) "a/"))
@@ -1061,19 +1042,8 @@ success."
       (put-text-property beg end :a-revision a-rev))
     (when (stringp b-rev)
       (put-text-property beg end :b-revision b-rev))
-    (apply 'egg-decorate-diff-sequence
-	   (nconc (list :src-prefix a :dst-prefix b)
-		  args))))
-
-
-
-(defsubst egg-decorate-diff-section (beg end &optional diff-src-prefix
-				      diff-dst-prefix
-				      diff-map hunk-map
-				      a-rev b-rev)
-  (egg-decorate-diff-section-1 beg end diff-src-prefix
-			       diff-dst-prefix diff-map hunk-map diff-map
-			       a-rev b-rev))
+    (egg-decorate-diff-sequence 
+     (nconc (list :src-prefix a :dst-prefix b) args))))
   
 (defun egg-diff-section-cmd-visit-file (file)
   (interactive (list (car (get-text-property (point) :diff))))
@@ -1289,16 +1259,16 @@ success."
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
-    (egg-decorate-diff-section-2 :begin diff-beg 
-				 :end (point) 
-				 :src-prefix "INDEX:/"
-				 :dst-prefix "WORKDIR:/"
-				 :diff-map egg-unstaged-diff-section-map
-				 :hunk-map egg-unstaged-hunk-section-map
-				 :cc-diff-map egg-unmerged-diff-section-map
-				 :cc-hunk-map egg-unmerged-hunk-section-map
-				 :conflict-map egg-unmerged-hunk-section-map
-				 )))
+    (egg-decorate-diff-section :begin diff-beg 
+			       :end (point) 
+			       :src-prefix "INDEX:/"
+			       :dst-prefix "WORKDIR:/"
+			       :diff-map egg-unstaged-diff-section-map
+			       :hunk-map egg-unstaged-hunk-section-map
+			       :cc-diff-map egg-unmerged-diff-section-map
+			       :cc-hunk-map egg-unmerged-hunk-section-map
+			       :conflict-map egg-unmerged-hunk-section-map
+			       )))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg diff-beg)
@@ -1312,12 +1282,12 @@ success."
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
-    (egg-decorate-diff-section-2 :begin diff-beg 
-				 :end (point) 
-				 :src-prefix "HEAD:/"
-				 :dst-prefix "INDEX:/"
-				 :diff-map egg-staged-diff-section-map
-				 :hunk-map egg-staged-hunk-section-map)))
+    (egg-decorate-diff-section :begin diff-beg 
+			       :end (point) 
+			       :src-prefix "HEAD:/"
+			       :dst-prefix "INDEX:/"
+			       :diff-map egg-staged-diff-section-map
+			       :hunk-map egg-staged-hunk-section-map)))
 
 (defun egg-checkout-ref (&optional default)
   (interactive (list (car (get-text-property (point) :ref))))
@@ -1823,14 +1793,14 @@ success."
       (insert prologue "\n")
       (apply 'call-process "git" nil t nil "diff" args)
       (egg-delimit-section :section 'top-level (point-min) (point))
-      (egg-decorate-diff-section-2 :begin (point-min)
-				   :end (point)
-				   :src-prefix src-prefix
-				   :dst-prefix dst-prefix
-				   :diff-map diff-map
-				   :hunk-map hunk-map
-				   :a-revision src-rev
-				   :b-revision dst-rev))))
+      (egg-decorate-diff-section :begin (point-min)
+				 :end (point)
+				 :src-prefix src-prefix
+				 :dst-prefix dst-prefix
+				 :diff-map diff-map
+				 :hunk-map hunk-map
+				 :a-revision src-rev
+				 :b-revision dst-rev))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
   "Major mode to display the git diff output."
@@ -2283,10 +2253,10 @@ success."
       (setq end (point))
       (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
-      (egg-decorate-diff-section-2 :begin beg
-				   :end end
-				   :diff-map egg-log-diff-map
-				   :hunk-map egg-log-hunk-map)
+      (egg-decorate-diff-section :begin beg
+				 :end end
+				 :diff-map egg-log-diff-map
+				 :hunk-map egg-log-hunk-map)
       (goto-char beg)
       (setq end (next-single-property-change beg :diff))
       (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
