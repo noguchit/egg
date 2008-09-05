@@ -790,6 +790,14 @@ success."
   (interactive)
   (message "tp: %S" (text-properties-at (point))))
 
+(defun list-nav ()
+  (interactive)
+  (message "nav: %c:%s-%c:%s" 
+	   (preceding-char)
+	   (get-text-property (1- (point)) :navigation)
+	   (following-char)
+	   (get-text-property (point) :navigation)))
+
 (defun egg-safe-search (re limit &optional no)
   (save-excursion
     (save-match-data
@@ -807,7 +815,7 @@ success."
   (put-text-property beg end 'face 'egg-unmerged-diff-file-header))
 
 (defsubst egg-decorate-diff-index-line (beg end line-beg line-end)
-  (put-text-property (1- line-beg) beg 'display "-- ")
+  (put-text-property (1- line-beg) beg 'display "    -- ")
   (put-text-property beg end 'face 'egg-diff-none))
 
 (defsubst egg-decorate-hunk-header (beg end line-beg line-end)
@@ -1206,32 +1214,34 @@ success."
 			  inv-beg egg-section-map 'untracked)))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
-  (let ((beg (point)) inv-beg)
+  (let ((beg (point)) inv-beg diff-beg)
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
 	    "\n")
+    (setq diff-beg (point))
     (setq inv-beg (1- (point)))
     (apply 'call-process "git" nil t nil "diff" "--no-color"  "-p"
 	   "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/"
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
-    (egg-decorate-diff-section-1 beg (point) "INDEX/" "WORKDIR/"
+    (egg-decorate-diff-section-1 diff-beg (point) "INDEX/" "WORKDIR/"
 				egg-unstaged-diff-section-map
 				egg-unstaged-hunk-section-map
 				egg-unmerged-diff-section-map)))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
-  (let ((beg (point)) inv-beg)
+  (let ((beg (point)) inv-beg diff-beg)
     (insert (egg-prepend title "\n\n"
 			  'face 'egg-section-title)
 	    "\n")
-    (setq inv-beg (1- (point)))
+    (setq diff-beg (point)
+	  inv-beg (1- diff-beg))
     (apply 'call-process "git" nil t nil "diff" "--no-color" "--cached" "-p"
 	   "--src-prefix=HEAD/" "--dst-prefix=INDEX/"
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
-    (egg-decorate-diff-section beg (point) "HEAD/" "INDEX/"
+    (egg-decorate-diff-section diff-beg (point) "HEAD/" "INDEX/"
 				egg-staged-diff-section-map
 				egg-staged-hunk-section-map)))
 
