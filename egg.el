@@ -377,6 +377,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-name-rev (rev)
   (egg-git-to-string "name-rev" "--always" "--name-only" rev))
 
+(defsubst egg-sha1 (rev)
+  (egg-git-to-string "rev-parse" (concat rev "~0")))
+
 (defun egg-read-git-dir ()
   (let ((dir (egg-git-to-string "rev-parse" "--git-dir")))
     (if (stringp dir) 
@@ -1603,25 +1606,21 @@ success."
 (defun egg-do-merge-to-head (rev &optional no-commit)
   (let ((msg (concat "merging in " rev))
 	(commit-flag (if no-commit "--no-commit" "--commit"))
-	file merge-cmd-res merged-files conflicted-files 
-	res feed-back)
+	(pre-merge (egg-get-current-sha1))
+	merge-cmd-res modified-files res feed-back)
     (with-temp-buffer
       (setq merge-cmd-res (egg-git-ok (current-buffer)
 		      "merge" "--log" commit-flag "-m" msg rev))
       (goto-char (point-min))
-      (while (re-search-forward "^Auto-merged \\(.+\\)$" nil t)
-	(setq file (match-string-no-properties 1))
-	(if (egg-safe-search (concat "^CONFLICT.+ conflict in " file) nil)
-	    (add-to-list 'conflicted-files file)
-	  (add-to-list 'merged-files (match-string-no-properties 1) t)))
+      (setq modified-files 
+	    (egg-git-to-lines "diff" "--name-only" pre-merge))
       (setq feed-back
 	    (save-match-data
 	      (car (nreverse (split-string (buffer-string)
 					   "[\n]+" t)))))
       (run-hooks 'egg-buffers-refresh-hook)
       (list :success merge-cmd-res
-	    :merged-files merged-files
-	    :unmerged-files conflicted-files
+	    :files modified-files
 	    :message feed-back))))
 
 (defun egg-rm-ref (&optional force name prompt default)
@@ -2094,18 +2093,18 @@ success."
 (defun egg-log-buffer-merge (pos &optional no-commit)
   (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos))
-	res merged-files unmerged-files buf)
+	res modified-files buf)
     (unless (egg-repo-clean)
       (egg-status) 
       (error "Repo is not clean!"))
     (if  (null (y-or-n-p (format "merge %s to HEAD? " rev)))
 	(message "cancel merge from %s to HEAD!" rev)
       (setq res (egg-do-merge-to-head rev no-commit))
-      (setq merged-files (plist-get res :merged-files)
-	    unmerged-files (plist-get res :unmerged-files))
-      (egg-revert-visited-files (append merged-files unmerged-files)) 
+      (setq modified-files (plist-get res :files))
+      (if modified-files
+	  (egg-revert-visited-files modified-files)) 
       (message "GIT-MERGE: %s" (plist-get res :message))
-      (unless (plist-get res :success)
+      (unless (and (plist-get res :success) (null no-commit))
 	(egg-status)))))
 
 (defun egg-log-buffer-checkout-commit (pos)
