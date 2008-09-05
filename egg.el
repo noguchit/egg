@@ -873,6 +873,7 @@ success."
 	 (hunk-map 	(plist-get args	:hunk-map))
 	 (cc-diff-map 	(plist-get args	:cc-diff-map))
 	 (cc-hunk-map 	(plist-get args	:cc-hunk-map))
+	 (conflict-map 	(plist-get args	:conflict-map))
 	 (a 		(plist-get args	:src-prefix))
 	 (b 		(plist-get args	:dst-prefix))
 
@@ -899,9 +900,9 @@ success."
 		  "--- " a "\\(.+\\)\\|"		;5 src
 		  "\\+\\+\\+ " b "\\(.+\\)\\|"		;6 dst
 		  "index \\(.+\\)\\|"			;7 index
-		  "++<<<<<<< \\(.+\\)\\|"		;8 conflict start
+		  "++<<<<<<< \\(.+\\):.+\\|"		;8 conflict start
 		  "\\(++=======\\)\\|"			;9 conflict div
-		  "++>>>>>>> \\(.+\\)\\|"		;10 conflict end
+		  "++>>>>>>> \\(.+\\):.+\\|"		;10 conflict end
 		  "\\(-.*\\)\\|"			;11 del
 		  "\\(\\+.*\\)\\|"			;12 add
 		  "\\( .*\\)"				;13 none
@@ -928,6 +929,38 @@ success."
 
 		((match-beginning none-no) ;; unchanged
 		 (put-text-property m-b-0 m-e-0 'face 'egg-diff-none))
+
+		((match-beginning dst-no) ;; +++ b/file
+		 (setq m-b-x (match-beginning dst-no)
+		       m-e-x (match-end dst-no))
+		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-add)
+		 (put-text-property m-b-x m-e-x 'face 'egg-diff-none))
+
+		((match-beginning src-no) ;; --- a/file
+		 (setq m-b-x (match-beginning src-no)
+		       m-e-x (match-end src-no))
+		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-del)
+		 (put-text-property m-b-x m-e-x 'face 'egg-diff-none))
+
+		((match-beginning conf-beg-no)
+		 (setq m-b-x (match-beginning conf-beg-no)
+		       m-e-x (match-end conf-beg-no))
+		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-conflict)
+		 (put-text-property m-b-x m-e-x 'face 'egg-branch-mono)
+		 (put-text-property m-e-x m-e-0 'face 'egg-diff-none)
+		 (setq sub-end (egg-safe-search "^++>>>>>>>.+$" end))
+		 (put-text-property m-b-0 sub-end 'keymap
+				    conflict-map))
+
+		((match-beginning conf-end-no)
+		 (setq m-b-x (match-beginning conf-end-no)
+		       m-e-x (match-end conf-end-no))
+		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-conflict)
+		 (put-text-property m-b-x m-e-x 'face 'egg-branch-mono)
+		 (put-text-property m-e-x m-e-0 'face 'egg-diff-none))
+
+		((match-beginning conf-div-no)
+		 (put-text-property m-b-0 m-e-0 'face 'egg-diff-conflict))
 
 		((match-beginning hunk-no) ;; hunk
 		 (setq m-b-x (match-beginning hunk-no)
@@ -1230,11 +1263,11 @@ success."
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
     (apply 'call-process "git" nil t nil "diff" "--no-color"  "-p"
-	   "--src-prefix=INDEX/" "--dst-prefix=WORKDIR/"
+	   "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
-    (egg-decorate-diff-section-1 diff-beg (point) "INDEX/" "WORKDIR/"
+    (egg-decorate-diff-section-1 diff-beg (point) "INDEX:/" "WORKDIR:/"
 				egg-unstaged-diff-section-map
 				egg-unstaged-hunk-section-map
 				egg-unmerged-diff-section-map)))
@@ -1247,11 +1280,11 @@ success."
     (setq diff-beg (point)
 	  inv-beg (1- diff-beg))
     (apply 'call-process "git" nil t nil "diff" "--no-color" "--cached" "-p"
-	   "--src-prefix=HEAD/" "--dst-prefix=INDEX/"
+	   "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
-    (egg-decorate-diff-section diff-beg (point) "HEAD/" "INDEX/"
+    (egg-decorate-diff-section diff-beg (point) "HEAD:/" "INDEX:/"
 				egg-staged-diff-section-map
 				egg-staged-hunk-section-map)))
 
