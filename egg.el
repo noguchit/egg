@@ -1781,10 +1781,6 @@ success."
 	  (prologue (plist-get egg-diff-buffer-info :prologue))
 	  (src-prefix (plist-get egg-diff-buffer-info :src))
 	  (dst-prefix (plist-get egg-diff-buffer-info :dst))
-	  (src-rev (plist-get egg-diff-buffer-info :src-revision))
-	  (dst-rev (plist-get egg-diff-buffer-info :dst-revision))
-	  (diff-map (plist-get egg-diff-buffer-info :diff-map))
-	  (hunk-map (plist-get egg-diff-buffer-info :hunk-map))
 	  (inhibit-read-only t)
 	  pos inv-beg)
       (erase-buffer)
@@ -1793,14 +1789,12 @@ success."
       (insert prologue "\n")
       (apply 'call-process "git" nil t nil "diff" args)
       (egg-delimit-section :section 'top-level (point-min) (point))
-      (egg-decorate-diff-section :begin (point-min)
-				 :end (point)
-				 :src-prefix src-prefix
-				 :dst-prefix dst-prefix
-				 :diff-map diff-map
-				 :hunk-map hunk-map
-				 :src-revision src-rev
-				 :dst-revision dst-rev))))
+      (apply 'egg-decorate-diff-section
+	     :begin (point-min)
+	     :end (point)
+	     :src-prefix src-prefix
+	     :dst-prefix dst-prefix
+	     egg-diff-buffer-info))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
   "Major mode to display the git diff output."
