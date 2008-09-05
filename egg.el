@@ -1036,12 +1036,12 @@ success."
 	(end (plist-get args	 :end))
 	(a   (or (plist-get args :src-prefix) "a/"))
 	(b   (or (plist-get args :dst-prefix) "b/"))
-	(a-rev (plist-get args 	 :a-revision))
-	(b-rev (plist-get args 	 :b-revision)))
+	(a-rev (plist-get args 	 :src-revision))
+	(b-rev (plist-get args 	 :dst-revision)))
     (when (stringp a-rev)
-      (put-text-property beg end :a-revision a-rev))
+      (put-text-property beg end :src-revision a-rev))
     (when (stringp b-rev)
-      (put-text-property beg end :b-revision b-rev))
+      (put-text-property beg end :dst-revision b-rev))
     (egg-decorate-diff-sequence 
      (nconc (list :src-prefix a :dst-prefix b) args))))
   
@@ -1534,7 +1534,7 @@ success."
   (interactive (list (point)))
   (let ((file (car (or (get-text-property pos :diff)
 		       (error "No diff with file-name here!"))))
-	(src-rev (get-text-property pos :a-revision))
+	(src-rev (get-text-property pos :src-revision))
 	args)
     (setq args
 	  (if (stringp src-rev)
@@ -1799,8 +1799,8 @@ success."
 				 :dst-prefix dst-prefix
 				 :diff-map diff-map
 				 :hunk-map hunk-map
-				 :a-revision src-rev
-				 :b-revision dst-rev))))
+				 :src-revision src-rev
+				 :dst-revision dst-rev))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
   "Major mode to display the git diff output."
