@@ -265,7 +265,9 @@ ARGS is a list of arguments to pass to PROGRAM."
   (egg-git-ok nil "diff" "--quiet" "--" file))
 (defsubst egg-file-committed (file) 
   (egg-git-ok nil "diff" "--quiet" "HEAD" "--" file))
-(defsubst egg-index-empty () (egg-git-ok "diff" "--cached" "--quiet"))
+(defsubst egg-index-empty () (egg-git-ok nil "diff" "--cached" "--quiet"))
+
+(defsubst egg-repo-clean () (and (egg-wdir-clean) (egg-index-empty)))
 
 (defsubst egg-git-to-lines (&rest args)
   (save-match-data
@@ -1598,6 +1600,30 @@ success."
 	 -1 "GIT-RESET")
     (if update-wdir (egg-revert-all-visited-files))))
 
+(defun egg-do-merge-to-head (rev &optional no-commit)
+  (let ((msg (concat "merging in " rev))
+	(commit-flag (if no-commit "--no-commit" "--commit"))
+	file merge-cmd-res merged-files conflicted-files 
+	res feed-back)
+    (with-temp-buffer
+      (setq merge-cmd-res (egg-git-ok (current-buffer)
+		      "merge" "--log" commit-flag "-m" msg rev))
+      (goto-char (point-min))
+      (while (re-search-forward "^Auto-merged \\(.+\\)$" nil t)
+	(setq file (match-string-no-properties 1))
+	(if (egg-safe-search (concat "^CONFLICT.+ conflict in " file) nil)
+	    (add-to-list 'conflicted-files file)
+	  (add-to-list 'merged-files (match-string-no-properties 1) t)))
+      (setq feed-back
+	    (save-match-data
+	      (car (nreverse (split-string (buffer-string)
+					   "[\n]+" t)))))
+      (run-hooks 'egg-buffers-refresh-hook)
+      (list :success merge-cmd-res
+	    :merged-files merged-files
+	    :unmerged-files conflicted-files
+	    :message feed-back))))
+
 (defun egg-rm-ref (&optional force name prompt default)
   (let* ((refs-alist (egg-ref-type-alist))
 	 (name (or name (completing-read (or prompt "remove ref: ")
@@ -1880,7 +1906,7 @@ success."
 ;;;========================================================
 (defvar egg-log-buffer-comment-column nil)
 (defvar egg-log-buffer-git-log-args
-  '("--max-count=100000" "--graph" "--topo-order"
+  '("--max-count=10000" "--graph" "--topo-order"
     "--pretty=oneline" "--decorate"))
 (defconst egg-log-commit-map 
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
@@ -1890,7 +1916,8 @@ success."
     (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
-    (define-key map (kbd "m") 'egg-log-buffer-move-head)
+    (define-key map (kbd "a") 'egg-log-buffer-attach-head)
+    (define-key map (kbd "m") 'egg-log-buffer-merge)
     map))
 
 (defconst egg-log-ref-map 
@@ -1976,12 +2003,13 @@ success."
 	(setq separator (apply 'propertize " " line-props))
 	(setq ref-string
 	      (if full-refs
-		  (apply' propertize
-			  (mapconcat (lambda (full-ref-name)
-				       (cdr (assoc full-ref-name 
-						   dec-ref-alist)))
-				     full-refs separator)
-			  line-props)))
+		  (propertize
+		   (mapconcat (lambda (full-ref-name)
+				(cdr (assoc full-ref-name 
+					    dec-ref-alist)))
+			      full-refs separator)
+		   :navigation sha1 :commit sha1
+		   :references refs)))
 	(setq ref-string-len (if ref-string (length ref-string)))
 
 	;; entire line
@@ -2063,6 +2091,23 @@ success."
       (or ref-at-point first-head 
 	  (if symbolic (egg-name-rev commit) commit)))))
 
+(defun egg-log-buffer-merge (pos &optional no-commit)
+  (interactive "d\nP")
+  (let ((rev (egg-log-buffer-get-rev-at pos))
+	res merged-files unmerged-files buf)
+    (unless (egg-repo-clean)
+      (egg-status) 
+      (error "Repo is not clean!"))
+    (if  (null (y-or-n-p (format "merge %s to HEAD? " rev)))
+	(message "cancel merge from %s to HEAD!" rev)
+      (setq res (egg-do-merge-to-head rev no-commit))
+      (setq merged-files (plist-get res :merged-files)
+	    unmerged-files (plist-get res :unmerged-files))
+      (egg-revert-visited-files (append merged-files unmerged-files)) 
+      (message "GIT-MERGE: %s" (plist-get res :message))
+      (unless (plist-get res :success)
+	(egg-status)))))
+
 (defun egg-log-buffer-checkout-commit (pos)
   (interactive "d")
   (egg-do-checkout 
@@ -2092,12 +2137,12 @@ success."
 	   (format "start new branch at %s with name: " rev)
 	   force))))
 
-(defun egg-log-buffer-move-head (pos &optional strict-level)
+(defun egg-log-buffer-attach-head (pos &optional strict-level)
   (interactive "d\np")
   (let* ((rev (egg-name-rev (egg-log-buffer-get-rev-at pos t)))
 	 (update-index (> strict-level 3))
 	 (update-wdir (> strict-level 15))
-	 (prompt (format "move HEAD to %s%s? " rev
+	 (prompt (format "attach HEAD to %s%s? " rev
 			 (cond (update-wdir " (and update workdir)")
 			       (update-index " (and update index)")
 			       (t "")))))
@@ -2328,6 +2373,17 @@ Each line representing a commit has extra keybindings:\\<egg-log-commit-map>
 \\[egg-log-buffer-start-new-branch] start in a new branch from the current commit.
 \\[egg-log-buffer-checkout-commit] checkout the current commit.
 \\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit.
+\\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) to the 
+current commit (the underlying git command is `reset --soft'.
+C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
+the index to the current commit (the underlying git command
+is `reset --mixed'.)
+C-u C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
+the index to the current commit, the work dir will also be
+updated (the underlying git command is `reset --hard').
+\\[egg-log-buffer-merge] will merge the current commit into HEAD.
+C-u \\[egg-log-buffer-merge] will merge the current commit into HEAD but will not
+auto-commit if the merge was successful.
 
 \\{egg-log-commit-map}
 
