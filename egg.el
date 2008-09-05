@@ -527,7 +527,32 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (mapcar 'egg-name-rev 
 		  (if (file-readable-p merge-file)
 		      (egg-pick-file-records merge-file "^" "$"))))
-	 (state (list :branch branch :sha1 sha1 :merge-heads merge-heads)))
+	 (rebase-dir
+	  (cond ((file-directory-p (concat git-dir "/.dotest-merge"))
+		 (concat git-dir "/.dotest-merge/"))
+		((file-directory-p (concat git-dir "/.dotest"))
+		 (concat git-dir "/.dotest/"))
+		(t nil)))
+	 (rebase-head
+	  (if rebase-dir 
+	      (egg-name-rev 
+	       (egg-file-as-string (concat rebase-dir "head-name")))))
+	 (rebase-upstream
+	  (if rebase-dir 
+	      (egg-file-as-string (concat rebase-dir "onto_name"))))
+	 (rebase-step
+	  (if rebase-dir 
+	      (egg-file-as-string (concat rebase-dir "msgnum"))))
+	 (rebase-num
+	  (if rebase-dir 
+	      (egg-file-as-string (concat rebase-dir "end"))))
+	 (state (list :gitdir git-dir
+		      :branch branch :sha1 sha1 
+		      :merge-heads merge-heads
+		      :rebase-head rebase-head
+		      :rebase-upstream rebase-upstream
+		      :rebase-step rebase-step
+		      :rebase-num rebase-num)))
     (egg-set-mode-info state)
     state))
 
@@ -547,13 +572,17 @@ ARGS is a list of arguments to pass to PROGRAM."
   (let* ((state (or state (egg-repo-state)))
 	 (branch (plist-get state :branch))
 	 (merge-heads (plist-get state :merge-heads))
+	 (rebase-head (plist-get state :rebase-head))
+	 (rebase-upstream (plist-get state :rebase-upstream))
 	 (sha1 (plist-get state :sha1)))
     (cond ((and branch merge-heads)
-	   (concat "Merging: " branch " <- "
+	   (concat "Merging to " branch " from: "
 		   (mapconcat 'identity merge-heads ",")))
 	  (merge-heads 
-	   (concat "Merging: (detached HEAD:" (egg-name-rev sha1) ") <- "
+	   (concat "Merging to " (egg-name-rev sha1) " from: "
 		   (mapconcat 'identity merge-heads ",")))
+	  ((and rebase-head rebase-upstream)
+	   (format "Rebasing %s onto %s" rebase-head rebase-upstream))
 	  (branch branch)
 	  (t (concat "Detached HEAD: " (egg-name-rev sha1))))))
 
@@ -1225,20 +1254,25 @@ success."
 ;;;========================================================
 
 (defun egg-sb-insert-repo-section ()
-  (let* ((head-info (egg-head))
+  (let* ((state (egg-repo-state))
+	 (sha1 (plist-get state :sha1))
 	 (beg (point))
-	 (rev-name (egg-name-rev (car head-info)))
+	 (rebase-step (plist-get state :rebase-step))
+	 (rebase-num (plist-get state :rebase-num))
 	 inv-beg)
     (insert (propertize (egg-pretty-head-string) 'face 'egg-branch) 
 		"\n"
-		(propertize (car head-info) 'face 'font-lock-string-face)
+		(propertize sha1 'face 'font-lock-string-face)
 		"\n"
-		(propertize (egg-git-dir) 'face 'font-lock-constant-face)
+		(propertize (plist-get state :gitdir)
+			    'face 'font-lock-constant-face)
 		"\n")
     (setq inv-beg (1- (point)))
-    (call-process "git" nil t nil
-		  "log" "--max-count=5"
-		  "--abbrev-commit" "--pretty=oneline")
+    (if rebase-step
+	(insert (format "Rebase: step %s of %s\n" rebase-step rebase-num))
+      (call-process "git" nil t nil
+		    "log" "--max-count=5"
+		    "--abbrev-commit" "--pretty=oneline"))
     (egg-delimit-section :section 'repo beg (point)
 			 inv-beg egg-section-map 'repo)))
 
