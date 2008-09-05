@@ -712,7 +712,6 @@ success."
 		(cons egg-buffer-refresh-func (list (current-buffer)))
 		args))
 
-
 ;;;========================================================
 ;;; Diff/Hunk
 ;;;========================================================
@@ -1975,10 +1974,14 @@ success."
 
 	
 	(setq separator (apply 'propertize " " line-props))
-	(setq ref-string (if full-refs
-			     (mapconcat (lambda (full-ref-name)
-					  (cdr (assoc full-ref-name dec-ref-alist)))
-					full-refs separator)))
+	(setq ref-string
+	      (if full-refs
+		  (apply' propertize
+			  (mapconcat (lambda (full-ref-name)
+				       (cdr (assoc full-ref-name 
+						   dec-ref-alist)))
+				     full-refs separator)
+			  line-props)))
 	(setq ref-string-len (if ref-string (length ref-string)))
 
 	;; entire line
@@ -2278,6 +2281,7 @@ success."
   ;; update log buffer
   (with-current-buffer buffer
     (buffer-disable-undo buffer)
+    (setq buffer-invisibility-spec nil)
     (let ((head-info (egg-head))
 	  (orig-pos (point))
 	  (inhibit-read-only t)
