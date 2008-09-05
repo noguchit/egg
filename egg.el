@@ -2283,9 +2283,10 @@ success."
       (setq end (point))
       (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
-      (egg-decorate-diff-section beg end nil nil 
-				 egg-log-diff-map
-				 egg-log-hunk-map)
+      (egg-decorate-diff-section-2 :begin beg
+				   :end end
+				   :diff-map egg-log-diff-map
+				   :hunk-map egg-log-hunk-map)
       (goto-char beg)
       (setq end (next-single-property-change beg :diff))
       (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
