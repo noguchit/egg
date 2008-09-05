@@ -805,14 +805,24 @@ success."
 	   (match-beginning (or no 0))))))
 
 (defsubst egg-decorate-diff-header (beg end line-beg line-end)
-  (put-text-property line-beg beg 'display "\n")
-  (put-text-property end line-end 'display "    ")
-  (put-text-property beg end 'face 'egg-diff-file-header))
+  (put-text-property line-beg (1+ beg)
+		     'display 
+		     (propertize
+		      (concat "\n"
+			      (buffer-substring-no-properties beg
+							      (1+ beg)))
+		      'face 'egg-diff-file-header))
+  (put-text-property (1+ beg) end 'face 'egg-diff-file-header))
 
 (defsubst egg-decorate-cc-diff-header (beg end line-beg line-end)
-  (put-text-property line-beg beg 'display "\n")
-  (put-text-property end line-end 'display " ")
-  (put-text-property beg end 'face 'egg-unmerged-diff-file-header))
+  (put-text-property line-beg (1+ beg)
+		     'display 
+		     (propertize
+		      (concat "\n"
+			      (buffer-substring-no-properties beg
+							      (1+ beg)))
+		      'face 'egg-unmerged-diff-file-header))
+  (put-text-property (1+ beg) end 'face 'egg-unmerged-diff-file-header))
 
 (defsubst egg-decorate-diff-index-line (beg end line-beg line-end)
   (put-text-property (1- line-beg) beg 'display "    -- ")
