@@ -1312,9 +1312,12 @@ success."
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
-    (egg-decorate-diff-section diff-beg (point) "HEAD:/" "INDEX:/"
-				egg-staged-diff-section-map
-				egg-staged-hunk-section-map)))
+    (egg-decorate-diff-section-2 :begin diff-beg 
+				 :end (point) 
+				 :src-prefix "HEAD:/"
+				 :dst-prefix "INDEX:/"
+				 :diff-map egg-staged-diff-section-map
+				 :hunk-map egg-staged-hunk-section-map)))
 
 (defun egg-checkout-ref (&optional default)
   (interactive (list (car (get-text-property (point) :ref))))
@@ -1820,10 +1823,14 @@ success."
       (insert prologue "\n")
       (apply 'call-process "git" nil t nil "diff" args)
       (egg-delimit-section :section 'top-level (point-min) (point))
-      (egg-decorate-diff-section (point-min) (point)
-				 src-prefix dst-prefix
-				 diff-map hunk-map
-				 src-rev dst-rev))))
+      (egg-decorate-diff-section-2 :begin (point-min)
+				   :end (point)
+				   :src-prefix src-prefix
+				   :dst-prefix dst-prefix
+				   :diff-map diff-map
+				   :hunk-map hunk-map
+				   :a-revision src-rev
+				   :b-revision dst-rev))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
   "Major mode to display the git diff output."
