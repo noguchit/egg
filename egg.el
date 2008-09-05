@@ -737,25 +737,25 @@ success."
     map))
 
 (defconst egg-staged-diff-section-map 
-  (let ((map (make-sparse-keymap "Egg:Diff")))
+  (let ((map (make-sparse-keymap "Egg:StagedDiff")))
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
     map))
 
 (defconst egg-wdir-diff-section-map 
-  (let ((map (make-sparse-keymap "Egg:Diff")))
+  (let ((map (make-sparse-keymap "Egg:WdirDiff")))
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "u") 'egg-diff-section-cmd-undo)
     map))
 
 (defconst egg-unstaged-diff-section-map 
-  (let ((map (make-sparse-keymap "Egg:Diff")))
+  (let ((map (make-sparse-keymap "Egg:UnstagedDiff")))
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
     map))
 
 (defconst egg-unmerged-diff-section-map 
-  (let ((map (make-sparse-keymap "Egg:Diff")))
+  (let ((map (make-sparse-keymap "Egg:UnmergedDiff")))
     (set-keymap-parent map egg-unstaged-diff-section-map)
     (define-key map (kbd "=") 'egg-diff-section-cmd-ediff3)
     map))
@@ -768,21 +768,27 @@ success."
     map))
 
 (defconst egg-staged-hunk-section-map 
-  (let ((map (make-sparse-keymap "Egg:Hunk")))
+  (let ((map (make-sparse-keymap "Egg:StagedHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
     map))
 
 (defconst egg-wdir-hunk-section-map 
-  (let ((map (make-sparse-keymap "Egg:Hunk")))
+  (let ((map (make-sparse-keymap "Egg:WdirHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
     map))
 
 (defconst egg-unstaged-hunk-section-map 
-  (let ((map (make-sparse-keymap "Egg:Hunk")))
+  (let ((map (make-sparse-keymap "Egg:UnstagedHunk")))
     (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
+    map))
+
+(defconst egg-unmerged-hunk-section-map 
+  (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
+    (set-keymap-parent map egg-unstaged-hunk-section-map)
+    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff3)
     map))
 
 (defun list-tp ()
@@ -1009,7 +1015,7 @@ success."
 		 (egg-delimit-section
 		  :diff (setq last-cc
 			      (egg-make-diff-info
-			       (match-string-no-properties diff-no)
+			       (match-string-no-properties cc-diff-no)
 			       sub-beg sub-end head-end))
 		  sub-beg sub-end m-e-0 cc-diff-map
 		  'egg-compute-navigation))
@@ -1043,6 +1049,23 @@ success."
 				:cc-hunk-map hunk-map
 				:src-prefix a
 				:dst-prefix b)))
+
+(defun egg-decorate-diff-section-2 (&rest args)
+  (let ((beg (plist-get args	 :begin))
+	(end (plist-get args	 :end))
+	(a   (or (plist-get args :src-prefix) "a/"))
+	(b   (or (plist-get args :dst-prefix) "b/"))
+	(a-rev (plist-get args 	 :a-revision))
+	(b-rev (plist-get args 	 :b-revision)))
+    (when (stringp a-rev)
+      (put-text-property beg end :a-revision a-rev))
+    (when (stringp b-rev)
+      (put-text-property beg end :b-revision b-rev))
+    (apply 'egg-decorate-diff-sequence
+	   (nconc (list :src-prefix a :dst-prefix b)
+		  args))))
+
+
 
 (defsubst egg-decorate-diff-section (beg end &optional diff-src-prefix
 				      diff-dst-prefix
@@ -1266,10 +1289,16 @@ success."
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
-    (egg-decorate-diff-section-1 diff-beg (point) "INDEX:/" "WORKDIR:/"
-				egg-unstaged-diff-section-map
-				egg-unstaged-hunk-section-map
-				egg-unmerged-diff-section-map)))
+    (egg-decorate-diff-section-2 :begin diff-beg 
+				 :end (point) 
+				 :src-prefix "INDEX:/"
+				 :dst-prefix "WORKDIR:/"
+				 :diff-map egg-unstaged-diff-section-map
+				 :hunk-map egg-unstaged-hunk-section-map
+				 :cc-diff-map egg-unmerged-diff-section-map
+				 :cc-hunk-map egg-unmerged-hunk-section-map
+				 :conflict-map egg-unmerged-hunk-section-map
+				 )))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   (let ((beg (point)) inv-beg diff-beg)
