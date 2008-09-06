@@ -260,6 +260,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-git-ok (buffer &rest args)
   (= (apply 'call-process "git" nil buffer nil args) 0))
 
+(defsubst egg-git-region-ok (start end &rest args)
+  (= (apply 'call-process-region start end "git" t t nil args) 0))
+
 (defsubst egg-wdir-clean () (egg-git-ok nil "diff" "--quiet"))
 (defsubst egg-file-updated (file) 
   (egg-git-ok nil "diff" "--quiet" "--" file))
@@ -822,7 +825,8 @@ success."
 
 (defconst egg-unmerged-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
-    (set-keymap-parent map egg-unstaged-hunk-section-map)
+    ;; no hunking staging in unmerged file
+    (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "=") 'egg-diff-section-cmd-ediff3)
     map))
 
@@ -1273,7 +1277,8 @@ success."
     (define-key map (kbd "RET") 'egg-buffer-rebase-continue)
     map))
 
-(defun egg-buffer-do-rebase (upstream-or-action)
+(defun egg-buffer-do-rebase (upstream-or-action 
+			     &optional old-base prompt)
   (let ((git-dir (egg-git-dir))
 	modified-files res)
     (if (stringp upstream-or-action)
@@ -1283,7 +1288,7 @@ success."
       (unless (file-directory-p (concat git-dir "/.dotest-merge"))
 	(error "No rebase in progress in directory %s"
 	       (file-name-directory git-dir))))
-    (setq res (egg-do-rebase-head upstream-or-action))
+    (setq res (egg-do-rebase-head upstream-or-action old-base prompt))
     (setq modified-files (plist-get res :files))
     (if modified-files
 	(egg-revert-visited-files modified-files))
@@ -1719,12 +1724,35 @@ success."
 	    :files modified-files
 	    :message feed-back))))
 
-(defun egg-do-rebase-head (upstream-or-action)
+(defun egg-do-rebase-head (upstream-or-action 
+			   &optional old-base prompt)
   (let ((pre-merge (egg-get-current-sha1))
-	cmd-res modified-files feed-back)
+	cmd-res modified-files feed-back old-choices)
     (with-temp-buffer
+      (when (and (stringp upstream-or-action) ;; start a rebase
+		 (eq old-base t))	      ;; ask for old-base
+	(unless (egg-git-ok (current-buffer) "rev-list"
+			    "--topo-order" "--reverse"
+			    (concat upstream-or-action "..HEAD^"))
+	  (error "Failed to find rev between %s and HEAD^: %s"
+		 upstream-or-action (buffer-string)))
+	(unless (egg-git-region-ok (point-min) (point-max)
+				   "name-rev" "--stdin")
+	  (error "Failed to translate revisions: %s" (buffer-string)))
+	(save-match-data 
+	  (goto-char (point-min))
+	  (while (re-search-forward "^.+(\\(.+\\))$" nil t)
+	    (setq old-choices (cons (match-string-no-properties 1)
+				    old-choices))))
+	(setq old-base
+	      (completing-read (or prompt "old base: ") old-choices))
+	(erase-buffer))
+      
       (setq cmd-res 
-	    (cond ((eq upstream-or-action :abort)
+	    (cond ((and (stringp old-base) (stringp upstream-or-action))
+		   (egg-git-ok (current-buffer) "rebase" "-m" "--onto"
+			       upstream-or-action old-base))
+		  ((eq upstream-or-action :abort)
 		   (egg-git-ok (current-buffer) "rebase" "--abort"))
 		  ((eq upstream-or-action :skip)
 		   (egg-git-ok (current-buffer) "rebase" "--skip"))
@@ -2229,13 +2257,17 @@ success."
       (unless (and (plist-get res :success) (null no-commit))
 	(egg-status)))))
 
-(defun egg-log-buffer-rebase (pos)
-  (interactive "d")
+(defun egg-log-buffer-rebase (pos &optional move)
+  (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos))
 	res modified-files buf)
     (if  (null (y-or-n-p (format "rebase HEAD to %s? " rev)))
 	(message "cancel rebase HEAD to %s!" rev)
-      (unless (egg-buffer-do-rebase rev)
+      (unless (egg-buffer-do-rebase 
+	       rev (if move t)
+	       (if move
+		   (format "starting point to rebase HEAD onto %s: "
+			   rev)))
 	(egg-status)))))
 
 (defun egg-log-buffer-checkout-commit (pos)
