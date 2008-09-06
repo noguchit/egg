@@ -517,7 +517,8 @@ ARGS is a list of arguments to pass to PROGRAM."
 				(plist-get state :branch))
 			       (t "(detached)")))))
 
-(defun egg-repo-state ()
+(defvar egg-internal-current-state nil)
+(defun egg-get-repo-state ()
   (let* ((git-dir (egg-git-dir))
 	 (head-file (concat git-dir "/HEAD"))
 	 (merge-file (concat git-dir "/MERGE_HEAD"))
@@ -552,6 +553,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 		      :rebase-num rebase-num)))
     (egg-set-mode-info state)
     state))
+
+(defsubst egg-repo-state ()
+  (or egg-internal-current-state (egg-get-repo-state)))
 
 (defsubst egg-current-branch (&optional state)
   (plist-get (or state (egg-repo-state)) :branch))
@@ -1183,6 +1187,11 @@ success."
 ;;;========================================================
 (defvar egg-buffer-refresh-func nil)
 
+(defsubst egg-run-buffers-update-hook (&optional newly-read-state)
+  (let ((egg-internal-current-state 
+	 (or newly-read-state (egg-get-repo-state))))
+    (run-hooks 'egg-buffers-refresh-hook)))
+
 (defun egg-buffer-cmd-refresh ()
   (interactive)
   (when (and (egg-git-dir)
@@ -1307,7 +1316,7 @@ success."
 	 (rebase-num (plist-get state :rebase-num))
 	 context-beg context-end context-keymap
 	 inv-beg)
-    (insert (propertize (egg-pretty-head-string) 'face 'egg-branch) 
+    (insert (propertize (egg-pretty-head-string state) 'face 'egg-branch) 
 		"\n"
 		(propertize sha1 'face 'font-lock-string-face)
 		"\n"
@@ -1512,7 +1521,7 @@ success."
 	  (narrow-to-region (cdr logger) (point-max))
 	  (display-buffer (current-buffer) t)
 	  nil)
-      (run-hooks 'egg-buffers-refresh-hook)
+      (egg-run-buffers-update-hook)
       output)))
 
 (defun egg-sync-do (program stdin accepted-codes args)
@@ -1705,7 +1714,7 @@ success."
 	    (save-match-data
 	      (car (nreverse (split-string (buffer-string)
 					   "[\n]+" t)))))
-      (run-hooks 'egg-buffers-refresh-hook)
+      (egg-run-buffers-update-hook)
       (list :success merge-cmd-res
 	    :files modified-files
 	    :message feed-back))))
@@ -1730,7 +1739,7 @@ success."
 	     "^\\(?:CONFLICT\\|All done\\|HEAD is now at\\|Fast-forwarded\\|You must edit all merge conflicts\\).+$")) 
       (setq modified-files 
 	    (egg-git-to-lines "diff" "--name-only" pre-merge))
-      (run-hooks 'egg-buffers-refresh-hook)
+      (egg-run-buffers-update-hook)
       (list :success cmd-res
 	    :message feed-back
 	    :files modified-files))))
@@ -1787,7 +1796,7 @@ success."
 			       "commit" "-F" "-"))
     (when output
       (egg-show-git-output output -1 "GIT-COMMIT")
-      (run-hooks 'egg-buffers-refresh-hook))))
+      (egg-run-buffers-update-hook))))
 
 (defun egg-log-msg-done ()
   (interactive)
@@ -2435,31 +2444,18 @@ success."
       (egg-log-buffer-do-insert-commit pos))))
 
 (defun egg-log-buffer-insert-logs (buffer)
-  ;; in process buffer
-  (when (and (processp egg-async-process)
-	     (equal (current-buffer) (process-buffer egg-async-process)))
-    (or 
-     (save-excursion
-       (goto-char (point-min))
-       (save-match-data
-	 (when (re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
-	   (message "%s: %s" (match-string-no-properties 1)
-		    (match-string-no-properties 2)))))))
-  ;; update log buffer
   (with-current-buffer buffer
     (buffer-disable-undo buffer)
     (setq buffer-invisibility-spec nil)
-    (let ((head-info (egg-head))
-	  (orig-pos (point))
-	  (inhibit-read-only t)
-	  inv-beg beg)
+    (let* ((state (egg-repo-state))
+	   (sha1 (plist-get state :sha1))
+	   (orig-pos (point))
+	   (inhibit-read-only t)
+	   inv-beg beg)
       (erase-buffer)
-      (insert (propertize (or (cdr head-info) 
-			      (format "Detached HEAD: %s"
-				      (egg-name-rev (car head-info))))
-			  'face 'egg-branch) 
+      (insert (propertize (egg-pretty-head-string state) 'face 'egg-branch) 
 	      "\n"
-	      (propertize (car head-info) 'face 'font-lock-string-face)
+	      (propertize sha1 'face 'font-lock-string-face)
 	      "\n"
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
 	      "\n\n")
@@ -2474,6 +2470,20 @@ success."
 			egg-log-local-ref-map
 			egg-log-remote-ref-map)
       (goto-char beg))))
+
+(defun egg-log-buffer-redraw (buffer)
+  ;; in process buffer
+  (when (and (processp egg-async-process)
+	     (equal (current-buffer) (process-buffer egg-async-process)))
+    (or 
+     (save-excursion
+       (goto-char (point-min))
+       (save-match-data
+	 (when (re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
+	   (message "%s: %s" (match-string-no-properties 1)
+		    (match-string-no-properties 2)))))))
+  ;; update log buffer
+  (egg-log-buffer-insert-logs buffer))
 
 
 (define-egg-buffer log "*%s-log@%s*"
@@ -2531,7 +2541,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	truncate-lines t)
   (use-local-map egg-log-buffer-mode-map)
   (set (make-local-variable 'egg-buffer-refresh-func)
-       'egg-log-buffer-insert-logs)
+       'egg-log-buffer-redraw)
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
@@ -2550,7 +2560,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	(when (member  "--all" egg-log-buffer-git-log-args)
 	  (setq egg-log-buffer-git-log-args
 		(delete "--all" egg-log-buffer-git-log-args)))) 
-      (egg-log-buffer-insert-logs buf))
+      (egg-log-buffer-redraw buf))
     (pop-to-buffer buf t)))
 
 ;;;========================================================
