@@ -1727,7 +1727,7 @@ success."
       (goto-char (point-min))
       (setq feed-back
 	    (egg-safe-search-pickup 
-	     "^\\(?:CONFLICT.+\\|All done.+\\|HEAD is now at.+\\)$")) 
+	     "^\\(?:CONFLICT\\|All done\\|HEAD is now at\\|Fast-forwarded\\|You must edit all merge conflicts\\).+$")) 
       (setq modified-files 
 	    (egg-git-to-lines "diff" "--name-only" pre-merge))
       (run-hooks 'egg-buffers-refresh-hook)
