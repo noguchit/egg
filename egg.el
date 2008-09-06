@@ -527,12 +527,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 	  (mapcar 'egg-name-rev 
 		  (if (file-readable-p merge-file)
 		      (egg-pick-file-records merge-file "^" "$"))))
-	 (rebase-dir
-	  (cond ((file-directory-p (concat git-dir "/.dotest-merge"))
-		 (concat git-dir "/.dotest-merge/"))
-		((file-directory-p (concat git-dir "/.dotest"))
-		 (concat git-dir "/.dotest/"))
-		(t nil)))
+	 (rebase-dir 
+	  (if (file-directory-p (concat git-dir "/.dotest-merge"))
+	      (concat git-dir "/.dotest-merge/")))
 	 (rebase-head
 	  (if rebase-dir 
 	      (egg-name-rev 
@@ -1253,12 +1250,50 @@ success."
 ;;; Status Buffer
 ;;;========================================================
 
+(defconst egg-status-buffer-rebase-map 
+  (let ((map (make-sparse-keymap "Egg:StatusBufferRebase")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "x") 'egg-buffer-rebase-abort)
+    (define-key map (kbd "u") 'egg-buffer-rebase-skip)
+    (define-key map (kbd "RET") 'egg-buffer-rebase-continue)
+    map))
+
+(defun egg-buffer-do-rebase (upstream-or-action)
+  (let ((git-dir (egg-git-dir))
+	modified-files res)
+    (if (stringp upstream-or-action)
+	(unless (file-directory-p (concat git-dir "/.dotest-merge"))
+	  (error "No rebase in progress in directory %s"
+		 (file-name-directory git-dir))))
+    (setq res (egg-do-rebase-head upstream-or-action))
+    (setq modified-files (plist-get res :files))
+    (if modified-files
+	(egg-revert-visited-files modified-files))
+    ;;(message "GIT-REBASE: %s" (plist-get res :message))
+    (plist-get res :success)))
+
+(defun egg-buffer-rebase-continue ()
+  (interactive)
+  (unless (egg-buffer-do-rebase :continue)
+    (egg-status)))
+
+(defun egg-buffer-rebase-skip ()
+  (interactive)
+  (unless (egg-buffer-do-rebase :skip)
+    (egg-status)))
+
+(defun egg-buffer-rebase-abort ()
+  (interactive)
+  (egg-buffer-do-rebase :abort)
+  (egg-status))
+
 (defun egg-sb-insert-repo-section ()
   (let* ((state (egg-repo-state))
 	 (sha1 (plist-get state :sha1))
 	 (beg (point))
 	 (rebase-step (plist-get state :rebase-step))
 	 (rebase-num (plist-get state :rebase-num))
+	 context-beg context-end context-keymap
 	 inv-beg)
     (insert (propertize (egg-pretty-head-string) 'face 'egg-branch) 
 		"\n"
@@ -1267,14 +1302,20 @@ success."
 		(propertize (plist-get state :gitdir)
 			    'face 'font-lock-constant-face)
 		"\n")
-    (setq inv-beg (1- (point)))
-    (if rebase-step
-	(insert (format "Rebase: step %s of %s\n" rebase-step rebase-num))
-      (call-process "git" nil t nil
+    (setq context-beg (point))
+    (setq inv-beg (1- context-beg))
+    (if (null rebase-step)
+	(call-process "git" nil t nil
 		    "log" "--max-count=5"
-		    "--abbrev-commit" "--pretty=oneline"))
+		    "--abbrev-commit" "--pretty=oneline")
+      (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
+      (setq context-keymap egg-status-buffer-rebase-map))
+    (setq context-end (point))
     (egg-delimit-section :section 'repo beg (point)
-			 inv-beg egg-section-map 'repo)))
+			 inv-beg egg-section-map 'repo)
+    (if context-keymap
+	(put-text-property context-beg context-end
+			   'keymap context-keymap))))
 
 (defun egg-sb-insert-untracked-section ()
   (let ((beg (point)) inv-beg)
@@ -1657,6 +1698,26 @@ success."
 	    :files modified-files
 	    :message feed-back))))
 
+(defun egg-do-rebase-head (upstream-or-action)
+  (let ((pre-merge (egg-get-current-sha1))
+	cmd-res modified-files)
+    (with-temp-buffer
+      (setq cmd-res 
+	    (cond ((eq upstream-or-action :abort)
+		   (egg-git-ok (current-buffer) "rebase" "--abort"))
+		  ((eq upstream-or-action :skip)
+		   (egg-git-ok (current-buffer) "rebase" "--skip"))
+		  ((eq upstream-or-action :continue)
+		   (egg-git-ok (current-buffer) "rebase" "--continue"))
+		  ((stringp upstream-or-action)
+		   (egg-git-ok (current-buffer) "rebase" "-m" 
+			       upstream-or-action))))
+      (setq modified-files 
+	    (egg-git-to-lines "diff" "--name-only" pre-merge))
+      (run-hooks 'egg-buffers-refresh-hook)
+      (list :success cmd-res
+	    :files modified-files))))
+
 (defun egg-rm-ref (&optional force name prompt default)
   (let* ((refs-alist (egg-ref-type-alist))
 	 (name (or name (completing-read (or prompt "remove ref: ")
@@ -1951,6 +2012,7 @@ success."
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
+    (define-key map (kbd "r") 'egg-log-buffer-rebase)
     map))
 
 (defconst egg-log-ref-map 
@@ -2139,6 +2201,23 @@ success."
 	  (egg-revert-visited-files modified-files)) 
       (message "GIT-MERGE: %s" (plist-get res :message))
       (unless (and (plist-get res :success) (null no-commit))
+	(egg-status)))))
+
+(defun egg-log-buffer-rebase (pos)
+  (interactive "d")
+  (let ((rev (egg-log-buffer-get-rev-at pos))
+	res modified-files buf)
+    (unless (egg-repo-clean)
+      (egg-status) 
+      (error "Repo is not clean!"))
+    (if  (null (y-or-n-p (format "rebase HEAD to %s? " rev)))
+	(message "cancel rebase HEAD to %s!" rev)
+      (setq res (egg-do-rebase-head rev))
+      (setq modified-files (plist-get res :files))
+      (if modified-files
+	  (egg-revert-visited-files modified-files)) 
+      ;;(message "GIT-REBASE: %s" (plist-get res :message))
+      (unless (plist-get res :success) 
 	(egg-status)))))
 
 (defun egg-log-buffer-checkout-commit (pos)
