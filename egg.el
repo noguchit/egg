@@ -2080,6 +2080,7 @@ success."
   (let ((map (make-sparse-keymap "Egg:LogLocalRef")))
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
+    (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
     map))
 
 (defconst egg-log-remote-ref-map 
