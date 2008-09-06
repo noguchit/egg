@@ -1278,7 +1278,7 @@ success."
     (setq modified-files (plist-get res :files))
     (if modified-files
 	(egg-revert-visited-files modified-files))
-    (message "GIT-REBASE: %s" (plist-get res :message))
+    (message "GIT-REBASE> %s" (plist-get res :message))
     (plist-get res :success)))
 
 (defun egg-buffer-rebase-continue ()
@@ -2216,7 +2216,7 @@ success."
       (setq modified-files (plist-get res :files))
       (if modified-files
 	  (egg-revert-visited-files modified-files)) 
-      (message "GIT-MERGE: %s" (plist-get res :message))
+      (message "GIT-MERGE> %s" (plist-get res :message))
       (unless (and (plist-get res :success) (null no-commit))
 	(egg-status)))))
 
