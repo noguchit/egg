@@ -834,11 +834,17 @@ success."
 	   (following-char)
 	   (get-text-property (point) :navigation)))
 
-(defun egg-safe-search (re limit &optional no)
+(defsubst egg-safe-search (re limit &optional no)
   (save-excursion
     (save-match-data
       (and (re-search-forward re limit t)
 	   (match-beginning (or no 0))))))
+
+(defsubst egg-safe-search-pickup (re &optional limit no)
+  (save-excursion
+    (save-match-data
+      (and (re-search-forward re limit t)
+	   (match-string-no-properties (or no 0))))))
 
 (defsubst egg-decorate-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
@@ -1262,28 +1268,34 @@ success."
   (let ((git-dir (egg-git-dir))
 	modified-files res)
     (if (stringp upstream-or-action)
-	(unless (file-directory-p (concat git-dir "/.dotest-merge"))
-	  (error "No rebase in progress in directory %s"
-		 (file-name-directory git-dir))))
+	(unless (egg-repo-clean)
+	  (egg-status)
+	  (error "Repo %s is not clean" git-dir))
+      (unless (file-directory-p (concat git-dir "/.dotest-merge"))
+	(error "No rebase in progress in directory %s"
+	       (file-name-directory git-dir))))
     (setq res (egg-do-rebase-head upstream-or-action))
     (setq modified-files (plist-get res :files))
     (if modified-files
 	(egg-revert-visited-files modified-files))
-    ;;(message "GIT-REBASE: %s" (plist-get res :message))
+    (message "GIT-REBASE: %s" (plist-get res :message))
     (plist-get res :success)))
 
 (defun egg-buffer-rebase-continue ()
   (interactive)
+  (message "continue with current rebase")
   (unless (egg-buffer-do-rebase :continue)
     (egg-status)))
 
 (defun egg-buffer-rebase-skip ()
   (interactive)
+  (message "skip rebase's current commit")
   (unless (egg-buffer-do-rebase :skip)
     (egg-status)))
 
 (defun egg-buffer-rebase-abort ()
   (interactive)
+  (message "abort current rebase")
   (egg-buffer-do-rebase :abort)
   (egg-status))
 
@@ -1700,7 +1712,7 @@ success."
 
 (defun egg-do-rebase-head (upstream-or-action)
   (let ((pre-merge (egg-get-current-sha1))
-	cmd-res modified-files)
+	cmd-res modified-files feed-back)
     (with-temp-buffer
       (setq cmd-res 
 	    (cond ((eq upstream-or-action :abort)
@@ -1712,10 +1724,15 @@ success."
 		  ((stringp upstream-or-action)
 		   (egg-git-ok (current-buffer) "rebase" "-m" 
 			       upstream-or-action))))
+      (goto-char (point-min))
+      (setq feed-back
+	    (egg-safe-search-pickup 
+	     "^\\(?:CONFLICT.+\\|All done.+\\|HEAD is now at.+\\)$")) 
       (setq modified-files 
 	    (egg-git-to-lines "diff" "--name-only" pre-merge))
       (run-hooks 'egg-buffers-refresh-hook)
       (list :success cmd-res
+	    :message feed-back
 	    :files modified-files))))
 
 (defun egg-rm-ref (&optional force name prompt default)
@@ -2207,17 +2224,9 @@ success."
   (interactive "d")
   (let ((rev (egg-log-buffer-get-rev-at pos))
 	res modified-files buf)
-    (unless (egg-repo-clean)
-      (egg-status) 
-      (error "Repo is not clean!"))
     (if  (null (y-or-n-p (format "rebase HEAD to %s? " rev)))
 	(message "cancel rebase HEAD to %s!" rev)
-      (setq res (egg-do-rebase-head rev))
-      (setq modified-files (plist-get res :files))
-      (if modified-files
-	  (egg-revert-visited-files modified-files)) 
-      ;;(message "GIT-REBASE: %s" (plist-get res :message))
-      (unless (plist-get res :success) 
+      (unless (egg-buffer-do-rebase rev)
 	(egg-status)))))
 
 (defun egg-log-buffer-checkout-commit (pos)
