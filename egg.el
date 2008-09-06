@@ -2343,7 +2343,7 @@ success."
 (defun egg-log-buffer-push-to-local (pos &optional non-ff)
   (interactive "d\nP")
   (let* ((src (car (get-text-property pos :ref)))
-	 dst type)
+	 dst)
     (unless src
       (error "Nothing to push here!"))
     (setq dst (completing-read (format "use %s to update: " src) 
@@ -2353,6 +2353,18 @@ success."
 		       (concat src ":" dst))
 	   -1 "GIT-PUSH")
       (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-log-buffer-push-head-to-local (pos &optional non-ff)
+  (interactive "d\nP")
+  (let* ((dst (car (get-text-property pos :ref))))
+    (unless dst
+      (error "Nothing here to push to!"))
+    (if (y-or-n-p (format "update %s with HEAD? " dst))
+    (when (egg-show-git-output
+	   (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
+		       (concat "HEAD:" dst))
+	   -1 "GIT-PUSH")
+      (funcall egg-buffer-refresh-func (current-buffer))))))
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
   (interactive "d\nP")
