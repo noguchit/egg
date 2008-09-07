@@ -265,6 +265,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 
 (defun egg-git-to-string (&rest args)
+  "run GIT wih ARGS and return the output as a string."
   (let* ((str (egg-cmd-to-string-1 "git" args))
 	 (len (length str)))
     (when (> len 0)
@@ -273,12 +274,21 @@ ARGS is a list of arguments to pass to PROGRAM."
 	str))))
 
 (defsubst egg-cmd-ok (program buffer &rest args)
+  "run PROGRAM with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
   (= (apply 'call-process program nil buffer nil args) 0))
 
 (defsubst egg-git-ok (buffer &rest args)
+  "run GIT with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
   (= (apply 'call-process "git" nil buffer nil args) 0))
 
 (defsubst egg-git-region-ok (start end &rest args)
+  "run GIT with ARGS and insert output into current buffer at point.
+return the t if the exit-code was 0. The text between START and END
+is used as input to GIT."
   (= (apply 'call-process-region start end "git" t t nil args) 0))
 
 (defsubst egg-wdir-clean () (egg-git-ok nil "diff" "--quiet"))
@@ -291,21 +301,28 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-repo-clean () (and (egg-wdir-clean) (egg-index-empty)))
 
 (defsubst egg-git-to-lines (&rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
   (save-match-data
     (split-string (egg-cmd-to-string-1 "git" args) "[\n]+" t)))
 
 (defsubst egg-file-git-name (file)
+  "return the repo-relative name of FILE."
   (car (egg-git-to-lines "ls-files" "--full-name" "--" file)))
 
 (defsubst egg-buf-git-name (&optional buf)
+  "return the repo-relative name of the file visited by BUF.
+if BUF was nil then use current-buffer"
   (egg-file-git-name (buffer-file-name buf)))
 
 (defsubst egg-files-git-name (files)
+  "return the repo-relative name for each file in the list of files FILES."
   (delete-duplicates 
    (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)
    :test 'string-equal))
 
 (defun egg-unmerged-files ()
+  "return a list of repo-relative names for each unmerged files."
   (delete-duplicates 
    (mapcar 'car 
 	   (mapcar 'last
@@ -332,19 +349,30 @@ ARGS is a list of arguments to pass to PROGRAM."
 	      lst))))
 
 (defsubst egg-rbranch-to-remote (rbranch)
+  "Return the remote name in the remote-branch RBRANCH.
+E.g: `foo' in `foo/bar'"
   (and (stringp rbranch)
        (> (length rbranch) 0)
-       (car (save-match-data (split-string rbranch "/")))))
+       (directory-file-name (file-name-directory rbranch))))
 
 (defsubst egg-rbranch-name (rbranch)
+  "Return the ref name in the remote-branch RBRANCH.
+E.g: `bar' in `foo/bar'"
   (and (stringp rbranch) 
        (> (length rbranch) 0)
-       (cadr (save-match-data (split-string rbranch "/")))))
+       (file-name-nondirectory rbranch)))
 
-(defsubst egg-push-refspec (lbranch rbranch)
-   (setq rbranch (egg-rbranch-name rbranch))
-   (if (or lbranch rbranch)
-       (format "%s%s%s" (or lbranch "") (if rbranch ":" "") (or rbranch ""))))
+(defsubst egg-short-ref (full-ref)
+  "Return the short ref name of the full ref name FULL-REF.
+like `my_tag' in `refs/tags/my_tag'."
+  (and (stringp full-ref) 
+       (> (length full-ref) 0)
+       (file-name-nondirectory full-ref)))
+
+;; (defsubst egg-push-refspec (lbranch rbranch)
+;;    (setq rbranch (egg-rbranch-name rbranch))
+;;    (if (or lbranch rbranch)
+;;        (format "%s%s%s" (or lbranch "") (if rbranch ":" "") (or rbranch ""))))
 
 (defun egg-file-as-string-raw (file-name)
   (with-temp-buffer
@@ -352,6 +380,10 @@ ARGS is a list of arguments to pass to PROGRAM."
     (buffer-string)))
 
 (defun egg-pick-file-contents (file-name regexp &rest indices)
+  "Pick a string out of the contents of the file FILE-NAME.
+This function searches for and return the 1st match of REGEXP on the
+contents of the file. If indices was not nil, then return the first
+successful submatch in the order in INDICES."
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (goto-char (point-min))
@@ -363,6 +395,9 @@ ARGS is a list of arguments to pass to PROGRAM."
 	      (return (match-string-no-properties idx))))))))
 
 (defun egg-pick-file-records (file-name start-re end-re)
+  "Return a list of strings from the contents of the file FILE-NAME.
+START-RE is the regexp to match the beginning of a record.
+END-RE is the regexp to match the end of a record."
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (goto-char (point-min))
@@ -384,48 +419,63 @@ ARGS is a list of arguments to pass to PROGRAM."
       lst)))
 
 (defun egg-file-as-string (file-name)
+  "return the contents of file FILE-NAME as a string."
   (let ((str (egg-file-as-string-raw file-name)))
     (if (> (length str) 0)
+	;; chop the final new line
 	(substring str 0 -1)
       str)))
 
 (defsubst egg-is-in-git ()
+  "is the default-directory in a git repo."
   (= (call-process "git" nil nil nil "rev-parse" "--git-dir") 0))
 
 (defsubst egg-is-dir-in-git (dir)
+  "is DIR in a git repo."
   (let ((default-directory dir)) (egg-is-in-git)))
 
 (defsubst egg-name-rev (rev)
+  "get the symbolic name of REV."
   (egg-git-to-string "name-rev" "--always" "--name-only" rev))
 
 (defsubst egg-sha1 (rev)
+  "get the SHA1 of REV."
   (egg-git-to-string "rev-parse" (concat rev "~0")))
 
 (defun egg-read-git-dir ()
+  "call GIT to read the git directory of default-directory."
   (let ((dir (egg-git-to-string "rev-parse" "--git-dir")))
     (if (stringp dir) 
 	(expand-file-name dir))))
 
 (defsubst egg-read-dir-git-dir (dir)
+  "call GIT to read the git directory of DIR."
   (let ((default-directory dir)) (egg-read-git-dir)))
 
 (defvar egg-git-dir nil)
 (defsubst egg-git-dir ()
+  "return the (pre-read) git-dir of default-directory"
   (if (local-variable-p 'egg-git-dir)
       egg-git-dir
     (set (make-local-variable 'egg-git-dir) (egg-read-git-dir))
+    ;; first time, no status yet.
+    ;; this directory's specific var will be updated by
+    ;; egg-set-mode-info
     (set (intern (concat "egg-" egg-git-dir "-HEAD")) " Egg")
     egg-git-dir))
 
 (defsubst egg-buf-git-dir (buffer)
+  "return the (pre-read) git-dir of BUFFER."
   (with-current-buffer buffer
     (egg-git-dir)))
 
 (defun egg-HEAD ()
+  "return HEAD.
+Either a symbolic ref or a sha1."
   (let* ((git-dir (egg-git-dir))) 
     (if git-dir
 	(egg-pick-file-contents (concat git-dir "/HEAD")
-				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-z]+\\)" 1 2))))
+				 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-f]+\\)" 1 2))))
 
 (defun egg-all-refs ()
   "Get a list of all refs."
