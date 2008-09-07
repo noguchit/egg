@@ -126,6 +126,15 @@ Many Egg faces inherit from this one by default."
   "Face for the current branch."
   :group 'egg)
 
+(defface egg-term
+  '((((class color) (background light))
+     :foreground "SkyBlue" :inherit bold)
+    (((class color) (background dark))
+     :foreground "Yellow" :inherit bold)
+    (t :weight bold))
+  "Face for an important term."
+  :group 'egg)
+
 (defface egg-diff-file-header
   '((((class color) (background light))
      :foreground "SlateBlue" :inherit egg-header)
@@ -1251,13 +1260,15 @@ success."
 	       (unless (eq major-mode ',buffer-mode-sym)
 		 (,buffer-mode-sym))))
 	   buf))
-       (defun ,update-buffer-no-create-sym ()
-	 (let ((buf (,get-buffer-sym)))
-	   (when (bufferp buf)
-	     (with-current-buffer buf
-	       (when (functionp egg-buffer-refresh-func)
-		 (funcall egg-buffer-refresh-func buf))))))
-       (add-hook 'egg-buffers-refresh-hook ',update-buffer-no-create-sym))))
+       ,(unless (string-match ":" type-name)
+	  `(progn
+	     (defun ,update-buffer-no-create-sym ()
+	       (let ((buf (,get-buffer-sym)))
+		 (when (bufferp buf)
+		   (with-current-buffer buf
+		     (when (functionp egg-buffer-refresh-func)
+		       (funcall egg-buffer-refresh-func buf))))))
+	     (add-hook 'egg-buffers-refresh-hook ',update-buffer-no-create-sym))))))
 
 
 ;; (cl-macroexpand '(define-egg-buffer diff "*diff-%s@egg:%s*"))
@@ -2066,13 +2077,38 @@ success."
 ;;; log browsing
 ;;;========================================================
 (defvar egg-log-buffer-comment-column nil)
-(defvar egg-log-buffer-git-log-args
-  '("--max-count=10000" "--graph" "--topo-order"
-    "--pretty=oneline" "--decorate"))
+;; (defvar egg-log-buffer-git-log-args
+;;   '("--max-count=10000" "--graph" "--topo-order"
+;;     "--pretty=oneline" "--decorate"))
+
+(defvar egg-internal-log-buffer-closure nil)
+
+(defun egg-run-git-log-HEAD ()
+  (egg-git-ok t "log" "--max-count=10000" "--graph" "--topo-order"
+		"--pretty=oneline" "--decorate"))
+
+(defun egg-run-git-log-all ()
+  (egg-git-ok t "log" "--max-count=10000" "--graph" "--topo-order"
+		"--pretty=oneline" "--decorate" "--all"))
+
+(defun egg-run-git-log-pickaxe (string)
+  (egg-git-ok t "log" "--pretty=oneline" "--decorate"
+	      (concat "-S" string)))
+
+
+(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func)
+  (let ((beg (point)))
+    (funcall log-insert-func)
+    (goto-char beg)
+    (egg-decorate-log egg-log-commit-map 
+		      egg-log-local-ref-map
+		      egg-log-local-ref-map
+		      egg-log-remote-ref-map)))
+
 (defconst egg-log-commit-map 
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
     (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
+    (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "B") 'egg-log-buffer-create-new-branch)
     (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
@@ -2193,6 +2229,8 @@ success."
 	
 	(setq dashes-len (- 300 graph-len 1 
 			    (if refs (1+ ref-string-len) 0)))
+;;; 	(setq dashes-len (- 300 graph-len
+;;; 			    (if refs (1+ ref-string-len) 0)))
 	(setq min-dashes-len (min min-dashes-len dashes-len))
 
 	(goto-char (match-beginning 2))
@@ -2212,9 +2250,25 @@ success."
 	  (move-overlay ov beg (1+ (line-end-position)))))
       
       (goto-char start)
+
+      ;; compute how many dashes can be deleted while
+      ;; leaving at least 1 dash
       (setq min-dashes-len (1- min-dashes-len))
+
+      ;; before cut
+      ;; type a: 300 = graph spc dashes
+      ;; type b: 300 = graph spc dashes spc ref-string
+      ;;
+      ;; after cut
+      ;; type a: 300 - min-dashes-len = graph spc dashes
+      ;; type b: 300 - min-dashes-len = graph spc dashes spc ref-string
+      ;; 
+      ;; a: comment-column = graph spc dashes spc sha1-8 spc
+      ;; b: comment-column = graph spc dashes spc ref-string spc sha1-8 spc
+      ;; need to remove the 1st spc if graph-len = 0
       (set (make-local-variable 'egg-log-buffer-comment-column)
-	   (+ (- 300 min-dashes-len) 1 8 1))
+	   (+ (- 300 min-dashes-len (if (> graph-len 0) 0 1)) 1 8 1))
+
       (when (> min-dashes-len 0)
 	(let ((re (format "^\\(?:[^\n-]+ \\)?\\(-\\{%d\\}\\)" min-dashes-len)))
 	  (while (re-search-forward re nil t)
@@ -2509,6 +2563,8 @@ success."
     (let* ((state (egg-repo-state))
 	   (sha1 (plist-get state :sha1))
 	   (inhibit-read-only t)
+	   (banner (plist-get egg-internal-log-buffer-closure :description))
+	   (closure (plist-get egg-internal-log-buffer-closure :closure))
 	   inv-beg beg)
       (erase-buffer)
       (insert (propertize (egg-pretty-head-string state) 'face 'egg-branch) 
@@ -2516,17 +2572,11 @@ success."
 	      (propertize sha1 'face 'font-lock-string-face)
 	      "\n"
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
-	      "\n\n")
+	      (if banner (concat "\n" banner "\n") "\n")
+	      "\n")
       (setq beg (point))
       (setq inv-beg (- beg 2))
-
-      (apply 'call-process "git" nil t nil "log"
-	     egg-log-buffer-git-log-args)
-      (goto-char beg)
-      (egg-decorate-log egg-log-commit-map 
-			egg-log-local-ref-map
-			egg-log-local-ref-map
-			egg-log-remote-ref-map)
+      (funcall closure)
       (goto-char beg))))
 
 (defun egg-log-buffer-redraw (buffer)
@@ -2611,33 +2661,33 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
-      (make-local-variable 'egg-log-buffer-git-log-args)
-      (if all
-	  (unless (member "--all" egg-log-buffer-git-log-args)
-	    (setq egg-log-buffer-git-log-args
-		  (cons "--all" egg-log-buffer-git-log-args)))
-	(when (member  "--all" egg-log-buffer-git-log-args)
-	  (setq egg-log-buffer-git-log-args
-		(delete "--all" egg-log-buffer-git-log-args)))) 
+      (set 
+       (make-local-variable 'egg-internal-log-buffer-closure)
+       (if all
+	   (list :description (concat 
+			       (propertize "history: " 'face 'egg-text-2)
+			       (propertize "all" 'face 'egg-term))
+		 :closure (lambda ()
+			    (egg-log-buffer-insert-n-decorate-logs
+			     'egg-run-git-log-all)))
+	 (list :description (concat 
+			     (propertize "history: " 'face 'egg-text-2)
+			     (propertize "HEAD" 'face 'egg-term))
+	       :closure (lambda ()
+			  (egg-log-buffer-insert-n-decorate-logs
+			   'egg-run-git-log-HEAD)))))
       (egg-log-buffer-redraw buf))
     (pop-to-buffer buf t)))
 ;;;========================================================
 ;;; commit search
 ;;;========================================================
-(defconst egg-query:commit-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:CommitQuery")))
-    (set-keymap-parent map egg-log-buffer-mode-map)
-    (define-key map "s" 'egg-status)
-    (define-key map "g" 'egg-query:commit-buffer-rerun)
-    map))
-
 (defconst egg-query:commit-commit-map 
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
     (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
+    (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
-    (define-key map (kbd "l") 'egg-query:commit-locate)
+    (define-key map (kbd "RET") 'egg-query:commit-locate)
     (define-key map (kbd "C-c C-c") 'egg-query:commit-locate)
     map))
 
@@ -2670,8 +2720,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	  (closure (plist-get egg-query:commit-buffer-query :closure))
 	  inv-beg beg)
       (erase-buffer)
-      (insert (propertize banner 'face 'egg-text-3) 
-	      "\n"
+      (insert banner "\n"
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
 	      "\n\n")
       (setq beg (point))
@@ -2688,15 +2737,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	mode-name  "Egg-Query:Commit"
 	mode-line-process ""
 	truncate-lines t)
-  (use-local-map egg-query:commit-buffer-mode-map)
+  (use-local-map egg-buffer-mode-map)
   (set (make-local-variable 'egg-query:commit-buffer-query) nil)
-  ;; no auto-refresh for querries, should be on demand
-  (set (make-local-variable 'egg-buffer-refresh-func) nil)
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-query:commit-buffer-rerun)
   ;; re use log-buffer redrawing
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
-
 
 
 (defun egg-search-changes (string)
@@ -2704,7 +2752,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-query:commit-buffer 'create))
-	 (desc (format "Commits containing: %s" string))
+	 (desc (concat (propertize "Commits containing: "
+				   'face 'egg-text-2)
+		       (propertize string 'face 'egg-term)))
 	 (func `(lambda ()
 		  (egg-git-ok t "log" "--pretty=oneline" "--decorate"
 			      (concat "-S" ,string)))))
