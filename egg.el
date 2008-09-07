@@ -2507,7 +2507,6 @@ success."
     (setq buffer-invisibility-spec nil)
     (let* ((state (egg-repo-state))
 	   (sha1 (plist-get state :sha1))
-	   (orig-pos (point))
 	   (inhibit-read-only t)
 	   inv-beg beg)
       (erase-buffer)
@@ -2621,7 +2620,79 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		(delete "--all" egg-log-buffer-git-log-args)))) 
       (egg-log-buffer-redraw buf))
     (pop-to-buffer buf t)))
+;;;========================================================
+;;; commit search
+;;;========================================================
+(defconst egg-query:commit-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:CommitQuery")))
+    (set-keymap-parent map egg-log-buffer-mode-map)
+    (define-key map "s" 'egg-status)
+    (define-key map "g" 'egg-query:commit-buffer-rerun)
+    map))
 
+(defconst egg-query:commit-commit-map 
+  (let ((map (make-sparse-keymap "Egg:LogCommit")))
+    (set-keymap-parent map egg-hide-show-map)
+    (define-key map (kbd "RET") 'egg-log-buffer-insert-commit)
+    (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
+    (define-key map (kbd "a") 'egg-log-buffer-attach-head)
+    (define-key map (kbd "l") 'egg-query:commit-locate)
+    (define-key map (kbd "C-c C-c") 'egg-query:commit-locate)
+    map))
+
+(defvar egg-query:commit-buffer-query nil)
+(defun egg-query:commit-buffer-rerun (buffer)
+  (interactive (list (current-buffer)))
+  (with-current-buffer buffer
+    (buffer-disable-undo buffer)
+    (setq buffer-invisibility-spec nil)
+    (let ((inhibit-read-only t)
+	  (banner (plist-get egg-query:commit-buffer-query :description))
+	  (closure (plist-get egg-query:commit-buffer-query :closure))
+	  inv-beg beg)
+      (erase-buffer)
+      (insert (propertize banner 'face 'egg-text-3) 
+	      "\n"
+	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
+	      "\n\n")
+      (setq beg (point))
+      (setq inv-beg (- beg 2))
+      (funcall closure)
+      (goto-char beg)
+      (egg-decorate-log egg-query:commit-commit-map)
+      (goto-char beg))))
+
+(define-egg-buffer query:commit "*%s-query:commit@%s*"
+  (kill-all-local-variables)
+  (setq buffer-read-only t)
+  (setq major-mode 'egg-query:commit-buffer-mode
+	mode-name  "Egg-Query:Commit"
+	mode-line-process ""
+	truncate-lines t)
+  (use-local-map egg-query:commit-buffer-mode-map)
+  (set (make-local-variable 'egg-query:commit-buffer-query) nil)
+  ;; no auto-refresh for querries, should be on demand
+  (set (make-local-variable 'egg-buffer-refresh-func) nil)
+  ;; re use log-buffer redrawing
+  (set (make-local-variable 'egg-log-buffer-comment-column) 0)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
+
+(defun egg-search-changes (string)
+  (interactive "ssearch history for changes containing: ")
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir))
+	 (buf (egg-get-query:commit-buffer 'create))
+	 (desc (format "Commits containing: %s" string))
+	 (func `(lambda ()
+		  (egg-git-ok t "log" "--pretty=oneline"
+			      "--graph" "--decorate"
+			      (concat "-S" ,string)))))
+    (with-current-buffer buf
+      (set (make-local-variable 'egg-query:commit-buffer-query)
+	   (list :description desc :closure func))
+      (egg-query:commit-buffer-rerun buf))
+    (pop-to-buffer buf t)))
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
