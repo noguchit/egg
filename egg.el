@@ -2671,13 +2671,13 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
        (make-local-variable 'egg-internal-log-buffer-closure)
        (if all
 	   (list :description (concat 
-			       (propertize "history: " 'face 'egg-text-2)
-			       (propertize "all" 'face 'egg-term))
+			       (propertize "history of: " 'face 'egg-text-2)
+			       (propertize "all refs" 'face 'egg-term))
 		 :closure (lambda ()
 			    (egg-log-buffer-insert-n-decorate-logs
 			     'egg-run-git-log-all)))
 	 (list :description (concat 
-			     (propertize "history: " 'face 'egg-text-2)
+			     (propertize "history of: " 'face 'egg-text-2)
 			     (propertize "HEAD" 'face 'egg-term))
 	       :closure (lambda ()
 			  (egg-log-buffer-insert-n-decorate-logs
@@ -2704,11 +2704,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
 	   (list :description 
-		 (concat (propertize "history: " 'face 'egg-text-2)
+		 (concat (propertize "history of: " 'face 'egg-text-2)
 			 (propertize "HEAD" 'face 'egg-term)
 			 (propertize " and " 'face 'egg-text-2)
-			 (propertize sha1 'face 'egg-term)
-			 )
+			 (propertize sha1 'face 'egg-term))
 		 :closure 
 		 (lambda ()
 		   (egg-log-buffer-insert-n-decorate-logs
@@ -2725,27 +2724,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (egg-log-buffer-goto-pos pos)
     (recenter)))
 
-
-(defvar egg-query:commit-buffer-query nil)
 (defun egg-query:commit-buffer-rerun (buffer)
   (interactive (list (current-buffer)))
   (with-current-buffer buffer
-    (buffer-disable-undo buffer)
-    (setq buffer-invisibility-spec nil)
-    (let ((inhibit-read-only t)
-	  (banner (plist-get egg-query:commit-buffer-query :description))
-	  (closure (plist-get egg-query:commit-buffer-query :closure))
-	  inv-beg beg)
-      (erase-buffer)
-      (insert banner "\n"
-	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
-	      "\n\n")
-      (setq beg (point))
-      (setq inv-beg (- beg 2))
-      (funcall closure)
-      (goto-char beg)
-      (egg-decorate-log egg-query:commit-commit-map)
-      (goto-char beg))))
+    (plist-put egg-internal-log-buffer-closure :title
+	       (propertize "History Search" 'face 'egg-branch))
+    (egg-generic-display-logs egg-internal-log-buffer-closure)))
 
 (define-egg-buffer query:commit "*%s-query:commit@%s*"
   (kill-all-local-variables)
@@ -2755,7 +2739,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	mode-line-process ""
 	truncate-lines t)
   (use-local-map egg-buffer-mode-map)
-  (set (make-local-variable 'egg-query:commit-buffer-query) nil)
+  (set (make-local-variable 'egg-internal-log-buffer-closure) nil)
   (set (make-local-variable 'egg-buffer-refresh-func)
        'egg-query:commit-buffer-rerun)
   ;; re use log-buffer redrawing
@@ -2763,6 +2747,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
 
+(defun egg-insert-n-decorate-pickaxed-logs (string)
+  (let ((beg (point)))
+    (egg-git-ok t "log" "--pretty=oneline" "--decorate" 
+		(concat "-S" string))
+    (goto-char beg)
+    (egg-decorate-log egg-query:commit-commit-map)))
 
 (defun egg-search-changes (string)
   (interactive "ssearch history for changes containing: ")
@@ -2773,12 +2763,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				   'face 'egg-text-2)
 		       (propertize string 'face 'egg-term)))
 	 (func `(lambda ()
-		  (egg-git-ok t "log" "--pretty=oneline" "--decorate"
-			      (concat "-S" ,string)))))
+		  (egg-insert-n-decorate-pickaxed-logs ,string))))
     (with-current-buffer buf
-      (set (make-local-variable 'egg-query:commit-buffer-query)
-	   (list :description desc :closure func))
-      (egg-query:commit-buffer-rerun buf))
+      (set (make-local-variable 'egg-internal-log-buffer-closure)
+	 (list :description desc :closure func))
+      (egg-query:commit-buffer-rerun buf))			 
     (pop-to-buffer buf t)))
 ;;;========================================================
 ;;; minor-mode
