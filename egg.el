@@ -2139,10 +2139,11 @@ success."
 	separator ref-string refs full-refs sha1
 	line-props graph-len beg end)
     (save-excursion
-      (while (re-search-forward "^\\([ \\\\/*|.-]+\\) \\([0-9a-f]+\\) \\((\\(?:tag: \\)?\\([^)]+\\)) \\)?\\(.+\\)$" nil t)
+      (while (re-search-forward "^\\(?:\\([ \\\\/*|.-]+\\) \\)?\\([0-9a-f]+\\) \\((\\(?:tag: \\)?\\([^)]+\\)) \\)?\\(.+\\)$" nil t)
 	(setq beg (match-beginning 0)
 	      end (1+ (match-end 0)))
-	(setq graph-len (- (match-end 1) (match-beginning 1)))
+	(setq graph-len (if (match-end 1) 
+			    (- (match-end 1) (match-beginning 1)) 0))
 	(setq sha1 (match-string-no-properties 2))
 	(setq full-refs (if (match-beginning 4)
 			    (save-match-data
@@ -2215,7 +2216,7 @@ success."
       (set (make-local-variable 'egg-log-buffer-comment-column)
 	   (+ (- 300 min-dashes-len) 1 8 1))
       (when (> min-dashes-len 0)
-	(let ((re (format "^[^\n-]+ \\(-\\{%d\\}\\)" min-dashes-len)))
+	(let ((re (format "^\\(?:[^\n-]+ \\)?\\(-\\{%d\\}\\)" min-dashes-len)))
 	  (while (re-search-forward re nil t)
 	    (delete-region (match-beginning 1) (match-end 1))))))))
 
@@ -2705,8 +2706,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (buf (egg-get-query:commit-buffer 'create))
 	 (desc (format "Commits containing: %s" string))
 	 (func `(lambda ()
-		  (egg-git-ok t "log" "--pretty=oneline"
-			      "--graph" "--decorate"
+		  (egg-git-ok t "log" "--pretty=oneline" "--decorate"
 			      (concat "-S" ,string)))))
     (with-current-buffer buf
       (set (make-local-variable 'egg-query:commit-buffer-query)
