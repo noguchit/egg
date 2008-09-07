@@ -2640,6 +2640,24 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map (kbd "C-c C-c") 'egg-query:commit-locate)
     map))
 
+(defun egg-query:commit-locate (pos)
+  (interactive "d")
+  (let ((sha1 (get-text-property pos :commit))
+	(buf (egg-get-log-buffer 'create)))
+    (with-current-buffer buf
+      (set (make-local-variable 'egg-log-buffer-git-log-args)
+	   (append (list sha1 "HEAD")
+		   egg-log-buffer-git-log-args)) 
+      (egg-log-buffer-redraw buf)
+      (setq pos (point-min))
+      (while (and pos
+		  (not (equal (get-text-property pos :commit) sha1)))
+	(setq pos (next-single-property-change pos :commit))))
+    (pop-to-buffer buf t)
+    (egg-log-buffer-goto-pos pos)
+    (recenter)))
+
+
 (defvar egg-query:commit-buffer-query nil)
 (defun egg-query:commit-buffer-rerun (buffer)
   (interactive (list (current-buffer)))
@@ -2677,6 +2695,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
+
+
 
 (defun egg-search-changes (string)
   (interactive "ssearch history for changes containing: ")
