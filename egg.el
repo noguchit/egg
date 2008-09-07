@@ -754,11 +754,6 @@ success."
 		(egg-async-exit-msg msg)) 
 	    (apply callback-func callback-args))))))
 
-(defsubst egg-buffer-async-do (accepted-code &rest args)
-  (egg-async-do accepted-code 
-		(cons egg-buffer-refresh-func (list (current-buffer)))
-		args))
-
 ;;;========================================================
 ;;; Diff/Hunk
 ;;;========================================================
@@ -1199,6 +1194,14 @@ success."
 ;;; Buffer
 ;;;========================================================
 (defvar egg-buffer-refresh-func nil)
+(defvar egg-buffer-async-cmd-refresh-func nil)
+
+(defsubst egg-buffer-async-do (accepted-code &rest args)
+  (egg-async-do accepted-code 
+		(cons (or egg-buffer-async-cmd-refresh-func
+			  egg-buffer-refresh-func) 
+		      (list (current-buffer)))
+		args))
 
 (defsubst egg-run-buffers-update-hook (&optional newly-read-state)
   (let ((egg-internal-current-state 
@@ -2077,10 +2080,6 @@ success."
 ;;; log browsing
 ;;;========================================================
 (defvar egg-log-buffer-comment-column nil)
-;; (defvar egg-log-buffer-git-log-args
-;;   '("--max-count=10000" "--graph" "--topo-order"
-;;     "--pretty=oneline" "--decorate"))
-
 (defvar egg-internal-log-buffer-closure nil)
 
 (defun egg-run-git-log-HEAD ()
@@ -2556,30 +2555,38 @@ success."
     (unless (equal (get-text-property pos :commit) sha1)
       (egg-log-buffer-do-insert-commit pos))))
 
-(defun egg-log-buffer-insert-logs (buffer)
-  (with-current-buffer buffer
-    (buffer-disable-undo buffer)
-    (setq buffer-invisibility-spec nil)
-    (let* ((state (egg-repo-state))
-	   (sha1 (plist-get state :sha1))
-	   (inhibit-read-only t)
-	   (banner (plist-get egg-internal-log-buffer-closure :description))
-	   (closure (plist-get egg-internal-log-buffer-closure :closure))
-	   inv-beg beg)
+(defun egg-generic-display-logs (data)
+  (buffer-disable-undo)
+  (setq buffer-invisibility-spec nil)
+  (let ((title (plist-get data :title))
+	(subtitle (plist-get data :subtitle))
+	(git-dir (egg-git-dir))
+	(desc (plist-get egg-internal-log-buffer-closure :description))
+	(closure (plist-get egg-internal-log-buffer-closure :closure))
+	(inhibit-read-only t)
+	inv-beg beg)
       (erase-buffer)
-      (insert (propertize (egg-pretty-head-string state) 'face 'egg-branch) 
-	      "\n"
-	      (propertize sha1 'face 'font-lock-string-face)
-	      "\n"
+      (insert title
+	      (if subtitle (concat "\n" subtitle "\n") "\n")
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
-	      (if banner (concat "\n" banner "\n") "\n")
+	      (if desc (concat "\n" desc "\n") "\n")
 	      "\n")
       (setq beg (point))
       (setq inv-beg (- beg 2))
       (funcall closure)
-      (goto-char beg))))
+      (goto-char beg)))
 
-(defun egg-log-buffer-redraw (buffer)
+(defun egg-log-buffer-redisplay (buffer)
+  (with-current-buffer buffer
+    (let* ((state (egg-repo-state))
+	   (sha1 (plist-get state :sha1)))
+      (plist-put egg-internal-log-buffer-closure :title
+		 (propertize (egg-pretty-head-string state) 'face 'egg-branch))
+      (plist-put egg-internal-log-buffer-closure :subtitle
+		 (propertize sha1 'face 'font-lock-string-face))
+      (egg-generic-display-logs egg-internal-log-buffer-closure))))
+
+(defun egg-log-buffer-redisplay-from-command (buffer)
   ;; in process buffer
   (when (and (processp egg-async-process)
 	     (equal (current-buffer) (process-buffer egg-async-process)))
@@ -2591,8 +2598,7 @@ success."
 	   (message "%s: %s" (match-string-no-properties 1)
 		    (match-string-no-properties 2)))))))
   ;; update log buffer
-  (egg-log-buffer-insert-logs buffer))
-
+  (egg-log-buffer-redisplay buffer))
 
 (define-egg-buffer log "*%s-log@%s*"
   "Major mode to display the output of git log.\\<egg-log-buffer-mode-map>
@@ -2640,8 +2646,6 @@ Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-l
 Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-ref-map>
 \\[egg-log-buffer-fetch-remote-ref] download the new value of the ref from the remote repo.
 ."
-
-
   (kill-all-local-variables)
   (setq buffer-read-only t)
   (setq major-mode 'egg-log-buffer-mode
@@ -2650,7 +2654,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	truncate-lines t)
   (use-local-map egg-log-buffer-mode-map)
   (set (make-local-variable 'egg-buffer-refresh-func)
-       'egg-log-buffer-redraw)
+       'egg-log-buffer-redisplay)
+  (set (make-local-variable 'egg-buffer-async-cmd-refresh-func)
+       'egg-log-buffer-redisplay-from-command)
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
@@ -2676,7 +2682,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       :closure (lambda ()
 			  (egg-log-buffer-insert-n-decorate-logs
 			   'egg-run-git-log-HEAD)))))
-      (egg-log-buffer-redraw buf))
+      (egg-log-buffer-redisplay buf))
     (pop-to-buffer buf t)))
 ;;;========================================================
 ;;; commit search
@@ -2696,10 +2702,21 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((sha1 (get-text-property pos :commit))
 	(buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
-      (set (make-local-variable 'egg-log-buffer-git-log-args)
-	   (append (list sha1 "HEAD")
-		   egg-log-buffer-git-log-args)) 
-      (egg-log-buffer-redraw buf)
+      (set (make-local-variable 'egg-internal-log-buffer-closure)
+	   (list :description 
+		 (concat (propertize "history: " 'face 'egg-text-2)
+			 (propertize "HEAD" 'face 'egg-term)
+			 (propertize " and " 'face 'egg-text-2)
+			 (propertize sha1 'face 'egg-term)
+			 )
+		 :closure 
+		 (lambda ()
+		   (egg-log-buffer-insert-n-decorate-logs
+		    `(lambda ()
+		       (egg-git-ok t "log" "--max-count=10000" "--graph"
+				   "--topo-order" "--pretty=oneline"
+				   "--decorate" "HEAD" sha1)))))) 
+      (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
 		  (not (equal (get-text-property pos :commit) sha1)))
