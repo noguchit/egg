@@ -135,6 +135,15 @@ Many Egg faces inherit from this one by default."
   "Face for an important term."
   :group 'egg)
 
+(defface egg-warning
+  '((((class color) (background light))
+     :foreground "Red" :inherit bold)
+    (((class color) (background dark))
+     :foreground "Orange" :inherit bold)
+    (t :weight bold))
+  "Face for a warning."
+  :group 'egg)
+
 (defface egg-diff-file-header
   '((((class color) (background light))
      :foreground "SlateBlue" :inherit egg-header)
@@ -2241,7 +2250,7 @@ success."
 			       line-props))
 		 (if refs
 		     (concat separator ref-string separator)
-			separator)))
+		   separator)))
 	
 	(when (string= sha1 head-sha1)
 	  (overlay-put ov 'face 'region)
@@ -2250,28 +2259,31 @@ success."
       
       (goto-char start)
 
-      ;; compute how many dashes can be deleted while
-      ;; leaving at least 1 dash
-      (setq min-dashes-len (1- min-dashes-len))
+      (if (= min-dashes-len 300)
+	  (insert (propertize "nothing found!" 'face 'egg-warning))
 
-      ;; before cut
-      ;; type a: 300 = graph spc dashes
-      ;; type b: 300 = graph spc dashes spc ref-string
-      ;;
-      ;; after cut
-      ;; type a: 300 - min-dashes-len = graph spc dashes
-      ;; type b: 300 - min-dashes-len = graph spc dashes spc ref-string
-      ;; 
-      ;; a: comment-column = graph spc dashes spc sha1-8 spc
-      ;; b: comment-column = graph spc dashes spc ref-string spc sha1-8 spc
-      ;; need to remove the 1st spc if graph-len = 0
-      (set (make-local-variable 'egg-log-buffer-comment-column)
-	   (+ (- 300 min-dashes-len (if (> graph-len 0) 0 1)) 1 8 1))
+	;; compute how many dashes can be deleted while
+	;; leaving at least 1 dash
+	(setq min-dashes-len (1- min-dashes-len))
 
-      (when (> min-dashes-len 0)
-	(let ((re (format "^\\(?:[^\n-]+ \\)?\\(-\\{%d\\}\\)" min-dashes-len)))
-	  (while (re-search-forward re nil t)
-	    (delete-region (match-beginning 1) (match-end 1))))))))
+	;; before cut
+	;; type a: 300 = graph spc dashes
+	;; type b: 300 = graph spc dashes spc ref-string
+	;;
+	;; after cut
+	;; type a: 300 - min-dashes-len = graph spc dashes
+	;; type b: 300 - min-dashes-len = graph spc dashes spc ref-string
+	;; 
+	;; a: comment-column = graph spc dashes spc sha1-8 spc
+	;; b: comment-column = graph spc dashes spc ref-string spc sha1-8 spc
+	;; need to remove the 1st spc if graph-len = 0
+	(set (make-local-variable 'egg-log-buffer-comment-column)
+	     (+ (- 300 min-dashes-len (if (> graph-len 0) 0 1)) 1 8 1))
+
+	(when (> min-dashes-len 0)
+	  (let ((re (format "^\\(?:[^\n-]+ \\)?\\(-\\{%d\\}\\)" min-dashes-len)))
+	    (while (re-search-forward re nil t)
+	      (delete-region (match-beginning 1) (match-end 1)))))))))
 
 (defun egg-log-diff-cmd-visit-file (file sha1)
   (interactive (list (car (get-text-property (point) :diff))
