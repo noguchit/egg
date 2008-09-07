@@ -1826,6 +1826,15 @@ success."
       (egg-show-git-output output -1 "GIT-COMMIT")
       (egg-run-buffers-update-hook))))
 
+(defun egg-log-msg-amend-commit ()
+  (let (output)
+    (setq output 
+	  (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end 
+			       "commit" "--amend" "-F" "-"))
+    (when output
+      (egg-show-git-output output -1 "GIT-COMMIT-AMEND")
+      (egg-run-buffers-update-hook))))
+
 (defun egg-log-msg-done ()
   (interactive)
   (widen)
@@ -1904,8 +1913,8 @@ success."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-commit-buffer-mode-hook))
 
-(defun egg-commit-log-edit ()
-  (interactive)
+(defun egg-commit-log-edit (&optional amend)
+  (interactive "P")
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-commit-buffer 'create))
@@ -1916,7 +1925,8 @@ success."
     (pop-to-buffer buf t)
     (setq inhibit-read-only t)
     (erase-buffer)
-    (set (make-local-variable 'egg-log-msg-action) 'egg-log-msg-commit)
+    (set (make-local-variable 'egg-log-msg-action)
+	 (if amend 'egg-log-msg-amend-commit 'egg-log-msg-commit))
     (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "--------------- Commit Message (type C-c C-c when done) ---------------"
@@ -1935,6 +1945,9 @@ success."
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
     (egg-commit-log-buffer-show-diffs buf 'init)
     (goto-char egg-log-msg-text-beg)
+    (when amend
+      (egg-git-ok t "log" "--max-count=1" "--pretty=format:%s%n%n%b"
+		  "HEAD"))
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
 
@@ -2572,6 +2585,7 @@ Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-l
   for a remote-tracking local branch this would updating the tracking target.
   for other local refs this  means uploading (or deleting) the local value
    of the ref to the remote repository.
+\\[egg-log-buffer-push-head-to-local] update the local ref under the cursor with the current HEAD.
 
 Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-ref-map>
 \\[egg-log-buffer-fetch-remote-ref] download the new value of the ref from the remote repo.
