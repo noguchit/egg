@@ -2499,6 +2499,7 @@ success."
     (setq name (file-name-nondirectory ref)
 	  remote (egg-rbranch-to-remote ref))
     (when (and remote name)
+      (message "GIT> fetching %s from %s..." ref remote)
       (egg-buffer-async-do nil "fetch" remote 
 			   (format "refs/heads/%s:refs/remotes/%s"
 				   name ref)))))
@@ -2566,6 +2567,7 @@ success."
 	(setq remote nil rref nil lref nil)))
     (when (and remote rref lref)
       (setq spec (concat lref ":" rref))
+      (message "GIT> pushing %s to %s on %s..." lref rref remote)
       (egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") 
 			   remote spec))))
 
