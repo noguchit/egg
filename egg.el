@@ -300,15 +300,17 @@ is used as input to GIT."
 
 (defsubst egg-repo-clean () (and (egg-wdir-clean) (egg-index-empty)))
 
-(defsubst egg-git-to-lines (&rest args)
+(defun egg-git-to-lines (&rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
-  (save-match-data
-    (split-string (egg-cmd-to-string-1 "git" args) "[\n]+" t)))
+  (let ((out (egg-cmd-to-string-1 "git" args)))
+    (if out 
+	(save-match-data
+	  (split-string out "[\n]+" t)))))
 
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
-  (car (egg-git-to-lines "ls-files" "--full-name" "--" file)))
+  (egg-git-to-string "ls-files" "--full-name" "--" file))
 
 (defsubst egg-buf-git-name (&optional buf)
   "return the repo-relative name of the file visited by BUF.
@@ -548,6 +550,40 @@ Either a symbolic ref or a sha1."
 		(cons full-name name))))
 	  (egg-git-to-lines "show-ref")))
 
+
+(defun egg-complete-rev (string &optional ignored all)
+  (save-match-data
+    (cond ((string-match "\\`:[0-3]*" string)
+	   (funcall (if all 'all-completions 'try-completion)
+		    string '(":0" ":1" ":2" ":3")))
+	  ((string-match "[\\^~][\\^~0-9]*\\'" string)
+	   (if (egg-git-ok nil "rev-parse" string) 
+	       (if all (list string)
+		 string)))
+	  (t (let ((matches 
+		    (egg-git-to-lines "for-each-ref" "--format=%(refname)"
+				      (concat "refs/*/" string "*")
+				      (concat "refs/*/" string "*/*")))
+		   prefix)
+	       (setq matches
+		     (mapcar (lambda (long)
+			       (string-match 
+				"\\`refs/\\(?:heads\\|tags\\|remotes\\)/\\(.+\\)\\'"
+				long)
+			       (match-string-no-properties 1 long))
+			     matches))
+	       (setq prefix 
+		     (funcall (if all 'all-completions 'try-completion)
+			      string 
+			      (nconc (directory-files (egg-git-dir)
+						      nil "HEAD")
+				     matches)))
+	       (cond (all prefix)
+		     ((stringp prefix) prefix)
+		     ((stringp prefix) prefix)
+		     ((null prefix) nil)
+		     (t string)))))))
+
 (defun egg-decorate-ref (full-name)
   (save-match-data
     (let (name type)
@@ -565,9 +601,9 @@ Either a symbolic ref or a sha1."
 			   :ref (cons name :tag)))
 	      ((string= type "remotes")
 	       (propertize
-		(concat (propertize (file-name-directory name)
+		(concat (propertize (egg-rbranch-name name)
 				    'face 'egg-remote-mono)
-			(propertize (file-name-nondirectory name)
+			(propertize (egg-rbranch-name name)
 				    'face 'egg-branch-mono))
 		:ref (cons name :remote))))))))
 
@@ -719,25 +755,23 @@ Either a symbolic ref or a sha1."
   (let ((remote (egg-config-get "branch" "remote" branch))
 	(rbranch (egg-config-get "branch" "merge" branch)))
     (when (stringp rbranch)
-      (setq rbranch (file-name-nondirectory rbranch))
+      (setq rbranch (egg-rbranch-name rbranch))
       (cond ((null mode) (concat remote "/" rbranch))
 	    ((eq :name-only mode) rbranch)
 	    (t (cons rbranch remote))))))
 
-(defun egg-revs ()
-  (apply 'nconc 
-	 (mapcar (lambda (ref)
-		   (cons ref 
-			 (mapcar (lambda (suffix)
-			     (concat ref suffix))
-				 '("^" "^^" "^^^" "^^^^" "^^^^^"
-				   "~0" "~1" "~2" "~3" "~4" "~5"))))
-		 (egg-all-refs))))
+;; (defun egg-revs ()
+;;   (apply 'nconc 
+;; 	 (mapcar (lambda (ref)
+;; 		   (cons ref 
+;; 			 (mapcar (lambda (suffix)
+;; 			     (concat ref suffix))
+;; 				 '("^" "^^" "^^^" "^^^^" "^^^^^"
+;; 				   "~0" "~1" "~2" "~3" "~4" "~5"))))
+;; 		 (egg-all-refs))))
 
-(defun egg-read-rev (prompt &optional default special-rev)
-  (unless (listp special-rev)
-    (setq special-rev (list special-rev)))
-  (completing-read prompt (nconc special-rev (egg-revs)) nil nil default))
+(defsubst egg-read-rev (prompt &optional default)
+  (completing-read prompt 'egg-complete-rev nil nil default))
 
 (defun egg-read-remote (prompt &optional default)
   (completing-read prompt (egg-config-get-all-remote-names) nil t default))
@@ -2463,8 +2497,7 @@ success."
     (unless (eq type :remote)
       (error "Nothing to fetch from here!"))
     (setq name (file-name-nondirectory ref)
-	  remote (directory-file-name
-		  (file-name-directory ref)))
+	  remote (egg-rbranch-to-remote ref))
     (when (and remote name)
       (egg-buffer-async-do nil "fetch" remote 
 			   (format "refs/heads/%s:refs/remotes/%s"
@@ -2889,7 +2922,7 @@ current file contains unstaged changes."
 	 (rbranch (and git-dir (or (egg-tracking-target lbranch)
 				   rev ":0")))
 	 (prompt (or prompt (format "%s's version: " file)))
-	 (rev (or rev (egg-read-rev prompt rbranch ":0")))
+	 (rev (or rev (egg-read-rev prompt rbranch)))
 	 (canon-name (egg-file-git-name file))
 	 (git-name (concat rev ":" canon-name))
 	 (buf (get-buffer-create (concat "*" git-name "*"))))
