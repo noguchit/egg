@@ -2541,20 +2541,21 @@ success."
     (pop-to-buffer (egg-file-get-other-version file sha1 nil t) t)
     (goto-line line)))
 
-(defun egg-log-buffer-get-rev-at (pos &optional symbolic)
+(defun egg-log-buffer-get-rev-at (pos &rest options)
   (let* ((commit (get-text-property pos :commit))
 	 (refs (get-text-property pos :references))
 	 (first-head (if (stringp refs) refs (car (last refs))))
 	 (ref-at-point (car (get-text-property pos :ref)))
 	 (head-sha1 (egg-get-current-sha1)))
-    (if (string= head-sha1 commit) 
+    (if (and (not (memq :no-HEAD options)) (string= head-sha1 commit)) 
 	"HEAD"
       (or ref-at-point first-head 
-	  (if symbolic (egg-name-rev commit) commit)))))
+	  (if (memq :symbolic options) 
+	      (egg-name-rev commit) commit)))))
 
 (defun egg-log-buffer-merge (pos &optional no-commit)
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos))
+  (let ((rev (egg-log-buffer-get-rev-at pos :no-HEAD))
 	res modified-files buf)
     (unless (egg-repo-clean)
       (egg-status) 
@@ -2571,7 +2572,7 @@ success."
 
 (defun egg-log-buffer-rebase (pos &optional move)
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos))
+  (let ((rev (egg-log-buffer-get-rev-at pos :no-HEAD))
 	res modified-files buf)
     (if  (null (y-or-n-p (format "rebase HEAD to %s? " rev)))
 	(message "cancel rebase HEAD to %s!" rev)
@@ -2586,7 +2587,7 @@ success."
   (interactive "d")
   (egg-do-checkout 
    (completing-read "checkout: " (egg-all-refs) nil nil 
-		    (egg-log-buffer-get-rev-at pos))))
+		    (egg-log-buffer-get-rev-at pos :no-HEAD))))
 
 (defun egg-log-buffer-tag-commit (pos &optional force)
   (interactive "d\nP")
@@ -2613,7 +2614,8 @@ success."
 
 (defun egg-log-buffer-attach-head (pos &optional strict-level)
   (interactive "d\np")
-  (let* ((rev (egg-name-rev (egg-log-buffer-get-rev-at pos t)))
+  (let* ((rev (egg-name-rev (egg-log-buffer-get-rev-at 
+			     pos :symbolic :no-HEAD)))
 	 (update-index (> strict-level 3))
 	 (update-wdir (> strict-level 15))
 	 (prompt (format "attach HEAD to %s%s? " rev
