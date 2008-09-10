@@ -275,6 +275,28 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
+(defcustom egg-status-buffer-sections '(repo unstaged staged untracked)
+  "Sections to be listed in the status buffer and their order."
+  :group 'egg
+  :type '(repeat (choice (const :tag "Repository Info" repo)
+			 (const :tag "Unstaged Changes Section" unstaged)
+			 (const :tag "Staged Changes Section" staged)
+			 (const :tag "Untracked/Uignored Files" untracked))))
+
+
+(defcustom egg-commit-buffer-sections '(staged unstaged untracked)
+  "Sections to be listed in the status buffer and their order."
+  :group 'egg
+  :type '(repeat (choice (const :tag "Unstaged Changes Section" unstaged)
+			 (const :tag "Staged Changes Section" staged)
+			 (const :tag "Untracked/Uignored Files" untracked))))
+
+
+
+(defcustom egg-dummy-option nil
+  "Foo bar"
+  :group 'egg
+  :type '(set (const :bold) (const :italic)))
 
 ;;;========================================================
 ;;; simple routines
@@ -1678,10 +1700,12 @@ success."
 	  (orig-pos (point)))
       (erase-buffer)
       (setq buffer-invisibility-spec nil)
-      (egg-sb-insert-repo-section)
-      (egg-sb-insert-unstaged-section "Unstaged Changes:")
-      (egg-sb-insert-staged-section "Staged Changes:")
-      (egg-sb-insert-untracked-section)
+
+      (dolist (sect egg-status-buffer-sections)
+	(cond ((eq sect 'repo) (egg-sb-insert-repo-section))
+	      ((eq sect 'unstaged) (egg-sb-insert-unstaged-section "Unstaged Changes:"))
+	      ((eq sect 'staged) (egg-sb-insert-staged-section "Staged Changes:"))
+	      ((eq sect 'untracked) (egg-sb-insert-untracked-section))))
       
       (when (and init egg-status-buffer-init-hiding-mode)
 	(egg-buffer-hide-all))
@@ -2148,9 +2172,15 @@ success."
       (goto-char egg-log-msg-diff-beg)
       (delete-region (point) (point-max))
       (setq beg (point))
-      (egg-sb-insert-staged-section "Changes to Commit:" "--stat")
-      (egg-sb-insert-unstaged-section "Deferred Changes:")
-      (egg-sb-insert-untracked-section)
+
+      (dolist (sect egg-commit-buffer-sections)
+	(cond ((eq sect 'staged)
+	       (egg-sb-insert-staged-section "Changes to Commit:" "--stat"))
+	      ((eq sect 'unstaged)
+	       (egg-sb-insert-unstaged-section "Deferred Changes:"))
+	      ((eq sect 'untracked)
+	       (egg-sb-insert-untracked-section))))
+
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
       (when (and init egg-commit-buffer-init-hiding-mode)
