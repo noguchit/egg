@@ -210,6 +210,34 @@ Many Egg faces inherit from this one by default."
   "Face for graph."
   :group 'egg)
 
+(defface egg-blame
+  '((((class color) (background light))
+     :background: "grey85" :foreground "black")
+    (((class color) (background dark))
+     :background "grey15" :foreground "white")
+    (t :inherit region))
+  "Face for blame header."
+  :group 'egg)
+
+(defface egg-blame-culprit
+  '((((class color) (background light))
+     :inherit egg-text-2 :background "grey85" :foreground "grey35")
+    (((class color) (background dark))
+     :inherit egg-text-2 :background "grey15" :foreground "grey60")
+    (t :inherit egg-blame))
+  "Face for blame culprit."
+  :group 'egg)
+
+(defface egg-blame-subject
+  '((((class color) (background light))
+     :inherit egg-blame-culprit :foreground "black")
+    (((class color) (background dark))
+     :inherit egg-blame-culprit :foreground "white")
+    (t :inherit egg-blame))
+  "Face for blame tag line."
+  :group 'egg)
+
+
 (defcustom egg-status-buffer-init-hiding-mode nil
   "Initial hiding mode for status buffer."
   :group 'egg
@@ -858,6 +886,93 @@ success."
 		(egg-async-cmds cmds)
 		(egg-async-exit-msg msg)) 
 	    (apply callback-func callback-args))))))
+
+;;;========================================================
+;;; Blame utils
+;;;========================================================
+(defun egg-parse-git-blame (target-buf blame-buf &optional ov-attributes)
+  (save-match-data
+    (let ((blank (propertize " " 'face 'egg-blame))
+	  (nl (propertize "\n" 'face 'egg-blame))
+	  (commit-hash (make-hash-table :test 'equal :size 577))
+	  commit commit-info old-line new-line num old-file subject author
+	  info ov beg end blame)
+      (with-current-buffer blame-buf
+	(goto-char (point-min))
+	(while (re-search-forward "^\\([0-9a-f]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\) \\([0-9]+\\)$" nil t)
+	  (setq commit (match-string-no-properties 1)
+		old-line (string-to-number
+			  (match-string-no-properties 2))
+		new-line (string-to-number
+			  (match-string-no-properties 3))
+		num (string-to-number
+		     (match-string-no-properties 4)))
+	  (setq commit-info (gethash commit commit-hash))
+	  (unless commit-info
+	    (re-search-forward "^author \\(.+\\)$")
+	    (setq author (match-string-no-properties 1))
+	    (re-search-forward "^filename \\(.+\\)$")
+	    (setq old-file (match-string-no-properties 1))
+	    (re-search-forward "^summary \\(.+\\)$")
+	    (setq subject (match-string-no-properties 1))
+	    (setq commit-info (nconc
+			       (list :sha1 commit :author author 
+				     :subject subject :file old-file)
+			       ov-attributes))
+	    (puthash commit commit-info commit-hash))
+	  (setq info (cons (list old-line new-line num commit-info)
+			   info))))
+      (setq info (nreverse info))
+      (with-current-buffer target-buf
+	(dolist (chunk info)
+	  (setq commit-info (nth 3 chunk)
+		old-line (nth 0 chunk)
+		new-line (nth 1 chunk)
+		num (nth 2 chunk)
+		commit (plist-get commit-info :sha1)
+		author (plist-get commit-info :author) 
+		subject (plist-get commit-info :subject))
+	  
+	  (goto-line new-line)
+	  (setq beg (line-beginning-position)
+		end (save-excursion
+		      (forward-line num)
+		      (line-beginning-position)))
+	  (put-text-property beg end :blame chunk)
+	  (setq ov (make-overlay beg end))
+	  (overlay-put ov :blame chunk)
+	  (setq blame (concat 
+		       (propertize (substring-no-properties commit 0 8)
+				   'face 'egg-blame)
+		       blank
+		       (propertize (format "%-20s" author)
+				   'face 'egg-blame-culprit)
+		       blank
+		       (propertize subject 'face 'egg-blame-subject)
+		       blank nl))
+	  (overlay-put ov 'before-string blame))))))
+
+(defsubst egg-file-buffer-blame-off (buffer)
+  (save-excursion
+    (save-restriction
+      (with-current-buffer buffer
+	(widen)
+	(mapc (lambda (ov)
+		(if (overlay-get ov :blame)
+		    (delete-overlay ov)))
+	      (overlays-in (point-min) (point-max)))))))
+
+(defun egg-file-buffer-blame-on (buffer &rest ov-attributes)
+  (egg-file-buffer-blame-off buffer)
+  (save-excursion
+    (with-current-buffer buffer
+      (save-restriction
+	(with-temp-buffer
+	  (when (egg-git-ok t "blame" "--porcelain" "--" 
+			    (file-name-nondirectory 
+			     (buffer-file-name buffer)))
+	    (egg-parse-git-blame buffer (current-buffer)
+				 ov-attributes)))))))
 
 ;;;========================================================
 ;;; Diff/Hunk
@@ -2886,6 +3001,30 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
+(defun egg-file-toggle-blame-mode (save)
+  (interactive "P")
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (when (and (buffer-modified-p)
+	     (or save 
+		 (y-or-n-p (format "save %s first? " (buffer-file-name)))))
+    (save-buffer))
+  (let (blame-was-on buffer-was-readonly)
+    (mapc (lambda (ov)
+	    (when (overlay-get ov :blame)
+	      (setq buffer-was-readonly (plist-get (overlay-get ov :blame)
+						   :buffer-read-only))
+	      (setq blame-was-on t)))
+	  (overlays-at (point)))
+    (if blame-was-on
+	(progn (egg-file-buffer-blame-off (current-buffer))
+	       (set-buffer-modified-p nil)
+	       (setq buffer-read-only buffer-was-readonly))
+      (egg-file-buffer-blame-on (current-buffer)
+				:buffer-read-only buffer-read-only)
+      (set-buffer-modified-p nil)
+      (setq buffer-read-only t))))
+
 (defun egg-file-diff (&optional ask)
   "Diff the current file in another window."
   (interactive "P")
@@ -3194,7 +3333,7 @@ current file contains unstaged changes."
   (custom-set-default var val))
 
 (let ((map egg-file-cmd-map))
-  (define-key map (kbd "a") 'egg-blame)
+  (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
   (define-key map (kbd "b") 'egg-start-new-branch)
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
