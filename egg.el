@@ -33,12 +33,16 @@
   :prefix "egg-"
   :group 'tools)
 
+(defgroup egg-faces nil
+  "Colourful Faces for Egg."
+  :group 'egg)
+
 (defface egg-header
   '((t :weight bold :inherit variable-pitch :height 1.3))
   "Face for generic headers.
 
 Many Egg faces inherit from this one by default."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-text-base
   '((((class color) (background light))
@@ -47,27 +51,27 @@ Many Egg faces inherit from this one by default."
      :foreground "SteelBlue" :inherit variable-pitch)
     (t))
   "Face for description text."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-text-1
   '((t :inherit egg-text-base :height 1.2))
   "Face for description text."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-text-2
   '((t :inherit egg-text-base :height 1.3))
   "Face for description text."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-text-3
   '((t :inherit egg-text-base :height 1.5))
   "Face for description text."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-text-4
   '((t :inherit egg-text-base :height 1.8))
   "Face for description text."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-electrict-choice
   '((((class color) (background light))
@@ -76,7 +80,7 @@ Many Egg faces inherit from this one by default."
      :foreground "Cyan" :inherit egg-text-base  :weight bold :height 1.2)
     (t))
   "Face for description text."
-  :group 'egg)
+  :group 'egg-faces)
 
 
 (defface egg-section-title
@@ -88,7 +92,7 @@ Many Egg faces inherit from this one by default."
   "Face for generic header lines.
 
 Many Egg faces inherit from this one by default."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-branch
   '((((class color) (background light))
@@ -97,7 +101,7 @@ Many Egg faces inherit from this one by default."
      :foreground "Yellow" :inherit egg-header :height 1.4)
     (t :weight bold))
   "Face for the current branch."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-branch-mono
   '((((class color) (background light))
@@ -106,7 +110,7 @@ Many Egg faces inherit from this one by default."
      :foreground "Yellow" :inherit bold)
     (t :weight bold))
   "Face for the current branch."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-tag-mono
   '((((class color) (background light))
@@ -115,7 +119,7 @@ Many Egg faces inherit from this one by default."
      :foreground "SkyBlue" :inherit bold)
     (t :weight bold))
   "Face for the current branch."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-remote-mono
   '((((class color) (background light))
@@ -124,7 +128,7 @@ Many Egg faces inherit from this one by default."
      :foreground "DarkSalmon" :inherit bold)
     (t :weight bold))
   "Face for the current branch."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-term
   '((((class color) (background light))
@@ -133,7 +137,7 @@ Many Egg faces inherit from this one by default."
      :foreground "Yellow" :inherit bold)
     (t :weight bold))
   "Face for an important term."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-warning
   '((((class color) (background light))
@@ -142,7 +146,7 @@ Many Egg faces inherit from this one by default."
      :foreground "Orange" :inherit bold)
     (t :weight bold))
   "Face for a warning."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-diff-file-header
   '((((class color) (background light))
@@ -151,7 +155,7 @@ Many Egg faces inherit from this one by default."
      :foreground "LightSlateBlue" :inherit egg-header)
     (t :weight bold))
   "Face for diff file headers."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-unmerged-diff-file-header
   '((((class color) (background light))
@@ -160,7 +164,7 @@ Many Egg faces inherit from this one by default."
      :foreground "Orange" :inherit egg-diff-file-header)
     (t :weight bold))
   "Face for unmerged diff file headers."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-diff-hunk-header
   '((((class color) (background light))
@@ -168,7 +172,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :background "grey45"))
   "Face for diff hunk headers."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-diff-add
   '((((class color) (background light))
@@ -176,7 +180,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "white"))
   "Face for lines in a diff that have been added."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-diff-none
   '((((class color) (background light))
@@ -184,7 +188,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "grey70"))
   "Face for lines in a diff that are unchanged."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-diff-del
   '((((class color) (background light))
@@ -192,7 +196,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "OrangeRed"))
   "Face for lines in a diff that have been deleted."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-diff-conflict
   '((((class color) (background light))
@@ -200,7 +204,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "Orange"))
   "Face for lines in a diff that have been deleted."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-graph
   '((((class color) (background light))
@@ -208,7 +212,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "grey30"))
   "Face for graph."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-blame
   '((((class color) (background light))
@@ -217,7 +221,7 @@ Many Egg faces inherit from this one by default."
      :background "grey15" :foreground "white")
     (t :inherit region))
   "Face for blame header."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-blame-culprit
   '((((class color) (background light))
@@ -226,7 +230,7 @@ Many Egg faces inherit from this one by default."
      :inherit egg-text-2 :background "grey15" :foreground "grey60")
     (t :inherit egg-blame))
   "Face for blame culprit."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-blame-subject
   '((((class color) (background light))
@@ -235,12 +239,12 @@ Many Egg faces inherit from this one by default."
      :inherit egg-blame-culprit :foreground "white")
     (t :inherit egg-blame))
   "Face for blame tag line."
-  :group 'egg)
+  :group 'egg-faces)
 
 (defface egg-log-HEAD
   '((t (:inherit region)))
     "Face to highlight HEAD in the log buffer."
-    :group 'egg)
+    :group 'egg-faces)
 
 (defcustom egg-status-buffer-init-hiding-mode nil
   "Initial hiding mode for status buffer."
