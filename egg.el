@@ -237,6 +237,10 @@ Many Egg faces inherit from this one by default."
   "Face for blame tag line."
   :group 'egg)
 
+(defface egg-log-HEAD
+  '((t (:inherit region)))
+    "Face to highlight HEAD in the log buffer."
+    :group 'egg)
 
 (defcustom egg-status-buffer-init-hiding-mode nil
   "Initial hiding mode for status buffer."
@@ -262,6 +266,10 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'integer)
 
+(defcustom egg-confirm-next-action t
+  "Always prompt for confirmation while guessing the next logical action ."
+  :group 'egg
+  :type 'boolean)
 
 
 ;;;========================================================
@@ -665,7 +673,7 @@ Either a symbolic ref or a sha1."
 			       (t "(detached)")))))
 
 (defvar egg-internal-current-state nil)
-(defun egg-get-repo-state ()
+(defun egg-get-repo-state (&optional extras)
   (let* ((git-dir (egg-git-dir))
 	 (head-file (concat git-dir "/HEAD"))
 	 (merge-file (concat git-dir "/MERGE_HEAD"))
@@ -698,11 +706,19 @@ Either a symbolic ref or a sha1."
 		      :rebase-upstream rebase-upstream
 		      :rebase-step rebase-step
 		      :rebase-num rebase-num)))
+    (dolist (req extras)
+      (cond ((eq req :unstaged)
+	     (setq state (nconc (list :unstaged (egg-git-to-lines "diff" "--name-only"))
+				state)))
+	    ((eq req :staged)
+	     (setq state (nconc (list :staged (egg-git-to-lines "diff" "--cached"
+								"--name-only"))
+				state)))))
     (egg-set-mode-info state)
     state))
 
-(defsubst egg-repo-state ()
-  (or egg-internal-current-state (egg-get-repo-state)))
+(defsubst egg-repo-state (&rest extras)
+  (or egg-internal-current-state (egg-get-repo-state extras)))
 
 (defsubst egg-current-branch (&optional state)
   (plist-get (or state (egg-repo-state)) :branch))
@@ -1174,9 +1190,9 @@ success."
 		  "--- " a "\\(.+\\)\\|"		;5 src
 		  "\\+\\+\\+ " b "\\(.+\\)\\|"		;6 dst
 		  "index \\(.+\\)\\|"			;7 index
-		  "++<<<<<<< \\(.+\\):.+\\|"		;8 conflict start
-		  "\\(++=======\\)\\|"			;9 conflict div
-		  "++>>>>>>> \\(.+\\):.+\\|"		;10 conflict end
+		  "\\+\\+<<<<<<< \\(.+\\):.+\\|"		;8 conflict start
+		  "\\(\\+\\+=======\\)\\|"			;9 conflict div
+		  "\\+\\+>>>>>>> \\(.+\\):.+\\|"		;10 conflict end
 		  "\\(-.*\\)\\|"			;11 del
 		  "\\(\\+.*\\)\\|"			;12 add
 		  "\\( .*\\)"				;13 none
@@ -2469,7 +2485,7 @@ success."
 		   separator)))
 	
 	(when (string= sha1 head-sha1)
-	  (overlay-put ov 'face 'region)
+	  (overlay-put ov 'face 'egg-log-HEAD)
 	  (overlay-put ov 'evaporate t)
 	  (move-overlay ov beg (1+ (line-end-position)))))
       
@@ -3141,28 +3157,29 @@ current file contains unstaged changes."
     (ediff-buffers3 ours (current-buffer) theirs)))
 
 (defconst egg-key-action-alist 
-  '((?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
-    (?s :status "show repo's [s]tatus" "Browse the current status of the repo" )
+  '((?m :merge-file "[m]erge current file" "Resolve merge conflict(s) in current file.")
     (?f :stage-file "stage current [f]ile" "Stage current file's changes")
+    (?s :status "show repo's [s]tatus" "Browse the current status of the repo" )
     (?a :stage-all "stage [a]ll files" "Stage all current changes inside this repo.")
+    (?r :rebase-continue "continue [r]rebase" "Continue with the current rebase session.")
     (?d :diff-file "[d]iff current file" "Compare the current file against the staged snapshot.")
     (?c :commit "[c]ommit staged changes" "Process to commit current staged changes onto HEAD.")
+    (?y :sync "s[y]nc" "Synchronize branches and repos (push/fetch).")
     (?? :more-options "[?] more options" nil)
+    (?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
     (?q :quit "[q] quit" nil)))
 
 (defconst egg-action-function-alist
-  '((:new-branch . egg-start-new-branch)
-    (:status     . egg-status)
-    (:stage-file . egg-file-stage-current-file)
-    (:stage-all  . egg-stage-all-files)
-    (:diff-file  . egg-file-diff)
-    (:commit     . egg-commit-log-edit)
-    (:quit 	 . (lambda () (message "do nothing now! later.") (ding) nil))))
-
-(defcustom egg-confirm-next-action t
-  "Always prompt for confirmation while guessing the next logical action ."
-  :group 'egg
-  :type 'boolean)
+  '((:merge-file	. egg-resolve-merge-with-ediff)
+    (:stage-file	. egg-file-stage-current-file)
+    (:status		. egg-status)
+    (:stage-all		. egg-stage-all-files)
+    (:rebase-continue	. egg-buffer-rebase-continue)
+    (:diff-file		. egg-file-diff)
+    (:commit		. egg-commit-log-edit)
+    (:sync		. egg-log)
+    (:new-branch	. egg-start-new-branch)
+    (:quit		. (lambda () (message "do nothing now! later.") (ding) nil))))
 
 (defconst egg-electrict-select-action-buffer 
   (get-buffer-create "*Egg:Select Action*"))
@@ -3196,13 +3213,15 @@ current file contains unstaged changes."
     (define-key map (kbd "C-l") 'recenter)
     map))
 
-(defun egg-electric-select-action (default desc)
+(defun egg-electric-select-action (default banner &optional alternatives)
   (let ((egg-electric-in-progress-p t)
 	(old-buffer (current-buffer))
 	(buf egg-electrict-select-action-buffer)
 	(action-alist
 	 (delq nil (mapcar (lambda (entry)
-			     (if (cadddr entry)
+			     (if (and (cadddr entry) 
+				      (or (null alternatives)
+					  (memq (cadr entry) alternatives)))
 				 (cons (cadr entry)
 				       (cadddr entry))))
 			   egg-key-action-alist)))
@@ -3219,7 +3238,7 @@ current file contains unstaged changes."
 		      (erase-buffer)
 		      (insert (propertize "Select Action\n" 'face
 					  'egg-section-title))
-		      (insert (propertize desc 'face 'egg-text-1) "\n\n")
+		      (insert (propertize banner 'face 'egg-text-1) "\n\n")
 		      (insert (propertize "select an action:" 
 					  'face 'egg-text-1)
 			      "\n\n")
@@ -3249,18 +3268,78 @@ current file contains unstaged changes."
     (when (and action (symbolp action))
       action)))
 
-(defun egg-guess-next-action (file-is-modified
-			      wdir-is-modified
-			      index-is-clean)
-  (if file-is-modified
-      :stage-file 
-    ;; file is unchanged
-    (if wdir-is-modified
-	:stage-all
-      ;; wdir is clean
-      (if index-is-clean
-	  :new-branch
-	:commit))))
+(defun egg-guess-next-action (desc)
+  (cond ((memq :file-has-merged-conflict desc) :merge-file)
+	((memq :file-is-modified desc) 	       :stage-file)
+	((memq :wdir-has-merged-conflict desc) :status)
+	((memq :wdir-is-modified desc)	       :stage-all)
+	((memq :rebase-in-progress desc)       :rebase-continue)
+	((memq :has-staged-changes desc)       :commit)
+	(t     	    			       :sync)))
+
+(defun egg-limit-alternative-actions (desc)
+  (let ((alternatives (mapcar 'car egg-action-function-alist)))
+    (unless (memq :file-has-merged-conflict desc)
+      (setq alternatives (delq :merge-file alternatives)))
+    (unless (memq :file-is-modified desc)
+      (setq alternatives (delq :stage-all alternatives))) 
+    (when (or (not (memq :wdir-is-modified desc))
+	      (memq :wdir-has-merged-conflict desc)) 
+      (setq alternatives (delq :stage-all alternatives)))
+    (when (or (not (memq :rebase-in-progress desc))
+	      (memq :wdir-is-modified desc))
+      (setq alternatives (delq :rebase-continue alternatives)))
+    (when (or (memq :wdir-is-modified desc)
+	      (memq :rebase-in-progress desc)
+	      (not (memq :has-staged-changes desc)))
+      (setq alternatives (delq :commit alternatives)))
+    (when (or (memq :wdir-has-merged-conflict desc)
+	      (memq :rebase-in-progress desc))
+      (setq alternatives (delq :new-branch alternatives)))
+    (when (or (memq :wdir-is-modified desc)
+	      (memq :has-staged-changes desc)
+	      (memq :rebase-in-progress desc))
+      (setq alternatives (delq :sync alternatives)))
+    alternatives))
+
+
+
+(defun egg-describe-state (state)
+  (let* ((git-dir (plist-get state :gitdir))
+	 (current-file (buffer-file-name))
+	 (default-directory (file-name-directory git-dir))
+	 (file-git-name (and current-file (egg-file-git-name current-file)))
+	 (unstaged-files (plist-get state :unstaged))
+	 (staged-files (plist-get state :staged))
+	 desc dummy)
+    (when unstaged-files 
+      (setq desc (cons :wdir-is-modified desc)))
+
+    (when staged-files
+      (setq desc (cons :has-staged-changes desc)))
+
+    (when (plist-get state :rebase-step)
+      (setq desc (cons :rebase-in-progress desc)))
+    
+    (when unstaged-files
+      (with-temp-buffer
+	(egg-git-ok t "diff")
+	(setq dummy (buffer-string))
+	(save-match-data 
+	  (goto-char (point-min))
+	  (if (search-forward "\n++<<<<<<<" nil t)
+	      (setq desc (cons :wdir-has-merged-conflict desc)))))
+
+      (when (and file-git-name (member file-git-name unstaged-files))
+	(setq desc (cons :file-is-modified desc))
+	(with-temp-buffer
+	  (egg-git-ok t "diff" file-git-name)
+	  (setq dummy (buffer-string))
+	  (save-match-data 
+	  (goto-char (point-min))
+	    (if (search-forward "\n++<<<<<<<" nil t)
+		(setq desc (cons :file-has-merged-conflict desc)))))))
+    desc))
 
 (defun egg-build-key-prompt (prefix default alternatives)
   (let ((action-desc-alist (mapcar 'cdr egg-key-action-alist)))
@@ -3272,13 +3351,10 @@ current file contains unstaged changes."
 			       (nth 1 (assq action action-desc-alist)))
 			     (remq default alternatives)) ", "))))
 
-(defun egg-prompt-next-action (file-modified
-			       wdir-modified
-			       index-clean)
-  (let ((default (egg-guess-next-action file-modified
-					wdir-modified
-					index-clean))
-	desc key action alternatives)
+(defun egg-prompt-next-action (described-state)
+  (let ((default (egg-guess-next-action described-state))
+	(limited-alternatives (egg-limit-alternative-actions described-state))
+	banner key action alternatives)
     (setq alternatives (list default :status :more-options))
     (while (null action)
       (setq key (read-key-sequence 
@@ -3290,19 +3366,26 @@ current file contains unstaged changes."
 		default 
 	      (cadr (assq key egg-key-action-alist))))
       (when (eq action :more-options)
-	(setq desc
+	(setq banner
 	      (format "%s %s\n%s %s\nINDEX %s"
 		      (buffer-file-name)
-		      (if file-modified 
-			  "contains unstaged changes"
-			"is not modified")
+		      (cond ((memq :file-has-merged-conflict described-state)
+			     "contains conflicting merge-changes")
+			    ((memq :file-is-modified described-state)
+			     "contains unstaged changes")
+			    (t "is not modified"))
 		      (file-name-directory (egg-git-dir))
-		      (if wdir-modified
-			  "contains unstaged changes"
-			"has no unstaged changes")
-		      (if index-clean "is identical to HEAD"
-			"contains staged changes to commit")))
-	(setq action (egg-electric-select-action default desc)))
+		      (cond ((memq :wdir-has-merged-conflict described-state)
+			     "has files with conflicting merge changes")
+			    ((memq :wdir-is-modified described-state)
+			     "has files with unstaged changes")
+			    (t "is clean"))
+		      (cond ((memq :rebase-in-progress described-state)
+			     "has unfinished rebase session")
+			    ((memq :has-staged-changes described-state)
+			     "contains staged changes ready to commit")
+			    (t "is empty"))))
+	(setq action (egg-electric-select-action default banner limited-alternatives)))
       (when (null action)
 	(ding)))
     action))
@@ -3310,17 +3393,12 @@ current file contains unstaged changes."
 (defun egg-next-action (&optional ask)
   (interactive "P")
   (save-some-buffers nil 'egg-is-in-git)
-  (let ((file-modified (not (egg-file-updated (buffer-file-name))))
-	(wdir-modified (not (egg-wdir-clean)))
-	(index-clean (egg-index-empty))
-	action default)
-     (setq action (if (or ask egg-confirm-next-action)
-		      (egg-prompt-next-action file-modified
-					      wdir-modified
-					      index-clean)
-		    (egg-guess-next-action file-modified
-					   wdir-modified
-					   index-clean)))
+  (let* ((state (egg-repo-state :unstaged :staged))
+	 (desc (egg-describe-state state))
+	 action default)
+    (setq action (if (or ask egg-confirm-next-action)
+		     (egg-prompt-next-action desc)
+		   (egg-guess-next-action desc)))
      
      (funcall (cdr (assq action egg-action-function-alist)))))
 
