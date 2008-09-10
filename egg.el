@@ -224,6 +224,18 @@ Many Egg faces inherit from this one by default."
 		 (const :tag "Show Everything" nil)
 		 (const :tag "Hide Everything" t)))
 
+(defcustom egg-log-HEAD-max-len 1000
+  "Maximum number of entries when showing the history of HEAD."
+  :group 'egg
+  :type 'integer)
+
+(defcustom egg-log-all-max-len 10000
+  "Maximum number of entries when showing the history of HEAD."
+  :group 'egg
+  :type 'integer)
+
+
+
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
@@ -2034,7 +2046,9 @@ success."
     (erase-buffer)
     (set (make-local-variable 'egg-log-msg-action)
 	 (if amend 'egg-log-msg-amend-commit 'egg-log-msg-commit))
-    (insert "Commiting into: " (propertize head 'face 'egg-branch) "\n"
+    (insert (propertize (if amend "Amending  " "Committing into  ")
+			'face 'egg-text-3)
+	    (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "--------------- Commit Message (type C-c C-c when done) ---------------"
 			'face 'font-lock-comment-face))
@@ -2158,9 +2172,10 @@ success."
     (when (consp file) 
       (setq tmp (plist-get info :prologue))
       (setq tmp (concat "\n"
-			     (mapconcat 'identity file "\n")
-			     "\n\n"
-			     tmp))
+			(propertize (mapconcat 'identity file "\n")
+				    'face 'egg-text-3)
+			"\n\n"
+			(propertize tmp 'face 'egg-text-2)))
       (plist-put info :prologue tmp)
       (setq tmp (plist-get info :args))
       (setq tmp (append tmp (cons "--" file)))
@@ -2176,11 +2191,13 @@ success."
 (defvar egg-internal-log-buffer-closure nil)
 
 (defun egg-run-git-log-HEAD ()
-  (egg-git-ok t "log" "--max-count=10000" "--graph" "--topo-order"
+  (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
+	      "--graph" "--topo-order"
 		"--pretty=oneline" "--decorate"))
 
 (defun egg-run-git-log-all ()
-  (egg-git-ok t "log" "--max-count=10000" "--graph" "--topo-order"
+  (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
+	      "--graph" "--topo-order"
 		"--pretty=oneline" "--decorate" "--all"))
 
 (defun egg-run-git-log-pickaxe (string)
@@ -3181,6 +3198,7 @@ current file contains unstaged changes."
   (define-key map (kbd "b") 'egg-start-new-branch)
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
+  (define-key map (kbd "e") 'egg-file-ediff)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-log)
   (define-key map (kbd "o") 'egg-file-checkout-other-version)
