@@ -3207,10 +3207,10 @@ current file contains unstaged changes."
     (?a :stage-all "stage [a]ll files" "Stage all current changes inside this repo.")
     (?r :rebase-continue "continue [r]rebase" "Continue with the current rebase session.")
     (?d :diff-file "[d]iff current file" "Compare the current file against the staged snapshot.")
-    (?c :commit "[c]ommit staged changes" "Process to commit current staged changes onto HEAD.")
+    (?c :commit "[c]ommit staged changes" "Proceed to commit current staged changes onto HEAD.")
     (?y :sync "s[y]nc" "Synchronize branches and repos (push/fetch).")
     (?? :more-options "[?] more options" nil)
-    (?b :new-branch "start new [b]ranch" "Create and switch to a new branching starting from HEAD.")
+    (?b :new-branch "start new [b]ranch" "Create and switch to a new branch starting from HEAD.")
     (?q :quit "[q] quit" nil)))
 
 (defconst egg-action-function-alist
@@ -3326,7 +3326,7 @@ current file contains unstaged changes."
     (unless (memq :file-has-merged-conflict desc)
       (setq alternatives (delq :merge-file alternatives)))
     (unless (memq :file-is-modified desc)
-      (setq alternatives (delq :stage-all alternatives))) 
+      (setq alternatives (delq :diff-file (delq :stage-file alternatives)))) 
     (when (or (not (memq :wdir-is-modified desc))
 	      (memq :wdir-has-merged-conflict desc)) 
       (setq alternatives (delq :stage-all alternatives)))
