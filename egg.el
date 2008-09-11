@@ -514,6 +514,10 @@ END-RE is the regexp to match the end of a record."
   "get the symbolic name of REV."
   (egg-git-to-string "name-rev" "--always" "--name-only" rev))
 
+(defsubst egg-describe-rev (rev)
+  "get the long symbolic name of REV."
+  (egg-git-to-string "describe" "--always" "--tags" rev))
+
 (defsubst egg-sha1 (rev)
   "get the SHA1 of REV."
   (egg-git-to-string "rev-parse" (concat rev "~0")))
@@ -734,11 +738,15 @@ Either a symbolic ref or a sha1."
 		      :rebase-num rebase-num)))
     (dolist (req extras)
       (cond ((eq req :unstaged)
-	     (setq state (nconc (list :unstaged (egg-git-to-lines "diff" "--name-only"))
-				state)))
+	     (setq state 
+		   (nconc (list :unstaged 
+				(egg-git-to-lines "diff" "--name-only"))
+			  state)))
 	    ((eq req :staged)
-	     (setq state (nconc (list :staged (egg-git-to-lines "diff" "--cached"
-								"--name-only"))
+	     (setq state 
+		   (nconc (list :staged 
+				(egg-git-to-lines "diff" "--cached"
+						  "--name-only"))
 				state)))))
     (egg-set-mode-info state)
     state))
@@ -774,7 +782,7 @@ Either a symbolic ref or a sha1."
 	  ((and rebase-head rebase-upstream)
 	   (format "Rebasing %s onto %s" rebase-head rebase-upstream))
 	  (branch branch)
-	  (t (concat "Detached HEAD: " (egg-name-rev sha1))))))
+	  (t (concat "Detached HEAD: " (egg-describe-rev sha1))))))
 
 
 (defun egg-config-section-raw (type &optional name)
@@ -2585,11 +2593,12 @@ success."
 	"HEAD"
       (or ref-at-point first-head 
 	  (if (memq :symbolic options) 
-	      (egg-name-rev commit) commit)))))
+	      (egg-describe-rev commit)
+	    commit)))))
 
 (defun egg-log-buffer-merge (pos &optional no-commit)
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos :no-HEAD))
+  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
 	res modified-files buf)
     (unless (egg-repo-clean)
       (egg-status) 
@@ -2606,7 +2615,7 @@ success."
 
 (defun egg-log-buffer-rebase (pos &optional move)
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos :no-HEAD))
+  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
 	res modified-files buf)
     (if  (null (y-or-n-p (format "rebase HEAD to %s? " rev)))
 	(message "cancel rebase HEAD to %s!" rev)
@@ -2621,7 +2630,7 @@ success."
   (interactive "d")
   (egg-do-checkout 
    (completing-read "checkout: " (egg-all-refs) nil nil 
-		    (egg-log-buffer-get-rev-at pos :no-HEAD))))
+		    (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
 
 (defun egg-log-buffer-tag-commit (pos &optional force)
   (interactive "d\nP")
@@ -2648,8 +2657,7 @@ success."
 
 (defun egg-log-buffer-attach-head (pos &optional strict-level)
   (interactive "d\np")
-  (let* ((rev (egg-name-rev (egg-log-buffer-get-rev-at 
-			     pos :symbolic :no-HEAD)))
+  (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
 	 (update-index (> strict-level 3))
 	 (update-wdir (> strict-level 15))
 	 (prompt (format "attach HEAD to %s%s? " rev
