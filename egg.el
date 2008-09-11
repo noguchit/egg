@@ -2658,9 +2658,14 @@ success."
 (defun egg-log-buffer-attach-head (pos &optional strict-level)
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+	 (branch (egg-current-branch))
 	 (update-index (> strict-level 3))
 	 (update-wdir (> strict-level 15))
-	 (prompt (format "attach HEAD to %s%s? " rev
+	 (prompt (format "%s to %s%s? " 
+			 (if branch 
+			     (concat "move " branch)
+			   "attach HEAD")
+			 rev
 			 (cond (update-wdir " (and update workdir)")
 			       (update-index " (and update index)")
 			       (t "")))))
