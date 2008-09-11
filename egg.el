@@ -2747,7 +2747,7 @@ success."
 	     (setq remote (egg-read-remote
 			   (format "push branch %s to remote: " lref)))
 	     (setq rref (read-string 
-			 (format "push branch % to %s as: " lref remote)
+			 (format "push branch %s to %s as: " lref remote)
 				     lref))))
 	  ((eq type :tag)
 	   (setq remote (egg-read-remote "push to remote: "))
