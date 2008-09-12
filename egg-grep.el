@@ -2,7 +2,6 @@
 ;;; A magit fork
 
 ;; Copyright (C) 2008  Linh Dang
-;; Copyright (C) 2008  Marius Vollmer
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -110,23 +109,24 @@ Set up `compilation-exit-message-function' and run `egg-grep-setup-hook'."
 	(cmd "git --no-pager grep -n ")
 	rev term)
 
-    (when (> level 5)
+    (when (> level 15)
       (setq rev (egg-read-rev "grep in revision: " "HEAD"))
       (when (= (aref rev 0) ?:)
 	(setq cmd (concat cmd "--cached "))
 	(setq rev nil)))
 
-    (when (and level (setq term (symbol-at-point)))
+    (when (and (> level 3) (setq term (symbol-at-point)))
       (when term
 	(setq term (symbol-name term))
 	(setq cmd (concat cmd term " "))))
     
-    (setq cmd 
-	  (read-string (if rev 
-			   (format "run git grep (with %s appended): " rev)
-			 "run git grep: ") cmd))
     (when rev
       (setq cmd (concat cmd " " rev)))
+
+    (setq cmd 
+	  (read-string "run git grep (like this) : " cmd))
+
     (compilation-start cmd 'egg-grep-mode
-		       `(lambda (name) (format "*git-grep@%s*" ,git-dir)))))
+		       `(lambda (name) 
+			  (format "*git-grep@%s*" ,git-dir)))))
 
