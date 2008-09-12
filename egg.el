@@ -3465,6 +3465,7 @@ current file contains unstaged changes."
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
   (define-key map (kbd "e") 'egg-file-ediff)
+  (define-key map (kbd "g") 'egg-grep)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-log)
   (define-key map (kbd "o") 'egg-file-checkout-other-version)
