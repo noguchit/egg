@@ -38,7 +38,7 @@
   :group 'egg)
 
 (defface egg-header
-  '((t :weight bold :inherit variable-pitch :height 1.3))
+  '((t :weight bold :inherit variable-pitch :height 1.1))
   "Face for generic headers.
 
 Many Egg faces inherit from this one by default."
@@ -54,30 +54,30 @@ Many Egg faces inherit from this one by default."
   :group 'egg-faces)
 
 (defface egg-text-1
-  '((t :inherit egg-text-base :height 1.2))
+  '((t :inherit egg-text-base))
   "Face for description text."
   :group 'egg-faces)
 
 (defface egg-text-2
-  '((t :inherit egg-text-base :height 1.3))
+  '((t :inherit egg-text-base :height 1.1))
   "Face for description text."
   :group 'egg-faces)
 
 (defface egg-text-3
-  '((t :inherit egg-text-base :height 1.5))
+  '((t :inherit egg-text-base :height 1.2))
   "Face for description text."
   :group 'egg-faces)
 
 (defface egg-text-4
-  '((t :inherit egg-text-base :height 1.8))
+  '((t :inherit egg-text-base :height 1.4))
   "Face for description text."
   :group 'egg-faces)
 
 (defface egg-electrict-choice
   '((((class color) (background light))
-     :foreground "Blue" :inherit egg-text-base :weight bold :height 1.2)
+     :foreground "Blue" :inherit egg-text-1 :weight bold)
     (((class color) (background dark))
-     :foreground "Cyan" :inherit egg-text-base  :weight bold :height 1.2)
+     :foreground "Cyan" :inherit egg-text-1 :weight bold)
     (t))
   "Face for description text."
   :group 'egg-faces)
@@ -96,9 +96,9 @@ Many Egg faces inherit from this one by default."
 
 (defface egg-branch
   '((((class color) (background light))
-     :foreground "SkyBlue" :inherit egg-header :height 1.4)
+     :foreground "SkyBlue" :inherit egg-header :height 1.1)
     (((class color) (background dark))
-     :foreground "Yellow" :inherit egg-header :height 1.4)
+     :foreground "Yellow" :inherit egg-header :height 1.1)
     (t :weight bold))
   "Face for the current branch."
   :group 'egg-faces)
