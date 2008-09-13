@@ -301,6 +301,12 @@ Many Egg faces inherit from this one by default."
 			 (const :tag "Untracked/Uignored Files" untracked))))
 
 
+(defcustom egg-refresh-index-in-backround nil
+  "Whether to refresh the index in the background when emacs is idle."
+  :group 'egg
+  :type 'boolean)
+
+
 
 (defcustom egg-dummy-option nil
   "Foo bar"
@@ -1490,6 +1496,7 @@ success."
 ;;;========================================================
 (defvar egg-buffer-refresh-func nil)
 (defvar egg-buffer-async-cmd-refresh-func nil)
+(defvar egg-internal-update-index-timer nil)
 
 (defsubst egg-buffer-async-do (accepted-code &rest args)
   (egg-async-do accepted-code 
@@ -1744,6 +1751,54 @@ success."
 	(egg-buffer-hide-all))
       (goto-char orig-pos))))
 
+(defun egg-internal-background (proc msg)
+  (let ((name (process-name proc)))
+    (cond ((string= msg "finished\n")
+	   (message "EGG BACKGROUND: %s finished." name))
+	  ((string= msg "killed\n")
+	   (message "EGG BACKGROUND: %s was killed." name))
+	  ((string-match "exited abnormally" msg)
+	   (message "EGG BACKGROUND: %s failed." name))
+	  (t (message "EGG BACKGROUND: %s is weird!" name)))))
+
+(defun egg-internal-background-refresh-index (buffer-name)
+  (let ((buffer (get-buffer buffer-name))
+	proc)
+    (when (and buffer (buffer-live-p buffer))
+      (with-current-buffer buffer
+	(setq proc (start-process (format "refresh index in %s"
+					  default-directory)
+				  nil
+				  "git" "update-index"
+				  "-q" "--really-refresh" "--unmerged"))
+	  (set-process-sentinel proc #'egg-internal-background)))))
+
+(defvar egg-internal-status-buffer-names-list nil)
+(defvar egg-internal-background-jobs-timer nil)
+
+(defun egg-status-buffer-background-job ()
+  (when egg-refresh-index-in-backround
+    (mapcar #'egg-internal-background-refresh-index
+	    egg-internal-status-buffer-names-list)))
+
+(defcustom egg-background-idle-period 30
+  "How long emacs has been idle before we trigger background jobs."
+  :group 'egg
+  :set 'egg-set-background-idle-period
+  :type 'integer)
+
+(defsubst egg-internal-background-jobs-restart ()
+  (cancel-function-timers #'egg-status-buffer-background-job)
+  (setq egg-internal-background-jobs-timer
+	(run-with-idle-timer egg-background-idle-period t
+			     #'egg-status-buffer-background-job)))
+
+(defun egg-set-background-idle-period (var val)
+  (custom-set-default var val)
+  (egg-internal-background-jobs-restart))
+
+(egg-internal-background-jobs-restart)
+
 (define-egg-buffer status "*%s-status@%s*"
   "Major mode to display the egg status buffer."
   (kill-all-local-variables)
@@ -1756,6 +1811,7 @@ success."
   (set (make-local-variable 'egg-buffer-refresh-func)
        'egg-status-buffer-redisplay)
   (setq buffer-invisibility-spec nil)
+  (add-to-list 'egg-internal-status-buffer-names-list (buffer-name))
   (run-mode-hooks 'egg-status-buffer-mode-hook))
 
 (defun egg-status (&optional no-update)
