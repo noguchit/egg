@@ -2420,6 +2420,7 @@ success."
     (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
+    (define-key map (kbd "T") 'egg-log-buffer-atag-commit)
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
@@ -2664,6 +2665,14 @@ success."
   (let ((rev (egg-log-buffer-get-rev-at pos)))
     (when (egg-do-tag rev (format "tag %s with name: " rev) force)
       (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-log-buffer-atag-commit (pos &optional force)
+  (interactive "d\nP")
+  (let ((commit (get-text-property pos :commit)))
+    (egg-create-annotated-tag 
+     (read-string (format "create annotated tag on %s with name: "
+			  (egg-describe-rev commit)))
+     commit)))
 
 (defun egg-log-buffer-create-new-branch (pos &optional force)
   (interactive "d\nP")
