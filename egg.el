@@ -109,7 +109,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "Yellow" :inherit bold)
     (t :weight bold))
-  "Face for the current branch."
+  "Face for a branch."
   :group 'egg-faces)
 
 (defface egg-tag-mono
@@ -118,7 +118,16 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "SkyBlue" :inherit bold)
     (t :weight bold))
-  "Face for the current branch."
+  "Face for a tag."
+  :group 'egg-faces)
+
+(defface egg-an-tag-mono
+  '((((class color) (background light))
+     :foreground "DarkGoldenRod" :inherit bold)
+    (((class color) (background dark))
+     :foreground "LightGreen" :inherit bold)
+    (t :weight bold))
+  "Face for an annotated branch."
   :group 'egg-faces)
 
 (defface egg-remote-mono
@@ -127,7 +136,7 @@ Many Egg faces inherit from this one by default."
     (((class color) (background dark))
      :foreground "DarkSalmon" :inherit bold)
     (t :weight bold))
-  "Face for the current branch."
+  "Face for a remote."
   :group 'egg-faces)
 
 (defface egg-term
@@ -586,9 +595,23 @@ Either a symbolic ref or a sha1."
 	  (egg-git-to-lines "show-ref")))
 
 (defun egg-full-ref-decorated-alist (head-face head-keymap
-					       tag-face tag-keymap
-					       remote-site-face remote-rname-face remote-keymap)
-  (mapcar (lambda (line)
+					       tag-face an-tag-face tag-keymap
+					       remote-site-face
+					       remote-rname-face 
+					       remote-keymap )
+  (let ((refs-lines (egg-git-to-lines "show-ref" "-d"))
+	annotated-tags)
+    (setq refs-lines  
+	  (delq nil 
+		(mapcar (lambda (line)
+			  (if (not (string-match "\\([^/]+\\)\\^{}\\'" line))
+			      line
+			    (setq annotated-tags 
+				  (cons (match-string-no-properties 1 line)
+					annotated-tags))
+			    nil))
+			refs-lines)))
+    (mapcar (lambda (line)
 	    (when (string-match "\\`\\(?:\\S-+\\) \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n]+\\)\\)\\'" line)
 	      (let ((full-name (match-string-no-properties 1 line))
 		    (name (match-string-no-properties 5 line))
@@ -605,7 +628,9 @@ Either a symbolic ref or a sha1."
 							     :ref (cons name :head))))
 		      ((match-beginning 3) (cons full-name
 						 (propertize name 
-							     'face tag-face 
+							     'face (if (member name annotated-tags)
+								       an-tag-face
+								     tag-face)
 							     'keymap tag-keymap
 							     :ref (cons name :tag))))
 		      ((match-beginning 4) (cons full-name
@@ -618,7 +643,7 @@ Either a symbolic ref or a sha1."
 							     'face remote-rname-face
 							     'keymap remote-keymap
 							     :ref (cons name :remote)))))))))
-	  (egg-git-to-lines "show-ref")))
+	  refs-lines)))
 
 (defun egg-full-ref-alist ()
   (mapcar (lambda (line)
@@ -2448,7 +2473,7 @@ success."
 	(ov (make-overlay (point-min) (point-min) nil t))
 	(dec-ref-alist (egg-full-ref-decorated-alist
 			'egg-branch-mono head-map 
-			'egg-tag-mono tag-map
+			'egg-tag-mono 'egg-an-tag-mono tag-map
 			'egg-remote-mono 'egg-branch-mono remote-map))
 	(ref-alist (egg-full-ref-alist))
 	(ref-string-len 0) 
@@ -2457,7 +2482,7 @@ success."
 	separator ref-string refs full-refs sha1
 	line-props graph-len beg end)
     (save-excursion
-      (while (re-search-forward "^\\(?:\\([ \\\\/*|.-]+\\) \\)?\\([0-9a-f]+\\) \\((\\(?:tag: \\)?\\([^)]+\\)) \\)?\\(.+\\)$" nil t)
+      (while (re-search-forward "^\\(?:\\([ \\\\/*|.-]+\\) \\)?\\([0-9a-f]+\\) \\((\\([^)]+\\)) \\)?\\(.+\\)$" nil t)
 	(setq beg (match-beginning 0)
 	      end (1+ (match-end 0)))
 	(setq graph-len (if (match-end 1) 
@@ -2465,8 +2490,12 @@ success."
 	(setq sha1 (match-string-no-properties 2))
 	(setq full-refs (if (match-beginning 4)
 			    (save-match-data
-			      (split-string 
-			       (match-string-no-properties 4) "[, ]+" t))))
+			      (mapcar (lambda (lref)
+					(if (string-equal (substring lref 0 5) "tag: ")
+					    (substring lref 5)
+					  lref))
+				      (split-string 
+				       (match-string-no-properties 4) ", +" t)))))
 	(setq refs (mapcar (lambda (full-ref-name) 
 			     (cdr (assoc full-ref-name ref-alist)))
 			   full-refs))
@@ -2511,8 +2540,6 @@ success."
 	
 	(setq dashes-len (- 300 graph-len 1 
 			    (if refs (1+ ref-string-len) 0)))
-;;; 	(setq dashes-len (- 300 graph-len
-;;; 			    (if refs (1+ ref-string-len) 0)))
 	(setq min-dashes-len (min min-dashes-len dashes-len))
 
 	(goto-char (match-beginning 2))
