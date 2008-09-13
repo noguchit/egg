@@ -3090,6 +3090,66 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (list :description desc :closure func))
       (egg-query:commit-buffer-rerun buf))			 
     (pop-to-buffer buf t)))
+
+;;;========================================================
+;;; annotated tag
+;;;========================================================
+(defvar egg-internal-annotated-tag-name nil)
+(defvar egg-internal-annotated-tag-target nil)
+
+(defun egg-tag-msg-create-tag ()
+  (let (output)
+    (setq output 
+	  (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end 
+			       "tag" "-a" "-F" "-"
+			       egg-internal-annotated-tag-name
+			       egg-internal-annotated-tag-target))
+    (when output
+      (egg-show-git-output output -1 "GIT-ANNOTATED-TAG")
+      (egg-run-buffers-update-hook))))
+
+(define-egg-buffer tag:msg "*%s-tag:msg@%s*"
+  (egg-log-msg-mode)
+  (setq major-mode 'egg-tag:msg-buffer-mode
+	mode-name "Egg-Tag:Msg"
+	mode-line-process "")
+  (make-local-variable 'egg-internal-annotated-tag-name) 
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-tag:msg-mode-hook))
+
+
+(defun egg-create-annotated-tag (name commit-1)
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir))
+	 (buf (egg-get-tag:msg-buffer 'create))
+	 (commit (egg-git-to-string "rev-parse" "--verify" commit-1))
+	 (pretty (egg-describe-rev commit))
+	 (inhibit-read-only inhibit-read-only))
+    (or commit (error "Bad commit: %s" commit-1))
+    (pop-to-buffer buf t)
+    (setq inhibit-read-only t)
+    (erase-buffer)
+    (set (make-local-variable 'egg-log-msg-action)
+	 'egg-tag-msg-create-tag)
+    (set (make-local-variable 'egg-internal-annotated-tag-name) name)
+    (set (make-local-variable 'egg-internal-annotated-tag-target) commit)
+    (insert (propertize "Create Annotated Tag" 'face 'egg-text-2) " "
+	    (propertize name 'face 'egg-branch) "\n\n"
+	    (propertize "on commit:" 'face 'egg-text-2) " "
+	    (propertize commit 'face 'font-lock-string-face) "\n"
+	    (propertize "aka:" 'face 'egg-text-2) " "
+	    (propertize pretty 'face 'font-lock-string-face) "\n"
+	    (propertize "Repository: " 'face 'egg-text-2)
+	    (propertize git-dir 'face 'font-lock-constant-face) "\n"
+	    (propertize "----------------- Tag Message (type C-c C-c when done) ---------------"
+			'face 'font-lock-comment-face))
+    (put-text-property (point-min) (point) 'read-only t)
+    (put-text-property (point-min) (point) 'rear-sticky nil)
+    (insert "\n")
+    (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
+    (set-marker-insertion-type egg-log-msg-text-beg nil)
+    (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
+    (set-marker-insertion-type egg-log-msg-text-end t)))
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
