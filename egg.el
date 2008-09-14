@@ -783,6 +783,31 @@ Either a symbolic ref or a sha1."
 				(plist-get state :branch))
 			       (t "(detached)")))))
 
+(defsubst egg-get-rebase-merge-state (rebase-dir)
+  (list :rebase-head 
+	(egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
+	:rebase-upstream
+	(egg-describe-rev (egg-file-as-string (concat rebase-dir "onto_name")))
+	:rebase-step
+	(egg-file-as-string (concat rebase-dir "msgnum"))
+	:rebase-num
+	(egg-file-as-string (concat rebase-dir "end"))))
+
+(defsubst egg-get-rebase-interactive-state (rebase-dir)
+  (list :rebase-head 
+	(egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
+	:rebase-upstream
+	(egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
+	:rebase-num
+	(length
+	 (egg-pick-file-records (concat rebase-dir "git-rebase-todo.backup")
+				"^[pes]" "$")) 
+	:rebase-step
+	(1+ (if (file-exists-p (concat rebase-dir "done")) 
+		(length (egg-pick-file-records (concat rebase-dir "done")
+					       "^[pes]" "$")) 
+	      0))))
+
 (defvar egg-internal-current-state nil)
 (defun egg-get-repo-state (&optional extras)
   (let* ((git-dir (egg-git-dir))
@@ -797,26 +822,17 @@ Either a symbolic ref or a sha1."
 	 (rebase-dir 
 	  (if (file-directory-p (concat git-dir "/.dotest-merge"))
 	      (concat git-dir "/.dotest-merge/")))
-	 (rebase-head
-	  (if rebase-dir 
-	      (egg-name-rev 
-	       (egg-file-as-string (concat rebase-dir "head-name")))))
-	 (rebase-upstream
-	  (if rebase-dir 
-	      (egg-file-as-string (concat rebase-dir "onto_name"))))
-	 (rebase-step
-	  (if rebase-dir 
-	      (egg-file-as-string (concat rebase-dir "msgnum"))))
-	 (rebase-num
-	  (if rebase-dir 
-	      (egg-file-as-string (concat rebase-dir "end"))))
-	 (state (list :gitdir git-dir
-		      :branch branch :sha1 sha1 
-		      :merge-heads merge-heads
-		      :rebase-head rebase-head
-		      :rebase-upstream rebase-upstream
-		      :rebase-step rebase-step
-		      :rebase-num rebase-num)))
+	 (is-rebase-interactive
+	  (file-exists-p (concat rebase-dir "interactive")))
+	 (rebase-state
+	  (when rebase-dir
+	    (if is-rebase-interactive
+		(egg-get-rebase-interactive-state rebase-dir)
+	      (egg-get-rebase-merge-state rebase-dir))))
+	 (state (nconc (list :gitdir git-dir
+			     :branch branch :sha1 sha1 
+			     :merge-heads merge-heads)
+		       rebase-state)))
     (dolist (req extras)
       (cond ((eq req :unstaged)
 	     (setq state 
