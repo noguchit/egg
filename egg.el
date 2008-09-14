@@ -2634,10 +2634,9 @@ success."
 	  (move-overlay ov beg (1+ (line-end-position))))
 	(goto-char (line-end-position)))
       
-      (goto-char start)
-
       (if (= min-dashes-len 300)
 	  (insert (propertize "nothing found!" 'face 'egg-warning))
+	
 
 	;; compute how many dashes can be deleted while
 	;; leaving at least 1 dash
@@ -2657,8 +2656,10 @@ success."
 	(set (make-local-variable 'egg-log-buffer-comment-column)
 	     (+ (- 300 min-dashes-len (if (> graph-len 0) 0 1)) 1 8 1))
 
-	(when (> min-dashes-len 0)
-	  (while (setq start (next-single-property-change (point) :dash-refs))
+	(when (and (> min-dashes-len 0))
+	  (goto-char (1- start))
+	  (while (setq start (next-single-property-change (point) 
+							  :dash-refs))
 	    (goto-char start)
 	    (insert (substring (get-text-property start :dash-refs)
 			       min-dashes-len))
