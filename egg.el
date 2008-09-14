@@ -397,6 +397,20 @@ Return the output lines as a list of strings."
 	(save-match-data
 	  (split-string out "[\n]+" t)))))
 
+(defun egg-git-lines-matching (re idx &rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
+  (with-temp-buffer
+    (let (code lines)
+      (setq code (apply 'call-process "git" nil t nil args))
+    (if (/= code 0)
+	nil
+      (save-match-data
+	(goto-char (point-min))
+	(while (re-search-forward re nil t)
+	  (setq lines (cons (match-string-no-properties idx) lines)))
+	lines)))))
+
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
   (egg-git-to-string "ls-files" "--full-name" "--" file))
@@ -1781,12 +1795,6 @@ success."
     (mapcar #'egg-internal-background-refresh-index
 	    egg-internal-status-buffer-names-list)))
 
-(defcustom egg-background-idle-period 30
-  "How long emacs has been idle before we trigger background jobs."
-  :group 'egg
-  :set 'egg-set-background-idle-period
-  :type 'integer)
-
 (defsubst egg-internal-background-jobs-restart ()
   (cancel-function-timers #'egg-status-buffer-background-job)
   (setq egg-internal-background-jobs-timer
@@ -1796,6 +1804,12 @@ success."
 (defun egg-set-background-idle-period (var val)
   (custom-set-default var val)
   (egg-internal-background-jobs-restart))
+
+(defcustom egg-background-idle-period 30
+  "How long emacs has been idle before we trigger background jobs."
+  :group 'egg
+  :set 'egg-set-background-idle-period
+  :type 'integer)
 
 (egg-internal-background-jobs-restart)
 
@@ -2459,14 +2473,6 @@ success."
 	      (concat "-S" string)))
 
 
-(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func)
-  (let ((beg (point)))
-    (funcall log-insert-func)
-    (goto-char beg)
-    (egg-decorate-log egg-log-commit-map 
-		      egg-log-local-ref-map
-		      egg-log-local-ref-map
-		      egg-log-remote-ref-map)))
 
 (defconst egg-log-commit-map 
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
@@ -2524,6 +2530,7 @@ success."
     (define-key map "p" 'egg-log-buffer-prev-ref)
     map))
 
+
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map)
   (let ((start (point))
 	(head-sha1 (egg-get-current-sha1)) 
@@ -2537,22 +2544,35 @@ success."
 	(dashes-len 0)
 	(min-dashes-len 300)
 	separator ref-string refs full-refs sha1
-	line-props graph-len beg end)
+	line-props graph-len beg end sha-beg sha-end subject-beg
+	refs-start refs-end)
     (save-excursion
-      (while (re-search-forward "^\\(?:\\([ \\\\/*|.-]+\\) \\)?\\([0-9a-f]+\\) \\((\\([^)]+\\)) \\)?\\(.+\\)$" nil t)
-	(setq beg (match-beginning 0)
-	      end (1+ (match-end 0)))
-	(setq graph-len (if (match-end 1) 
-			    (- (match-end 1) (match-beginning 1)) 0))
-	(setq sha1 (match-string-no-properties 2))
-	(setq full-refs (if (match-beginning 4)
-			    (save-match-data
-			      (mapcar (lambda (lref)
-					(if (string-equal (substring lref 0 5) "tag: ")
-					    (substring lref 5)
-					  lref))
-				      (split-string 
-				       (match-string-no-properties 4) ", +" t)))))
+      (while (re-search-forward "\\([0-9a-f]\\{40\\}\\) .+$" nil t)
+	(setq sha-beg (match-beginning 1) 
+	      sha-end (match-end 1)
+	      subject-beg (1+ sha-end)
+	      beg (line-beginning-position)
+	      end (match-end 0) 
+	      refs-start nil)
+	(setq graph-len (if (= beg sha-beg) 0 (- sha-beg beg 1))
+	      sha1 (buffer-substring-no-properties sha-beg sha-end)
+	      subject-beg (if (/= (char-after subject-beg) ?\()
+			      subject-beg
+			    (setq refs-start (1+ subject-beg))
+			    (goto-char subject-beg)
+			    (skip-chars-forward "^)")
+			    (setq refs-end (point))
+			    (+ (point) 2)))
+	(setq full-refs (when refs-start
+			  (save-match-data
+			    (mapcar (lambda (lref)
+				      (if (string-equal (substring lref 0 5) "tag: ")
+					  (substring lref 5)
+					lref))
+				    (split-string 
+				     (buffer-substring-no-properties (+ sha-end 2)
+								     refs-end) 
+				     ", +" t)))))
 	(setq refs (mapcar (lambda (full-ref-name) 
 			     (cdr (assoc full-ref-name ref-alist)))
 			   full-refs))
@@ -2581,39 +2601,38 @@ success."
 	(setq ref-string-len (if ref-string (length ref-string)))
 
 	;; entire line
-	(add-text-properties beg end line-props)
+	(add-text-properties beg (1+ end) line-props)
 
 	;; comment
-	(put-text-property (match-beginning 5) (match-end 5) 
-			   'face 'egg-text-2)
+	(put-text-property subject-beg end 'face 'egg-text-2)
 	;; delete refs list (they're already parsed)
-	(when (match-beginning 3)
-	  (delete-region (match-beginning 3) (match-end 3)))
+	(if refs-start 
+	  (delete-region (1- refs-start) (+ refs-end 2)))
 
 	;; shorten sha
- 	(delete-region (+ (match-beginning 2) 8) (match-end 2))
-	(put-text-property (match-beginning 2) (+ (match-beginning 2) 8)
+ 	(delete-region (+ sha-beg 8) sha-end)
+	(put-text-property sha-beg (+ sha-beg 8) 
 			   'face 'font-lock-constant-face)
 	
 	(setq dashes-len (- 300 graph-len 1 
 			    (if refs (1+ ref-string-len) 0)))
 	(setq min-dashes-len (min min-dashes-len dashes-len))
 
-	(goto-char (match-beginning 2))
-	
-	(insert
-	 (concat (apply 'propertize 
-			(make-string dashes-len ?-)
-			(nconc (list 'face 'egg-graph)
-			       line-props))
-		 (if refs
-		     (concat separator ref-string separator)
-		   separator)))
-	
+	(put-text-property sha-beg (1+ sha-beg)
+			   :dash-refs
+			   (apply 'concat 
+				  (apply 'propertize 
+					 (make-string dashes-len ?-)
+					 (nconc (list 'face 'egg-graph)
+						line-props))
+				  separator
+				  (if refs
+				      (list ref-string separator))))
 	(when (string= sha1 head-sha1)
 	  (overlay-put ov 'face 'egg-log-HEAD)
 	  (overlay-put ov 'evaporate t)
-	  (move-overlay ov beg (1+ (line-end-position)))))
+	  (move-overlay ov beg (1+ (line-end-position))))
+	(goto-char (line-end-position)))
       
       (goto-char start)
 
@@ -2639,9 +2658,21 @@ success."
 	     (+ (- 300 min-dashes-len (if (> graph-len 0) 0 1)) 1 8 1))
 
 	(when (> min-dashes-len 0)
-	  (let ((re (format "^\\(?:[^\n-]+ \\)?\\(-\\{%d\\}\\)" min-dashes-len)))
-	    (while (re-search-forward re nil t)
-	      (delete-region (match-beginning 1) (match-end 1)))))))))
+	  (while (setq start (next-single-property-change (point) :dash-refs))
+	    (goto-char start)
+	    (insert (substring (get-text-property start :dash-refs)
+			       min-dashes-len))
+	    (forward-char 2)))))))
+
+(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func)
+  (let ((beg (point)))
+    (funcall log-insert-func)
+    (goto-char beg)
+    (egg-decorate-log egg-log-commit-map 
+		      egg-log-local-ref-map
+		      egg-log-local-ref-map
+		      egg-log-remote-ref-map)))
+
 
 (defun egg-log-diff-cmd-visit-file (file sha1)
   (interactive (list (car (get-text-property (point) :diff))
