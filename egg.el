@@ -411,6 +411,26 @@ Return the output lines as a list of strings."
 	  (setq lines (cons (match-string-no-properties idx) lines)))
 	lines)))))
 
+(defun egg-git-lines-matching-multi (re indices &rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
+  (with-temp-buffer
+    (let (code lines matches)
+      (setq code (apply 'call-process "git" nil t nil args))
+    (if (/= code 0)
+	nil
+      (save-match-data
+	(goto-char (point-min))
+	(while (re-search-forward re nil t)
+	  (setq matches nil)
+	  (dolist (idx indices)
+	    (when (match-beginning idx)
+	      (setq matches 
+		    (cons (cons idx (match-string-no-properties idx))
+			  matches))))
+	  (setq lines (cons matches lines)))
+	lines)))))
+
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
   (egg-git-to-string "ls-files" "--full-name" "--" file))
@@ -606,73 +626,89 @@ Either a symbolic ref or a sha1."
 	  (egg-git-to-lines "show-ref")))
 
 (defun egg-ref-type-alist ()
-  (mapcar (lambda (line)
-	    (when (string-match "\\`\\(?:\\S-+\\) refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(.+\\)\\'" line)
-	      (cons (match-string-no-properties 4 line)
-		    (cond ((match-beginning 1) :head)
-			  ((match-beginning 2) :tag)
-			  ((match-beginning 3) :remote)))))
-	  (egg-git-to-lines "show-ref")))
+  (mapcar (lambda (ref-desc)
+	    (cons (cdr (assq 5 ref-desc))
+		  (cond ((assq 2 ref-desc) :head)
+			((assq 3 ref-desc) :tag)
+			((assq 4 ref-desc) :remote))))
+	  (egg-git-lines-matching-multi 
+	   "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n]+\\)\\)$"
+	   ;; 1: full-name
+	   ;; 2: head
+	   ;; 3: tag
+	   ;; 4: remote
+	   ;; 5: name
+	   ;; 6: remote-host
+	   '(1 2 3 4 5 6) "show-ref")))
 
 (defun egg-full-ref-decorated-alist (head-face head-keymap
 					       tag-face an-tag-face tag-keymap
 					       remote-site-face
 					       remote-rname-face 
 					       remote-keymap )
-  (let ((refs-lines (egg-git-to-lines "show-ref" "-d"))
+  (let ((refs-desc-list
+	 (egg-git-lines-matching-multi 
+	  "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
+	  ;; 1: full-name
+	  ;; 2: head
+	  ;; 3: tag
+	  ;; 4: remote
+	  ;; 5: name
+	  ;; 6: remote-host
+	  ;; 7: is annotated tag 
+	  '(1 2 3 4 5 6 7) "show-ref" "-d"))
 	annotated-tags)
-    (setq refs-lines  
+    (setq refs-desc-list
 	  (delq nil 
-		(mapcar (lambda (line)
-			  (if (not (string-match "\\([^/]+\\)\\^{}\\'" line))
-			      line
+		(mapcar (lambda (desc)
+			  (if (not (assq 7 desc))
+			      desc ;; not an annotated tag
 			    (setq annotated-tags 
-				  (cons (match-string-no-properties 1 line)
+				  (cons (cdr (assq 1 desc)) 
 					annotated-tags))
 			    nil))
-			refs-lines)))
-    (mapcar (lambda (line)
-	    (when (string-match "\\`\\(?:\\S-+\\) \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n]+\\)\\)\\'" line)
-	      (let ((full-name (match-string-no-properties 1 line))
-		    (name (match-string-no-properties 5 line))
-		    (remote (and (match-end 6)
-				 (match-string-no-properties 6 line)))
-		    (rname (and (match-end 6)
-				(substring-no-properties line 
-							 (match-end 6) 
-							 (match-end 5))))) 
-		(cond ((match-beginning 2) (cons full-name
-						 (propertize name 
-							     'face head-face 
-							     'keymap head-keymap
-							     :ref (cons name :head))))
-		      ((match-beginning 3) (cons full-name
-						 (propertize name 
-							     'face (if (member name annotated-tags)
-								       an-tag-face
-								     tag-face)
-							     'keymap tag-keymap
-							     :ref (cons name :tag))))
-		      ((match-beginning 4) (cons full-name
-						 (concat
-						  (propertize remote
-							     'face remote-site-face
-							     'keymap remote-keymap
-							     :ref (cons name :remote))
-						  (propertize rname
-							     'face remote-rname-face
-							     'keymap remote-keymap
-							     :ref (cons name :remote)))))))))
-	  refs-lines)))
+			refs-desc-list)))
+    (mapcar (lambda (desc)
+	      (let ((full-name (cdr (assq 1 desc)))
+		    (name (cdr (assq 5 desc)))
+		    (remote (cdr (assq 6 desc))))
+		(cond ((assq 2 desc) 
+		       (cons full-name
+			     (propertize name 
+					 'face head-face 
+					 'keymap head-keymap
+					 :ref (cons name :head))))
+		      ((assq 3 desc) 
+		       (cons full-name
+			     (propertize name 
+					 'face 
+					 (if (member full-name
+						     annotated-tags)
+					     an-tag-face
+					   tag-face)
+					 'keymap tag-keymap
+					 :ref (cons name :tag))))
+		      ((assq 4 desc)
+		       (cons full-name
+			     (concat
+			      (propertize remote
+					  'face remote-site-face
+					  'keymap remote-keymap
+					  :ref (cons name :remote))
+			      (propertize (substring name (length remote)) 
+					  'face remote-rname-face
+					  'keymap remote-keymap
+					  :ref (cons name :remote))))))))
+	    refs-desc-list)))
+
 
 (defun egg-full-ref-alist ()
-  (mapcar (lambda (line)
-	    (when (string-match "\\`\\(?:\\S-+\\) \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(.+\\)\\)\\'" line)
-	      (let ((full-name (match-string-no-properties 1 line))
-		    (name (match-string-no-properties 5 line)))
-		(cons full-name name))))
-	  (egg-git-to-lines "show-ref")))
-
+  (mapcar (lambda (desc)
+	    (cons (cdr (assq 1 desc))
+		  (cdr (assq 2 desc))))
+	  (egg-git-lines-matching-multi 
+	   "^.+ \\(refs/\\(?:heads\\|tags\\|remotes\\)/\\(.+\\)\\)$"
+	   '(1 2) "show-ref")))
 
 (defun egg-complete-rev (string &optional ignored all)
   (save-match-data
@@ -2539,13 +2575,16 @@ success."
 			'egg-branch-mono head-map 
 			'egg-tag-mono 'egg-an-tag-mono tag-map
 			'egg-remote-mono 'egg-branch-mono remote-map))
-	(ref-alist (egg-full-ref-alist))
 	(ref-string-len 0) 
 	(dashes-len 0)
 	(min-dashes-len 300)
 	separator ref-string refs full-refs sha1
 	line-props graph-len beg end sha-beg sha-end subject-beg
-	refs-start refs-end)
+	refs-start refs-end ref-alist)
+    (setq ref-alist (mapcar (lambda (pair)
+			      (cons (car pair)
+				    (substring-no-properties (cdr pair))))
+			    dec-ref-alist))
     (save-excursion
       (while (re-search-forward "\\([0-9a-f]\\{40\\}\\) .+$" nil t)
 	(setq sha-beg (match-beginning 1) 
