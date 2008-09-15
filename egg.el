@@ -2392,8 +2392,16 @@ success."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-commit-buffer-mode-hook))
 
-(defun egg-commit-log-edit (&optional amend)
-  (interactive "P")
+(defun egg-commit-log-edit (action-title action-function
+					 insert-init-text-function)
+  (interactive (if current-prefix-arg
+		   (list "Amending  " #'egg-log-msg-amend-commit
+			 (lambda () 
+			   (egg-git-ok t "log" "--max-count=1"
+				       "--pretty=format:%s%n%n%b" "HEAD")))
+		 (list "Committing into  "
+		       #'egg-log-msg-commit
+		       (lambda () nil))))
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-commit-buffer 'create))
@@ -2405,9 +2413,8 @@ success."
     (setq inhibit-read-only t)
     (erase-buffer)
     (set (make-local-variable 'egg-log-msg-action)
-	 (if amend 'egg-log-msg-amend-commit 'egg-log-msg-commit))
-    (insert (propertize (if amend "Amending  " "Committing into  ")
-			'face 'egg-text-3)
+	 action-function)
+    (insert (propertize action-title 'face 'egg-text-3)
 	    (propertize head 'face 'egg-branch) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "--------------- Commit Message (type C-c C-c when done) ---------------"
@@ -2426,9 +2433,8 @@ success."
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
     (egg-commit-log-buffer-show-diffs buf 'init)
     (goto-char egg-log-msg-text-beg)
-    (when amend
-      (egg-git-ok t "log" "--max-count=1" "--pretty=format:%s%n%n%b"
-		  "HEAD"))
+    (when (functionp insert-init-text-function)
+      (funcall insert-init-text-function))
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
 
@@ -3643,7 +3649,7 @@ current file contains unstaged changes."
     (:commit		. egg-commit-log-edit)
     (:sync		. egg-log)
     (:new-branch	. egg-start-new-branch)
-    (:quit		. (lambda () (message "do nothing now! later.") (ding) nil))))
+    (:quit		. (lambda () (interactive) (message "do nothing now! later.") (ding) nil))))
 
 (defconst egg-electrict-select-action-buffer 
   (get-buffer-create "*Egg:Select Action*"))
@@ -3864,7 +3870,7 @@ current file contains unstaged changes."
 		     (egg-prompt-next-action desc)
 		   (egg-guess-next-action desc)))
      
-     (funcall (cdr (assq action egg-action-function-alist)))))
+     (call-interactively (cdr (assq action egg-action-function-alist)))))
 
 (defvar egg-minor-mode nil)
 (defvar egg-minor-mode-map (make-sparse-keymap "Egg"))
