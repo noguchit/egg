@@ -103,6 +103,15 @@ Many Egg faces inherit from this one by default."
   "Face for the current branch."
   :group 'egg-faces)
 
+(defface egg-log-buffer-mark
+  '((((class color) (background light))
+     :foreground "black" :inherit bold)
+    (((class color) (background dark))
+     :foreground "white" :inherit bold)
+    (t :weight bold))
+  "Face to mark commit line in log-buffer."
+  :group 'egg-faces)
+
 (defface egg-branch-mono
   '((((class color) (background light))
      :foreground "SkyBlue" :inherit bold)
@@ -306,6 +315,13 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
+(defcustom egg-git-rebase-subdir ".dotest-merge"
+  "Name of the rebase's workdir.
+Different versions of git have different names for this subdir."
+  :group 'egg
+  :type '(choice (const ".dotest-merge")
+		 (const "rebase-merge")
+		 string))
 
 
 (defcustom egg-dummy-option nil
@@ -387,7 +403,18 @@ is used as input to GIT."
   (egg-git-ok nil "diff" "--quiet" "HEAD" "--" file))
 (defsubst egg-index-empty () (egg-git-ok nil "diff" "--cached" "--quiet"))
 
-(defsubst egg-repo-clean () (and (egg-wdir-clean) (egg-index-empty)))
+(defsubst egg-repo-clean (&optional state)
+  (unless state 
+    (setq state (egg-repo-state :staged :unstaged)))
+  (and 
+   (null (plist-get state :rebase-num))
+   (null (plist-get state :merge-heads))
+   (not (if (memq :unstaged state)
+	    (plist-get state :unstaged)
+	  (egg-wdir-clean)))
+   (not (if (memq :staged state)
+	    (plist-get state :staged)
+	  (egg-index-empty)))))
 
 (defun egg-git-to-lines (&rest args)
   "run GIT with ARGS.
@@ -772,6 +799,12 @@ Either a symbolic ref or a sha1."
 			  "^ref: refs/heads/\\(.+\\)"
 			  1))
 
+(defsubst egg-get-full-symbolic-HEAD (&optional file)
+  (setq file (or file (concat (egg-git-dir) "/HEAD")))
+  (egg-pick-file-contents file
+			  "^ref: \\(refs/heads/.+\\)"
+			  1))
+
 (defsubst egg-get-current-sha1 ()
   (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
 
@@ -784,7 +817,8 @@ Either a symbolic ref or a sha1."
 			       (t "(detached)")))))
 
 (defsubst egg-get-rebase-merge-state (rebase-dir)
-  (list :rebase-head 
+  (list :rebase-dir rebase-dir
+	:rebase-head 
 	(egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
 	:rebase-upstream
 	(egg-describe-rev (egg-file-as-string (concat rebase-dir "onto_name")))
@@ -794,7 +828,8 @@ Either a symbolic ref or a sha1."
 	(egg-file-as-string (concat rebase-dir "end"))))
 
 (defsubst egg-get-rebase-interactive-state (rebase-dir)
-  (list :rebase-head 
+  (list :rebase-dir rebase-dir
+	:rebase-head 
 	(egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
 	:rebase-upstream
 	(egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
@@ -814,14 +849,15 @@ Either a symbolic ref or a sha1."
 	 (head-file (concat git-dir "/HEAD"))
 	 (merge-file (concat git-dir "/MERGE_HEAD"))
 	 (branch (egg-get-symbolic-HEAD head-file))
+	 (branch-full-name (egg-get-full-symbolic-HEAD head-file))
 	 (sha1 (egg-get-current-sha1))
 	 (merge-heads
 	  (mapcar 'egg-name-rev 
 		  (if (file-readable-p merge-file)
 		      (egg-pick-file-records merge-file "^" "$"))))
 	 (rebase-dir 
-	  (if (file-directory-p (concat git-dir "/.dotest-merge"))
-	      (concat git-dir "/.dotest-merge/")))
+	  (if (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
+	      (concat git-dir "/" egg-git-rebase-subdir "/")))
 	 (is-rebase-interactive
 	  (file-exists-p (concat rebase-dir "interactive")))
 	 (rebase-state
@@ -830,7 +866,9 @@ Either a symbolic ref or a sha1."
 		(egg-get-rebase-interactive-state rebase-dir)
 	      (egg-get-rebase-merge-state rebase-dir))))
 	 (state (nconc (list :gitdir git-dir
-			     :branch branch :sha1 sha1 
+			     :head branch-full-name
+			     :branch branch 
+			     :sha1 sha1 
 			     :merge-heads merge-heads)
 		       rebase-state)))
     (dolist (req extras)
@@ -1667,7 +1705,7 @@ success."
 	(unless (egg-repo-clean)
 	  (egg-status)
 	  (error "Repo %s is not clean" git-dir))
-      (unless (file-directory-p (concat git-dir "/.dotest-merge"))
+      (unless (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
 	(error "No rebase in progress in directory %s"
 	       (file-name-directory git-dir))))
     (setq res (egg-do-rebase-head upstream-or-action old-base prompt))
@@ -2161,7 +2199,9 @@ success."
 			   &optional old-base prompt)
   (let ((pre-merge (egg-get-current-sha1))
 	cmd-res modified-files feed-back old-choices)
-    (with-temp-buffer
+;;;     (with-temp-buffer
+    (with-current-buffer (get-buffer-create "*egg-debug*")
+      (erase-buffer)
       (when (and (stringp upstream-or-action) ;; start a rebase
 		 (eq old-base t))	      ;; ask for old-base
 	(unless (egg-git-ok (current-buffer) "rev-list"
@@ -2538,6 +2578,11 @@ success."
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
+
+    (define-key map (kbd "+") 'egg-log-buffer-mark-pick)
+    (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
+    (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
+    (define-key map (kbd "-") 'egg-log-buffer-unmark)
     map))
 
 (defconst egg-log-ref-map 
@@ -2767,6 +2812,114 @@ success."
 	      (egg-describe-rev commit)
 	    commit)))))
 
+(defun egg-log-buffer-do-mark (pos char &optional unmark)
+  (let ((commit (get-text-property pos :commit))
+	(inhibit-read-only t))
+    (when commit 
+      (save-excursion
+	(beginning-of-line)
+	(when (> (skip-chars-forward "^-" (line-end-position)) 0)
+	  (funcall (if unmark
+		       #'remove-text-properties
+		     #'add-text-properties)
+		   (point) (1+ (point))
+		   (list :mark char
+			 'display 
+			 (and char 
+			      (propertize (char-to-string char)
+					  'face 'egg-log-buffer-mark))))
+	  nil)))))
+
+(defun egg-log-buffer-mark-pick (pos)
+  (interactive "d")
+  (egg-log-buffer-do-mark pos ?+))
+
+(defun egg-log-buffer-mark-squash (pos)
+  (interactive "d")
+  (egg-log-buffer-do-mark pos ?.))
+
+(defun egg-log-buffer-mark-edit (pos)
+  (interactive "d")
+  (egg-log-buffer-do-mark pos ?~))
+
+(defun egg-log-buffer-do-unmark-all ()
+  (interactive)
+  (let ((pos (point-min))
+	(inhibit-read-only t))
+      (while (setq pos (next-single-property-change (1+ pos) :mark))
+	(remove-text-properties pos (1+ pos)
+				(list :mark nil 'display nil)))))
+
+(defun egg-log-buffer-unmark (pos &optional all)
+  (interactive "d\nP")
+  (if all
+      (egg-log-buffer-do-unmark-all)
+    (egg-log-buffer-do-mark pos nil t)))
+
+(defun egg-log-buffer-get-marked-alist ()
+  (let ((pos (point-min))
+	marker subject alist)
+    (save-excursion
+      (while (setq pos (next-single-property-change (1+ pos) :mark))
+	(goto-char pos)
+	(setq marker (point-marker))
+	(move-to-column egg-log-buffer-comment-column)
+	(setq subject (buffer-substring-no-properties 
+		       (point) (line-end-position)))
+	(setq alist (cons (list (get-text-property pos :commit)
+				(get-text-property pos :mark)
+				subject marker)
+			  alist))))
+    alist))
+
+
+(defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
+  (let ((process-environment process-environment)
+	(repo-state (or repo-state (egg-repo-state :staged :unstaged)))
+	orig-head-sha1)
+    (setq orig-head-sha1 (plist-get repo-state :sha1))
+    (unless (egg-repo-clean repo-state) (error "Repo not clean"))
+    (unless onto (setq onto upstream))
+
+    (with-temp-buffer
+      (make-directory rebase-dir t)
+
+      (write-region (point-min) (point-min) 
+		    (concat rebase-dir "interactive"))
+      (insert (plist-get repo-state :head) "\n")
+      (write-region (point-min) (point-max) 
+		    (concat rebase-dir "head-name"))
+      (erase-buffer)
+      (insert (plist-get repo-state :sha1) "\n")
+      (write-region (point-min) (point-max) 
+		    (concat rebase-dir "head"))
+      (erase-buffer)
+      (insert upstream "\n")
+      (write-region (point-min) (point-max) 
+		    (concat rebase-dir "upstream"))
+      (erase-buffer)
+      (insert onto "\n")
+      (write-region (point-min) (point-max) 
+		    (concat rebase-dir "onto"))
+      (erase-buffer)
+      (insert "# Rebase " upstream ".." orig-head-sha1 " onto " onto "\n")
+      (dolist (rev-info commit-alist)
+	(insert (cond ((eq (nth 1 rev-info) ?+) "pick")
+		      ((eq (nth 1 rev-info) ?.) "squash")
+		      ((eq (nth 1 rev-info) ?~) "edit"))
+		" " (nth 0 rev-info) " " (nth 2 rev-info) "\n"))
+      (write-region (point-min) (point-max) 
+		    (concat rebase-dir "git-rebase-todo"))
+      (write-region (point-min) (point-max) 
+		    (concat rebase-dir "git-rebase-todo.backup")))
+
+    (setenv "GIT_REFLOG_ACTION" (format "rebase -i (%s)" onto))
+    (with-current-buffer (get-buffer-create "*egg-debug*")
+      (egg-git-ok nil "update-ref" "ORIG_HEAD" orig-head-sha1)
+      (egg-git-ok nil "checkout" onto)
+      (egg-buffer-do-rebase :continue))))
+
+
 (defun egg-log-buffer-merge (pos &optional no-commit)
   (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
@@ -2796,6 +2949,29 @@ success."
 		   (format "starting point to rebase HEAD onto %s: "
 			   rev)))
 	(egg-status)))))
+
+(defun egg-log-buffer-rewrite ()
+  (interactive)
+  (let* ((state (egg-repo-state :staged :unstaged))
+	 (rebase-dir (concat (plist-get state :gitdir) "/"
+			     egg-git-rebase-subdir "/"))
+	 (todo-alist (egg-log-buffer-get-marked-alist))
+	 (commits (mapcar 'car todo-alist))
+	 (oldest (car commits))
+	 (upstream (egg-sha1 (concat oldest "^")))
+	 (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
+				(concat upstream "..HEAD"))))
+    (unless (egg-repo-clean state)
+      (error "repo %s is not clean" (plist-get state :gitdir)))
+    (mapc (lambda (commit)
+	    (unless (member commit all)
+	      (error "commit %s is not between HEAD and upstream %s"
+		     commit upstream)))
+	  commits)
+    
+    (egg-setup-rebase-interactive rebase-dir upstream nil
+				  state todo-alist)
+    (egg-status)))
 
 (defun egg-log-buffer-checkout-commit (pos)
   (interactive "d")
