@@ -810,7 +810,9 @@ Either a symbolic ref or a sha1."
 
 (defsubst egg-set-mode-info (state)
   (set (intern (concat "egg-" egg-git-dir "-HEAD"))
-       (format " Git:%s" (cond ((plist-get state :merge-heads)
+       (format " Git:%s" (cond ((plist-get state :rebase-dir)
+				"(rebasing)")
+			       ((plist-get state :merge-heads)
 				"(merging)")
 			       ((plist-get state :branch)
 				(plist-get state :branch))
@@ -3034,7 +3036,7 @@ success."
 				    (with-current-buffer ,buffer
 				      (egg-do-async-rebase-continue
 				       #'egg-handle-rebase-interactive-exit
-				       orig-sha1)))
+				       ,orig-sha1)))
 				  (lambda () 
 				    (egg-git-ok t "log" "--max-count=1"
 						"--pretty=format:%s%n%n%b"
