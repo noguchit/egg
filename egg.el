@@ -2968,29 +2968,40 @@ success."
 (defun egg-rebase-interactive-server-buffer-hook ()
   ;; run inside server buffer
   (when (egg-interactive-rebase-in-progress)
-    (let* ((rebase-dir (concat (egg-git-dir) "/" 
-			       egg-git-rebase-subdir "/"))
+    (let* ((rebase-i-op (car (egg-git-lines-matching-multi 
+			      ": \\(rebase -i\\) (\\(\\sw+\\)):" '( 1 2 )
+			      "log" "-g" "--max-count=1"
+			      "--pretty=oneline")))
+	   (is-rebase-i (assq 1 rebase-i-op))
+	   (cherry-op (cdr (assq 2 rebase-i-op)))
+	   (server-buffer (current-buffer))
 	   commit-title)
-      (when (string-equal rebase-dir default-directory)
+      (when is-rebase-i
 	(goto-char (point-min))
 	(setq commit-title
 	      (if (re-search-forward 
 		   "^# This is a combination of two" nil t)
-		  "Squash commit on top of "
-		"Editing commit log of "))
+		  (concat "Squash commit (" cherry-op ") on top of ")
+		(concat "Editing commit (" cherry-op ") log of picked ")))
 	;; fix me
-	;; (setq wait nil) ;; hack
+	(if (boundp 'nowait)		;; hack to not show the window
+	    (set 'nowait t))
 	(egg-commit-log-edit 
 	 commit-title
 	 `(lambda ()
 	    (let ((msg (buffer-substring-no-properties
 			egg-log-msg-text-beg egg-log-msg-text-end)))
-	      (with-current-buffer ,(current-buffer)
-		(erase-buffer)
-		(insert msg)
-		(server-edit))))
+	      (with-current-buffer ,server-buffer 
+		(let ((require-final-newline nil))
+		  (erase-buffer)
+		  (insert msg)
+		  (save-buffer)
+		  (server-edit)))))
 	 `(lambda ()
-	    (insert-buffer-substring ,(current-buffer))))))))
+	    (insert-buffer-substring ,server-buffer)))
+	(bury-buffer server-buffer)))))
+
+(add-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
 
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
