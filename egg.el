@@ -843,6 +843,13 @@ Either a symbolic ref or a sha1."
 					       "^[pes]" "$")) 
 	      0))))
 
+(defsubst egg-git-rebase-dir (&optional git-dir)
+  (concat (or git-dir (egg-git-dir)) "/" egg-git-rebase-subdir "/"))
+
+(defsubst egg-interactive-rebase-in-progress ()
+  (file-exists-p (concat (egg-git-dir) "/" egg-git-rebase-subdir 
+			 "/interactive") ))
+
 (defvar egg-internal-current-state nil)
 (defun egg-get-repo-state (&optional extras)
   (let* ((git-dir (egg-git-dir))
@@ -1005,6 +1012,14 @@ Either a symbolic ref or a sha1."
 ;;; Async Git process
 ;;;========================================================
 
+(defsubst egg-async-process ()
+  (let* ((buffer (get-buffer-create "*egg-process*"))
+	 (proc (get-buffer-process buffer)))
+    (if (and (processp proc) 		;; is a process
+	     (not (eq (process-status proc) 'exit)) ;; not finised
+	     (= (process-exit-status proc) 0))      ;; still running
+	proc)))
+
 (defun egg-async-do (exit-code func-args args)
   "Run GIT asynchronously with ARGS.
 if EXIT code is an exit-code from GIT other than zero but considered
@@ -1039,7 +1054,11 @@ success."
 	(process-put proc :accepted-msg accepted-msg)
 	(process-put proc :accepted-code exit-code))
       (process-put proc :cmds (cons "git" args))
-      (set-process-sentinel proc #'egg-process-sentinel))))
+      (set-process-sentinel proc #'egg-process-sentinel))
+    proc))
+
+(defsubst egg-async-0 (func-args &rest args)
+  (egg-async-do nil func-args args))
 
 (defvar egg-async-process nil)
 (defvar egg-async-cmds nil)
@@ -1055,7 +1074,7 @@ success."
 	   (message "EGG: git finished."))
 	  ((string= msg "killed\n")
 	   (message "EGG: git was killed."))
-	  ((string-match accepted-msg msg)
+	  ((and accepted-msg (string-match accepted-msg msg))
 	   (message "EGG: git exited with code: %d." exit-code))
 	  ((string-match "exited abnormally" msg)
 	   (message "EGG: git failed."))
@@ -1694,7 +1713,7 @@ success."
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "x") 'egg-buffer-rebase-abort)
     (define-key map (kbd "u") 'egg-buffer-rebase-skip)
-    (define-key map (kbd "RET") 'egg-buffer-rebase-continue)
+    (define-key map (kbd "RET") 'egg-buffer-selective-rebase-continue)
     map))
 
 (defun egg-buffer-do-rebase (upstream-or-action 
@@ -1720,6 +1739,15 @@ success."
   (message "continue with current rebase")
   (unless (egg-buffer-do-rebase :continue)
     (egg-status)))
+
+(defun egg-buffer-selective-rebase-continue ()
+  (interactive)
+  (if (not (egg-interactive-rebase-in-progress))
+      (egg-buffer-rebase-continue)
+    (message "continue with interactive rebase")
+    (egg-do-async-rebase-continue
+     #'egg-handle-rebase-interactive-exit
+     (egg-pick-file-contents (concat (egg-git-rebase-dir) "head") "^.+$"))))
 
 (defun egg-buffer-rebase-skip ()
   (interactive)
@@ -2194,6 +2222,16 @@ success."
       (list :success merge-cmd-res
 	    :files modified-files
 	    :message feed-back))))
+
+(defsubst egg-do-async-rebase-continue (callback closure &optional action)
+  (let ((process-environment process-environment)
+	(action (or action "--continue"))
+	(buffer (current-buffer))
+	proc)
+    (setenv "EDITOR" "emacsclient")
+    (setq proc (egg-async-0 (list callback closure) "rebase" action))
+    (process-put proc :orig-buffer buffer)
+    proc))
 
 (defun egg-do-rebase-head (upstream-or-action 
 			   &optional old-base prompt)
@@ -2882,6 +2920,7 @@ success."
 (defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
   (let ((process-environment process-environment)
 	(repo-state (or repo-state (egg-repo-state :staged :unstaged)))
+	(orig-buffer (current-buffer))
 	orig-head-sha1)
     (setq orig-head-sha1 (plist-get repo-state :sha1))
     (unless (egg-repo-clean repo-state) (error "Repo not clean"))
@@ -2923,8 +2962,80 @@ success."
     (with-current-buffer (get-buffer-create "*egg-debug*")
       (egg-git-ok nil "update-ref" "ORIG_HEAD" orig-head-sha1)
       (egg-git-ok nil "checkout" onto)
-      (egg-buffer-do-rebase :continue))))
+      (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
+				    orig-head-sha1))))
 
+(defun egg-rebase-interactive-server-buffer-hook ()
+  ;; run inside server buffer
+  (when (egg-interactive-rebase-in-progress)
+    (let* ((rebase-dir (concat (egg-git-dir) "/" 
+			       egg-git-rebase-subdir "/"))
+	   commit-title)
+      (when (string-equal rebase-dir default-directory)
+	(goto-char (point-min))
+	(setq commit-title
+	      (if (re-search-forward 
+		   "^# This is a combination of two" nil t)
+		  "Squash commit on top of "
+		"Editing commit log of "))
+	;; fix me
+	;; (setq wait nil) ;; hack
+	(egg-commit-log-edit 
+	 commit-title
+	 `(lambda ()
+	    (let ((msg (buffer-substring-no-properties
+			egg-log-msg-text-beg egg-log-msg-text-end)))
+	      (with-current-buffer ,(current-buffer)
+		(erase-buffer)
+		(insert msg)
+		(server-edit))))
+	 `(lambda ()
+	    (insert-buffer-substring ,(current-buffer))))))))
+
+(defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
+  (let ((exit-msg egg-async-exit-msg)
+	(proc egg-async-process)
+	buffer res msg)
+    (goto-char (point-min))
+    (save-match-data
+      (re-search-forward 
+       (eval-when-compile 
+	 (concat "^\\(?:"
+		 "\\(Successfully rebased and updated.+$\\)" "\\|"
+		 "\\(You can amend the commit now\\)" 	     "\\|"
+		 "\\(Automatic cherry-pick failed\\)"	     "\\|"
+		 "\\(\\(?:Cannot\\|Could not\\).+\\)" "\\)")) nil t)
+      (setq msg (match-string-no-properties 0))
+      (setq res (cond ((match-beginning 1) :rebase-done)
+		      ((match-beginning 2) :rebase-edit)
+		      ((match-beginning 3) :rebase-conflict)
+		      ((match-beginning 4) :rebase-fail))))
+    (setq buffer (process-get proc :orig-buffer))
+    (with-current-buffer buffer
+      (egg-run-buffers-update-hook)
+      (egg-revert-all-visited-files) ;; too heavy ???
+      (cond ((eq res :rebase-done)
+	     (message "GIT-REBASE-INTERACTIVE: %s" msg))
+	    ((eq res :rebase-edit)
+	     (egg-commit-log-edit "Re-edit commit log of "
+				  `(lambda ()
+				    (egg-log-msg-amend-commit)
+				    (with-current-buffer ,buffer
+				      (egg-do-async-rebase-continue
+				       #'egg-handle-rebase-interactive-exit
+				       orig-sha1)))
+				  (lambda () 
+				    (egg-git-ok t "log" "--max-count=1"
+						"--pretty=format:%s%n%n%b"
+						"HEAD"))))
+	    ((eq res :rebase-conflict)
+	     (egg-status)
+	     (ding)
+	     (message "automatic rebase stopped! please resolve conflict(s)"))
+	    ((eq res :rebase-fail)
+	     (egg-status)
+	     (ding)
+	     (message "Automatic rebase failed!"))))))
 
 (defun egg-log-buffer-merge (pos &optional no-commit)
   (interactive "d\nP")
