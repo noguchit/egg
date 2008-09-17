@@ -2875,12 +2875,12 @@ success."
 
 (defun egg-log-buffer-do-mark (pos char &optional unmark)
   (let ((commit (get-text-property pos :commit))
-	(inhibit-read-only t))
+	(inhibit-read-only t)
+	(col (1- egg-log-buffer-comment-column))
+	(step (if unmark -1 1)))
     (when commit 
-      (save-excursion
-	(beginning-of-line)
-	(when (> (skip-chars-forward "^-" (line-end-position)) 0)
-	  (funcall (if unmark
+      (move-to-column col)
+      (funcall (if unmark
 		       #'remove-text-properties
 		     #'add-text-properties)
 		   (point) (1+ (point))
@@ -2889,7 +2889,11 @@ success."
 			 (and char 
 			      (propertize (char-to-string char)
 					  'face 'egg-log-buffer-mark))))
-	  nil)))))
+      (forward-line step)
+      (while (not (or (get-text-property pos :commit)
+		      (eobp) (bobp)))
+	(forward-line step))
+      (move-to-column col))))
 
 (defun egg-log-buffer-mark-pick (pos)
   (interactive "d")
