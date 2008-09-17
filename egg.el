@@ -928,6 +928,11 @@ Either a symbolic ref or a sha1."
 	  (branch branch)
 	  (t (concat "Detached HEAD: " (egg-describe-rev sha1))))))
 
+(defsubst egg-pretty-head-name (&optional state)
+  (let* ((state (or state (egg-repo-state)))
+	 (branch (plist-get state :branch)))
+    (or branch (egg-describe-rev (plist-get state :sha1)))))
+
 
 (defun egg-config-section-raw (type &optional name)
   (egg-pick-file-contents (concat (egg-git-dir) "/config")
@@ -2432,19 +2437,30 @@ success."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-commit-buffer-mode-hook))
 
-(defun egg-commit-log-edit (action-title action-function
-					 insert-init-text-function)
+(defun egg-commit-log-edit (title-function
+			    action-function
+			    insert-init-text-function)
   (interactive (if current-prefix-arg
-		   (list "Amending  " #'egg-log-msg-amend-commit
+		   (list (lambda (state)
+			   (concat 
+			    (propertize "Amending  " 'face 'egg-text-3)
+			    (propertize (egg-pretty-head-name) 'face 'egg-branch)))
+			 #'egg-log-msg-amend-commit
 			 (lambda () 
 			   (egg-git-ok t "log" "--max-count=1"
 				       "--pretty=format:%s%n%n%b" "HEAD")))
-		 (list "Committing into  "
+		 (list (lambda (state)
+			   (concat 
+			    (propertize "Committing into  "
+					'face 'egg-text-3)
+			    (propertize (egg-pretty-head-name)
+					'face 'egg-branch)))
 		       #'egg-log-msg-commit
-		       (lambda () nil))))
+		       nil)))
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-commit-buffer 'create))
+	 (state (egg-repo-state))
 	 (head-info (egg-head))
 	 (head (or (cdr head-info) 
 		   (format "Detached HEAD! (%s)" (car head-info))))
@@ -2454,8 +2470,7 @@ success."
     (erase-buffer)
     (set (make-local-variable 'egg-log-msg-action)
 	 action-function)
-    (insert (propertize action-title 'face 'egg-text-3)
-	    (propertize head 'face 'egg-branch) "\n"
+    (insert (funcall title-function state) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "--------------- Commit Message (type C-c C-c when done) ---------------"
 			'face 'font-lock-comment-face))
@@ -2979,17 +2994,17 @@ success."
 	   (server-buffer (current-buffer))
 	   commit-title)
       (when is-rebase-i
-	(goto-char (point-min))
-	(setq commit-title
-	      (if (re-search-forward 
-		   "^# This is a combination of two" nil t)
-		  (concat "Squash commit (" cherry-op ") on top of ")
-		(concat "Editing commit (" cherry-op ") log of picked ")))
 	;; fix me
 	(if (boundp 'nowait)		;; hack to not show the window
 	    (set 'nowait t))
 	(egg-commit-log-edit 
-	 commit-title
+	 `(lambda (state)
+	    (concat (propertize "Rebasing " 'face 'egg-text-3)
+		    (propertize (plist-get state :rebase-head)
+				'face 'egg-branch) ": "
+		    (propertize
+		     (concat "Commit " ,cherry-op "ed cherry")
+		     'face 'egg-text-3)))
 	 `(lambda ()
 	    (let ((msg (buffer-substring-no-properties
 			egg-log-msg-text-beg egg-log-msg-text-end)))
@@ -3030,17 +3045,24 @@ success."
       (cond ((eq res :rebase-done)
 	     (message "GIT-REBASE-INTERACTIVE: %s" msg))
 	    ((eq res :rebase-edit)
-	     (egg-commit-log-edit "Re-edit commit log of "
-				  `(lambda ()
-				    (egg-log-msg-amend-commit)
-				    (with-current-buffer ,buffer
-				      (egg-do-async-rebase-continue
-				       #'egg-handle-rebase-interactive-exit
-				       ,orig-sha1)))
-				  (lambda () 
-				    (egg-git-ok t "log" "--max-count=1"
-						"--pretty=format:%s%n%n%b"
-						"HEAD"))))
+	     (egg-commit-log-edit 
+	      (lambda (state)
+		(concat (propertize "Rebasing " 'face 'egg-text-3)
+			(propertize (plist-get state :rebase-head)
+				    'face 'egg-branch) ": "
+			(propertize
+			 (concat "Re-edit cherry's commit log")
+			 'face 'egg-text-3)))
+	      `(lambda ()
+		 (egg-log-msg-amend-commit)
+		 (with-current-buffer ,buffer
+		   (egg-do-async-rebase-continue
+		    #'egg-handle-rebase-interactive-exit
+		    ,orig-sha1)))
+	      (lambda () 
+		(egg-git-ok t "log" "--max-count=1"
+			    "--pretty=format:%s%n%n%b"
+			    "HEAD"))))
 	    ((eq res :rebase-conflict)
 	     (egg-status)
 	     (ding)
