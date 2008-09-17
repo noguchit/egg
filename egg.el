@@ -82,7 +82,6 @@ Many Egg faces inherit from this one by default."
   "Face for description text."
   :group 'egg-faces)
 
-
 (defface egg-section-title
   '((((class color) (background light))
      :foreground "DarkGoldenrod" :inherit egg-header :height 1.1)
@@ -107,7 +106,7 @@ Many Egg faces inherit from this one by default."
   '((((class color) (background light))
      :foreground "black" :inherit bold)
     (((class color) (background dark))
-     :foreground "white" :inherit bold)
+     :foreground "orchid1" :inherit bold)
     (t :weight bold))
   "Face to mark commit line in log-buffer."
   :group 'egg-faces)
@@ -2876,7 +2875,7 @@ success."
 (defun egg-log-buffer-do-mark (pos char &optional unmark)
   (let ((commit (get-text-property pos :commit))
 	(inhibit-read-only t)
-	(col (1- egg-log-buffer-comment-column))
+	(col (- egg-log-buffer-comment-column 10))
 	(step (if unmark -1 1)))
     (when commit 
       (move-to-column col)
