@@ -3533,7 +3533,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	truncate-lines t)
   (use-local-map egg-log-buffer-mode-map)
   (set (make-local-variable 'egg-buffer-refresh-func)
-       'egg-file-log-buffer-redisplay)
+       'egg-log-buffer-simple-redisplay)
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-file-log-buffer-mode-hook))
@@ -3548,23 +3548,23 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	      "--graph" "--topo-order"
 		"--pretty=oneline" "--decorate" "--all" "--" file))
 
-(defconst egg-file-log-commit-map 
+(defconst egg-log-commit-simple-map 
   (let ((map (make-sparse-keymap "Egg:FileLogCommit")))
     (set-keymap-parent map egg-log-commit-base-map)
     (define-key map (kbd "RET") 'egg-log-locate-commit)
     (define-key map (kbd "C-c C-c") 'egg-log-locate-commit)
     map))
 
-(defsubst egg-file-log-buffer-insert-n-decorate-logs (log-insert-func file-name)
+(defsubst egg-log-buffer-decorate-logs-simple (log-insert-func arg)
   (let ((beg (point)))
-    (funcall log-insert-func file-name)
+    (funcall log-insert-func arg)
     (goto-char beg)
-    (egg-decorate-log egg-file-log-commit-map 
-		      egg-file-log-commit-map
-		      egg-file-log-commit-map
-		      egg-file-log-commit-map)))
+    (egg-decorate-log egg-log-commit-simple-map
+		      egg-log-commit-simple-map
+		      egg-log-commit-simple-map
+		      egg-log-commit-simple-map)))
 
-(defun egg-file-log-buffer-redisplay (buffer)
+(defun egg-log-buffer-simple-redisplay (buffer)
   (with-current-buffer buffer
     (egg-generic-display-logs egg-internal-log-buffer-closure)))
 
@@ -3583,22 +3583,22 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		 :description (concat (propertize "scope: " 'face 'egg-text-2)
 				      (propertize "all refs" 'face 'egg-branch-mono)) 
 		 :closure `(lambda () 
-			     (egg-file-log-buffer-insert-n-decorate-logs
+			     (egg-log-buffer-decorate-logs-simple
 			      #'egg-run-git-file-log-all ,file-name)))
 	 (list :title title
 	       :description (concat (propertize "scope: " 'face 'egg-text-2)
 				    (propertize "HEAD" 'face 'egg-branch-mono))
 	       :closure `(lambda ()
-			   (egg-file-log-buffer-insert-n-decorate-logs
+			   (egg-log-buffer-decorate-logs-simple
 			    #'egg-run-git-file-log-HEAD ,file-name))))))
-    (egg-file-log-buffer-redisplay buffer)
+    (egg-log-buffer-simple-redisplay buffer)
     (pop-to-buffer buffer t)))
 
 ;;;========================================================
 ;;; commit search
 ;;;========================================================
 (defconst egg-query:commit-commit-map 
-  (let ((map (make-sparse-keymap "Egg:LogCommit")))
+  (let ((map (make-sparse-keymap "Egg:LogQueryCommit")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
@@ -3679,6 +3679,38 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (list :description desc :closure func))
       (egg-query:commit-buffer-rerun buf))			 
     (pop-to-buffer buf t)))
+;;;========================================================
+;;; reflog
+;;;========================================================
+(defsubst egg-run-reflog-branch (branch)
+  (egg-git-ok t "log" "-g" "--pretty=oneline" "--decorate"
+	      (format "--max-count=%d" egg-log-HEAD-max-len) 
+	      branch))
+
+(define-egg-buffer reflog "*%s-reflog@%s*"
+  (egg-file-log-buffer-mode)
+  (setq major-mode 'egg-reflog-buffer-mode
+	mode-name  "Egg-RefLog")
+  (run-mode-hooks 'egg-reflog-buffer-mode-hook))
+
+(defun egg-reflog (branch)
+  (interactive (list (if current-prefix-arg
+			 (egg-read-rev "show history of ref: " "HEAD")
+		       "HEAD")))
+  (unless branch (setq branch "HEAD"))
+  (let ((egg-internal-current-state (egg-repo-state :error-if-not-git))
+	(buffer (egg-get-reflog-buffer 'create))
+	(title (concat (propertize "history of " 'face 'egg-text-2)
+		       (propertize branch 'face 'egg-branch))))
+    (with-current-buffer buffer
+      (set 
+       (make-local-variable 'egg-internal-log-buffer-closure)
+       (list :title title
+	     :closure `(lambda ()
+			 (egg-log-buffer-decorate-logs-simple
+			  #'egg-run-reflog-branch ,branch)))))
+    (egg-log-buffer-simple-redisplay buffer)
+    (pop-to-buffer buffer t)))
 
 ;;;========================================================
 ;;; annotated tag
