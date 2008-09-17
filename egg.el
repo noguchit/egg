@@ -608,11 +608,15 @@ END-RE is the regexp to match the end of a record."
   (let ((default-directory dir)) (egg-read-git-dir)))
 
 (defvar egg-git-dir nil)
-(defsubst egg-git-dir ()
+(defsubst egg-git-dir (&optional error-if-not-git)
   "return the (pre-read) git-dir of default-directory"
   (if (local-variable-p 'egg-git-dir)
       egg-git-dir
-    (set (make-local-variable 'egg-git-dir) (egg-read-git-dir))
+    (set (make-local-variable 'egg-git-dir) 
+	 (or (egg-read-git-dir)
+	     (and error-if-not-git
+		  (or (kill-local-variable 'egg-git-dir) t)
+		  (error "Not in a git repository: %s" default-directory))))
     ;; first time, no status yet.
     ;; this directory's specific var will be updated by
     ;; egg-set-mode-info
@@ -853,7 +857,7 @@ Either a symbolic ref or a sha1."
 
 (defvar egg-internal-current-state nil)
 (defun egg-get-repo-state (&optional extras)
-  (let* ((git-dir (egg-git-dir))
+  (let* ((git-dir (egg-git-dir (memq :error-if-not-git extras)))
 	 (head-file (concat git-dir "/HEAD"))
 	 (merge-file (concat git-dir "/MERGE_HEAD"))
 	 (branch (egg-get-symbolic-HEAD head-file))
@@ -1954,7 +1958,9 @@ success."
 
 (defun egg-status (&optional no-update)
   (interactive "P")
-  (let ((buf (egg-get-status-buffer 'create)))
+  (let* ((egg-internal-current-state 
+	  (egg-repo-state (if (interactive-p) :error-if-not-git)))
+	 (buf (egg-get-status-buffer 'create)))
     (unless no-update
       (with-current-buffer buf
 	(egg-status-buffer-redisplay buf 'init)))
@@ -2624,10 +2630,8 @@ success."
   (egg-git-ok t "log" "--pretty=oneline" "--decorate"
 	      (concat "-S" string)))
 
-
-
-(defconst egg-log-commit-map 
-  (let ((map (make-sparse-keymap "Egg:LogCommit")))
+(defconst egg-log-commit-base-map
+  (let ((map (make-sparse-keymap "Egg:LogCommitBase")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "B") 'egg-log-buffer-create-new-branch)
@@ -2638,7 +2642,11 @@ success."
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
+    map))
 
+(defconst egg-log-commit-map 
+  (let ((map (make-sparse-keymap "Egg:LogCommit")))
+    (set-keymap-parent map egg-log-commit-base-map)
     (define-key map (kbd "+") 'egg-log-buffer-mark-pick)
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
@@ -2825,7 +2833,7 @@ success."
 			       min-dashes-len))
 	    (forward-char 2)))))))
 
-(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func)
+(defsubst egg-log-buffer-insert-n-decorate-logs (log-insert-func)
   (let ((beg (point)))
     (funcall log-insert-func)
     (goto-char beg)
@@ -3394,6 +3402,7 @@ success."
       (erase-buffer)
       (insert title
 	      (if subtitle (concat "\n" subtitle "\n") "\n")
+	      (propertize "repo: " 'face 'egg-text-2)
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
 	      (if desc (concat "\n" desc "\n") "\n")
 	      "\n")
@@ -3489,7 +3498,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-log (&optional all)
   (interactive "P")
-  (let* ((git-dir (egg-git-dir))
+  (let* ((egg-internal-current-state 
+	  (egg-repo-state (if (interactive-p) :error-if-not-git)))
+	 (git-dir (egg-git-dir (interactive-p)))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
@@ -3497,19 +3508,92 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
        (make-local-variable 'egg-internal-log-buffer-closure)
        (if all
 	   (list :description (concat 
-			       (propertize "history of: " 'face 'egg-text-2)
+			       (propertize "history scope: " 'face 'egg-text-2)
 			       (propertize "all refs" 'face 'egg-term))
 		 :closure (lambda ()
 			    (egg-log-buffer-insert-n-decorate-logs
 			     'egg-run-git-log-all)))
 	 (list :description (concat 
-			     (propertize "history of: " 'face 'egg-text-2)
+			     (propertize "history scope: " 'face 'egg-text-2)
 			     (propertize "HEAD" 'face 'egg-term))
 	       :closure (lambda ()
 			  (egg-log-buffer-insert-n-decorate-logs
 			   'egg-run-git-log-HEAD)))))
       (egg-log-buffer-redisplay buf))
     (pop-to-buffer buf t)))
+;;;========================================================
+;;; file history
+;;;========================================================
+(define-egg-buffer file-log "*%s-file-log@%s*"
+  (kill-all-local-variables)
+  (setq buffer-read-only t)
+  (setq major-mode 'egg-file-log-buffer-mode
+	mode-name  "Egg-FileHistory"
+	mode-line-process ""
+	truncate-lines t)
+  (use-local-map egg-log-buffer-mode-map)
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-file-log-buffer-redisplay)
+  (set (make-local-variable 'egg-log-buffer-comment-column) 0)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-file-log-buffer-mode-hook))
+
+(defsubst egg-run-git-file-log-HEAD (file)
+  (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
+	      "--graph" "--topo-order"
+		"--pretty=oneline" "--decorate" "--" file))
+
+(defsubst egg-run-git-file-log-all (file)
+  (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
+	      "--graph" "--topo-order"
+		"--pretty=oneline" "--decorate" "--all" "--" file))
+
+(defconst egg-file-log-commit-map 
+  (let ((map (make-sparse-keymap "Egg:FileLogCommit")))
+    (set-keymap-parent map egg-log-commit-base-map)
+    (define-key map (kbd "RET") 'egg-log-locate-commit)
+    (define-key map (kbd "C-c C-c") 'egg-log-locate-commit)
+    map))
+
+(defsubst egg-file-log-buffer-insert-n-decorate-logs (log-insert-func file-name)
+  (let ((beg (point)))
+    (funcall log-insert-func file-name)
+    (goto-char beg)
+    (egg-decorate-log egg-file-log-commit-map 
+		      egg-file-log-commit-map
+		      egg-file-log-commit-map
+		      egg-file-log-commit-map)))
+
+(defun egg-file-log-buffer-redisplay (buffer)
+  (with-current-buffer buffer
+    (egg-generic-display-logs egg-internal-log-buffer-closure)))
+
+(defun egg-file-log (file-name &optional all)
+  (interactive (list (buffer-file-name) current-prefix-arg))
+  (unless (and file-name (file-exists-p file-name))
+    (error "File does not exist: %s" file-name))
+  (let ((buffer (egg-get-file-log-buffer 'create))
+	(title (concat (propertize "history of " 'face 'egg-text-2)
+		       (propertize file-name 'face 'egg-term))))
+    (with-current-buffer buffer
+      (set 
+       (make-local-variable 'egg-internal-log-buffer-closure)
+       (if all
+	   (list :title title
+		 :description (concat (propertize "scope: " 'face 'egg-text-2)
+				      (propertize "all refs" 'face 'egg-branch-mono)) 
+		 :closure `(lambda () 
+			     (egg-file-log-buffer-insert-n-decorate-logs
+			      #'egg-run-git-file-log-all ,file-name)))
+	 (list :title title
+	       :description (concat (propertize "scope: " 'face 'egg-text-2)
+				    (propertize "HEAD" 'face 'egg-branch-mono))
+	       :closure `(lambda ()
+			   (egg-file-log-buffer-insert-n-decorate-logs
+			    #'egg-run-git-file-log-HEAD ,file-name))))))
+    (egg-file-log-buffer-redisplay buffer)
+    (pop-to-buffer buffer t)))
+
 ;;;========================================================
 ;;; commit search
 ;;;========================================================
@@ -3519,18 +3603,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
-    (define-key map (kbd "RET") 'egg-query:commit-locate)
-    (define-key map (kbd "C-c C-c") 'egg-query:commit-locate)
+    (define-key map (kbd "RET") 'egg-log-locate-commit)
+    (define-key map (kbd "C-c C-c") 'egg-log-locate-commit)
     map))
 
-(defun egg-query:commit-locate (pos)
+(defun egg-log-locate-commit (pos)
   (interactive "d")
   (let ((sha1 (get-text-property pos :commit))
 	(buf (egg-get-log-buffer 'create)))
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
 	   (list :description 
-		 (concat (propertize "history of: " 'face 'egg-text-2)
+		 (concat (propertize "history scope: " 'face 'egg-text-2)
 			 (propertize "HEAD" 'face 'egg-term)
 			 (propertize " and " 'face 'egg-text-2)
 			 (propertize sha1 'face 'egg-term))
@@ -3582,7 +3666,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-search-changes (string)
   (interactive "ssearch history for changes containing: ")
-  (let* ((git-dir (egg-git-dir))
+  (let* ((git-dir (egg-git-dir (interactive-p)))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-query:commit-buffer 'create))
 	 (desc (concat (propertize "Commits containing: "
@@ -4034,7 +4118,7 @@ current file contains unstaged changes."
 (defun egg-next-action (&optional ask)
   (interactive "P")
   (save-some-buffers nil 'egg-is-in-git)
-  (let* ((state (egg-repo-state :unstaged :staged))
+  (let* ((state (egg-repo-state :unstaged :staged :error-if-not-git))
 	 (desc (egg-describe-state state))
 	 action default)
     (setq action (if (or ask egg-confirm-next-action)
