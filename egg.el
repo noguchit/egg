@@ -3102,6 +3102,28 @@ success."
 			   rev)))
 	(egg-status)))))
 
+(defun egg-log-buffer-rebase-interactive (pos &optional move)
+  (interactive "d\nP")
+  (let* ((state (egg-repo-state :staged :unstaged))
+	 (rebase-dir (concat (plist-get state :gitdir) "/"
+			     egg-git-rebase-subdir "/"))
+	 (todo-alist (egg-log-buffer-get-marked-alist))
+	 (commits (mapcar 'car todo-alist))
+	 (upstream (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+	 (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
+				(concat upstream "..HEAD"))))
+    (unless (egg-repo-clean state)
+      (error "repo %s is not clean" (plist-get state :gitdir)))
+    (mapc (lambda (commit)
+	    (unless (member commit all)
+	      (error "commit %s is not between HEAD and upstream %s"
+		     commit upstream)))
+	  commits)
+    
+    (egg-setup-rebase-interactive rebase-dir upstream nil
+				  state todo-alist)
+    (egg-status)))
+
 (defun egg-log-buffer-rewrite ()
   (interactive)
   (let* ((state (egg-repo-state :staged :unstaged))
