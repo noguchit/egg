@@ -1747,7 +1747,7 @@ success."
 	(insert (substitute-command-keys
 		 (mapconcat 'identity strings "")))
 	(goto-char (point-min))
-	(while (re-search-forward "\\(\\<[^\n \t:]+\\|[+.~-]\\):" nil t)
+	(while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~-]\\):" nil t)
 	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-term)
 	  (if last-found
 	      (put-text-property last-found (1- (match-beginning 0))
@@ -2703,6 +2703,7 @@ success."
     (define-key map "n" 'egg-log-buffer-next-ref)
     (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-log-buffer-prev-ref)
+    (define-key map "/" 'egg-search-changes)
     map))
 
 
@@ -3537,6 +3538,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
 		"\\[egg-log-buffer-prev-ref]:previous thing  " 
+		"\\[egg-search-changes]:search history  " 
 		"\\[egg-status]:show repo's status  "
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
@@ -3550,11 +3552,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  "
 		"\\[egg-log-buffer-checkout-commit]:checkout  " 
 		"\\[egg-log-buffer-start-new-branch]:start new branch\n" 
-		"\\[egg-log-buffer-create-new-branch]:create branch  " 
+		"\\[egg-log-buffer-attach-head]:anchor HEAD  " 
 		"\\[egg-log-buffer-tag-commit]:new tag  " 
 		"\\[egg-log-buffer-atag-commit]:new annotated tag  " 
 		"\\[egg-log-buffer-merge]:merge to HEAD  " 
-		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
+		"\\[egg-log-buffer-rebase]:rebase HEAD  " 
+		"\\[egg-log-buffer-create-new-branch]:create branch\n" 
 		)
 	       "\n" 
 	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-text-3)
@@ -3571,7 +3574,6 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-local-ref-map>"
-		"\\[egg-log-buffer-attach-head]:anchor HEAD  " 
 		"\\[egg-log-buffer-rm-ref]:delete ref  "
 		"\\[egg-log-buffer-push-to-local]:update another local ref  "
 		"\\[egg-log-buffer-push-to-remote]:upload to remote  "
@@ -3656,7 +3658,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (error "File does not exist: %s" file-name))
   (let ((buffer (egg-get-file-log-buffer 'create))
 	(title (concat (propertize "history of " 'face 'egg-text-2)
-		       (propertize file-name 'face 'egg-term))))
+		       (propertize file-name 'face 'egg-term)))
+	help)
     (with-current-buffer buffer
       (set 
        (make-local-variable 'egg-internal-log-buffer-closure)
@@ -3672,7 +3675,45 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				    (propertize "HEAD" 'face 'egg-branch-mono))
 	       :closure `(lambda ()
 			   (egg-log-buffer-decorate-logs-simple
-			    #'egg-run-git-file-log-HEAD ,file-name))))))
+			    #'egg-run-git-file-log-HEAD ,file-name)))))
+      (when (memq :log egg-show-key-help-in-buffers)
+	(setq help
+	      (concat
+	       (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	       "\n"
+	       (egg-pretty-help-text
+		"\\[egg-log-buffer-next-ref]:next thing  "
+		"\\[egg-log-buffer-prev-ref]:previous thing  " 
+		"\\[egg-status]:show repo's status  "
+		"\\[egg-buffer-cmd-refresh]:redisplay  " 
+		"\\[quit-window]:quit\n" )
+	       "\n" 
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-3)
+	       "\n"
+	       (egg-pretty-help-text
+		"\\<egg-log-commit-simple-map>"
+		"\\[egg-log-locate-commit]:locate commit in history  " 
+		"\\[egg-log-buffer-insert-commit]:load details  " 
+		"\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
+		"\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks\n"
+		"\\[egg-log-buffer-attach-head]:anchor HEAD  " 
+		"\\[egg-log-buffer-checkout-commit]:checkout  " 
+		"\\[egg-log-buffer-start-new-branch]:start new branch  " 
+		"\\[egg-log-buffer-create-new-branch]:create branch\n" 
+		"\\[egg-log-buffer-tag-commit]:new tag  " 
+		"\\[egg-log-buffer-atag-commit]:new annotated tag  " 
+		"\\[egg-log-buffer-merge]:merge to HEAD  " 
+		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
+		)
+	       "\n" 
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-3)
+	       "\n"
+	       (egg-pretty-help-text
+		"\\<egg-log-diff-map>"
+		"\\[egg-log-diff-cmd-visit-file-other-window]:visit version/line\n")
+	       "\n"
+	       )))
+      (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer)
     (pop-to-buffer buffer t)))
 
@@ -3783,14 +3824,53 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((egg-internal-current-state (egg-repo-state :error-if-not-git))
 	(buffer (egg-get-reflog-buffer 'create))
 	(title (concat (propertize "history of " 'face 'egg-text-2)
-		       (propertize branch 'face 'egg-branch))))
+		       (propertize branch 'face 'egg-branch)))
+	help)
     (with-current-buffer buffer
       (set 
        (make-local-variable 'egg-internal-log-buffer-closure)
        (list :title title
 	     :closure `(lambda ()
 			 (egg-log-buffer-decorate-logs-simple
-			  #'egg-run-reflog-branch ,branch)))))
+			  #'egg-run-reflog-branch ,branch))))
+      (when (memq :log egg-show-key-help-in-buffers)
+	(setq help
+	      (concat
+	       (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	       "\n"
+	       (egg-pretty-help-text
+		"\\[egg-log-buffer-next-ref]:next thing  "
+		"\\[egg-log-buffer-prev-ref]:previous thing  " 
+		"\\[egg-status]:show repo's status  "
+		"\\[egg-buffer-cmd-refresh]:redisplay  " 
+		"\\[quit-window]:quit\n" )
+	       "\n" 
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-3)
+	       "\n"
+	       (egg-pretty-help-text
+		"\\<egg-log-commit-simple-map>"
+		"\\[egg-log-locate-commit]:locate commit in history  " 
+		"\\[egg-log-buffer-insert-commit]:load details  " 
+		"\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
+		"\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks\n"
+		"\\[egg-log-buffer-attach-head]:anchor HEAD  " 
+		"\\[egg-log-buffer-checkout-commit]:checkout  " 
+		"\\[egg-log-buffer-start-new-branch]:start new branch  " 
+		"\\[egg-log-buffer-create-new-branch]:create branch\n" 
+		"\\[egg-log-buffer-tag-commit]:new tag  " 
+		"\\[egg-log-buffer-atag-commit]:new annotated tag  " 
+		"\\[egg-log-buffer-merge]:merge to HEAD  " 
+		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
+		)
+	       "\n" 
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-3)
+	       "\n"
+	       (egg-pretty-help-text
+		"\\<egg-log-diff-map>"
+		"\\[egg-log-diff-cmd-visit-file-other-window]:visit version/line\n")
+	       "\n"
+	       )))
+      (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer)
     (pop-to-buffer buffer t)))
 
@@ -4258,6 +4338,7 @@ current file contains unstaged changes."
   (define-key map (kbd "g") 'egg-grep)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-log)
+  (define-key map (kbd "h") 'egg-file-log)
   (define-key map (kbd "o") 'egg-file-checkout-other-version)
   (define-key map (kbd "s") 'egg-status)
   (define-key map (kbd "u") 'egg-file-cancel-modifications)
