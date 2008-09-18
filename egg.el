@@ -2709,7 +2709,8 @@ success."
 	(min-dashes-len 300)
 	separator ref-string refs full-refs sha1
 	line-props graph-len beg end sha-beg sha-end subject-beg
-	refs-start refs-end ref-alist)
+	refs-start refs-end ref-alist
+	head-line)
     (setq ref-alist (mapcar (lambda (pair)
 			      (cons (car pair)
 				    (substring-no-properties (cdr pair))))
@@ -2796,10 +2797,13 @@ success."
 				  separator
 				  (if refs
 				      (list ref-string separator))))
+;;; 	(when (string= sha1 head-sha1)
+;;; 	  (overlay-put ov 'face 'egg-log-HEAD)
+;;; 	  (overlay-put ov 'evaporate t)
+;;; 	  (move-overlay ov beg (1+ (line-end-position))))
 	(when (string= sha1 head-sha1)
-	  (overlay-put ov 'face 'egg-log-HEAD)
-	  (overlay-put ov 'evaporate t)
-	  (move-overlay ov beg (1+ (line-end-position))))
+	  (setq head-line (point-marker)))
+	
 	(goto-char (line-end-position)))
       
       (if (= min-dashes-len 300)
@@ -2831,7 +2835,14 @@ success."
 	    (goto-char start)
 	    (insert (substring (get-text-property start :dash-refs)
 			       min-dashes-len))
-	    (forward-char 2)))))))
+	    (forward-char 2)))
+
+	(when head-line
+	  (goto-char head-line)
+	  (overlay-put ov 'face 'egg-log-HEAD)
+	  (overlay-put ov 'evaporate t)
+	  (move-overlay ov (line-beginning-position)
+			(1+ (line-end-position))))))))
 
 (defsubst egg-log-buffer-insert-n-decorate-logs (log-insert-func)
   (let ((beg (point)))
