@@ -332,35 +332,22 @@ Different versions of git have different names for this subdir."
 ;;; simple routines
 ;;;========================================================
 (defsubst egg-prepend (str prefix &rest other-properties)
+  "Make STR appear to have prefix PREFIX.
+If OTHER-PROPERTIES was non-nil, apply it to STR."
   (setq prefix (concat prefix (substring str 0 1)))
   (setq str (apply 'propertize str other-properties))
   (put-text-property 0 1 'display prefix str)
   str)
 
 
-(defun egg-cmd-to-string-1 (program args)
+(defsubst egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
-  (let (str code)
-    (setq str 
-	  (with-output-to-string
-	    (with-current-buffer
-		standard-output
-	      (setq code (apply 'call-process program nil t nil args)))))
-    (if (= code 0)
-	str
-      nil)))
-
-(defun egg-cmd-1 (program args)
-  "Execute PROGRAM with ARGS.
-The return code and the output are return as a cons."
-  (let (str code)
-    (setq str 
-	  (with-output-to-string
-	    (with-current-buffer
-		standard-output
-	      (setq code (apply 'call-process program nil t nil args)))))
-    (cons code str)))
+  (with-temp-buffer
+    (if (= (apply 'call-process program nil t nil args) 0)
+	(buffer-substring-no-properties
+	 (point-min) (if (> (point-max) (point-min)) 
+			 (1- (point-max)) (point-max))))))
 
 (defsubst egg-cmd-to-string (program &rest args)
   "Execute PROGRAM and return its output as a string.
@@ -368,14 +355,9 @@ ARGS is a list of arguments to pass to PROGRAM."
   (egg-cmd-to-string-1 program args))
 
 
-(defun egg-git-to-string (&rest args)
+(defsubst egg-git-to-string (&rest args)
   "run GIT wih ARGS and return the output as a string."
-  (let* ((str (egg-cmd-to-string-1 "git" args))
-	 (len (length str)))
-    (when (> len 0)
-      (if (eq (aref str (1- len)) ?\n)
-	  (substring str 0 -1)
-	str))))
+  (egg-cmd-to-string-1 "git" args))
 
 (defsubst egg-cmd-ok (program buffer &rest args)
   "run PROGRAM with ARGS and insert output into BUFFER at point.
@@ -415,47 +397,41 @@ is used as input to GIT."
 	    (plist-get state :staged)
 	  (egg-index-empty)))))
 
-(defun egg-git-to-lines (&rest args)
+(defsubst egg-git-to-lines (&rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
-  (let ((out (egg-cmd-to-string-1 "git" args)))
-    (if out 
-	(save-match-data
-	  (split-string out "[\n]+" t)))))
+  (save-match-data
+    (split-string (or (egg-cmd-to-string-1 "git" args) "") "[\n]+" t)))
 
 (defun egg-git-lines-matching (re idx &rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (with-temp-buffer
-    (let (code lines)
-      (setq code (apply 'call-process "git" nil t nil args))
-    (if (/= code 0)
-	nil
-      (save-match-data
-	(goto-char (point-min))
-	(while (re-search-forward re nil t)
-	  (setq lines (cons (match-string-no-properties idx) lines)))
-	lines)))))
+    (when (= (apply 'call-process "git" nil t nil args) 0)
+      (let (lines)
+	(save-match-data
+	  (goto-char (point-min))
+	  (while (re-search-forward re nil t)
+	    (setq lines (cons (match-string-no-properties idx) lines)))
+	  lines)))))
 
 (defun egg-git-lines-matching-multi (re indices &rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (with-temp-buffer
-    (let (code lines matches)
-      (setq code (apply 'call-process "git" nil t nil args))
-    (if (/= code 0)
-	nil
-      (save-match-data
-	(goto-char (point-min))
-	(while (re-search-forward re nil t)
-	  (setq matches nil)
-	  (dolist (idx indices)
-	    (when (match-beginning idx)
-	      (setq matches 
-		    (cons (cons idx (match-string-no-properties idx))
-			  matches))))
-	  (setq lines (cons matches lines)))
-	lines)))))
+    (when (= (apply 'call-process "git" nil t nil args) 0)
+      (let (lines matches)
+	(save-match-data
+	  (goto-char (point-min))
+	  (while (re-search-forward re nil t)
+	    (setq matches nil)
+	    (dolist (idx indices)
+	      (when (match-beginning idx)
+		(setq matches 
+		      (cons (cons idx (match-string-no-properties idx))
+			    matches))))
+	    (setq lines (cons matches lines)))
+	  lines)))))
 
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
@@ -472,7 +448,7 @@ if BUF was nil then use current-buffer"
    (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)
    :test 'string-equal))
 
-(defun egg-unmerged-files ()
+(defsubst egg-unmerged-files ()
   "return a list of repo-relative names for each unmerged files."
   (delete-duplicates 
    (mapcar 'car 
@@ -525,10 +501,19 @@ like `my_tag' in `refs/tags/my_tag'."
 ;;    (if (or lbranch rbranch)
 ;;        (format "%s%s%s" (or lbranch "") (if rbranch ":" "") (or rbranch ""))))
 
-(defun egg-file-as-string-raw (file-name)
+(defsubst egg-file-as-string-raw (file-name)
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (buffer-string)))
+
+(defsubst egg-file-as-string (file-name)
+  "return the contents of file FILE-NAME as a string."
+  (with-temp-buffer
+    (insert-file-contents-literally file-name)
+    (buffer-substring-no-properties
+     (point-min) (if (> (point-max) (point-min)) 
+		     (1- (point-max)) (point-max)))))
+
 
 (defun egg-pick-file-contents (file-name regexp &rest indices)
   "Pick a string out of the contents of the file FILE-NAME.
@@ -568,14 +553,6 @@ END-RE is the regexp to match the end of a record."
 				lst)))
 	    (goto-char end))))
       lst)))
-
-(defun egg-file-as-string (file-name)
-  "return the contents of file FILE-NAME as a string."
-  (let ((str (egg-file-as-string-raw file-name)))
-    (if (> (length str) 0)
-	;; chop the final new line
-	(substring str 0 -1)
-      str)))
 
 (defsubst egg-is-in-git ()
   "is the default-directory in a git repo."
@@ -732,7 +709,7 @@ Either a symbolic ref or a sha1."
 	    refs-desc-list)))
 
 
-(defun egg-full-ref-alist ()
+(defsubst egg-full-ref-alist ()
   (mapcar (lambda (desc)
 	    (cons (cdr (assq 1 desc))
 		  (cdr (assq 2 desc))))
@@ -937,7 +914,7 @@ Either a symbolic ref or a sha1."
     (or branch (egg-describe-rev (plist-get state :sha1)))))
 
 
-(defun egg-config-section-raw (type &optional name)
+(defsubst egg-config-section-raw (type &optional name)
   (egg-pick-file-contents (concat (egg-git-dir) "/config")
 			  (concat "^"
 				  (if name (format "\\[%s \"%s\"\\]" type name)
@@ -984,15 +961,6 @@ Either a symbolic ref or a sha1."
   (and (egg-git-dir)
        (cadr (assoc attr (egg-config-section type name)))))
 
-(defun egg-bool-config (type attr &optional name)
-  (let ((flag (egg-config-get type attr name)))
-    (cond ((equal flag "true")
-	   t)
-	  ((equal flag "false")
-	   nil)
-	  (t (error "Unexpected contents of boolean config %s of %s.%s"
-		    attr type name)))))
-
 (defun egg-tracking-target (branch &optional mode)
   (let ((remote (egg-config-get "branch" "remote" branch))
 	(rbranch (egg-config-get "branch" "merge" branch)))
@@ -1002,20 +970,11 @@ Either a symbolic ref or a sha1."
 	    ((eq :name-only mode) rbranch)
 	    (t (cons rbranch remote))))))
 
-;; (defun egg-revs ()
-;;   (apply 'nconc 
-;; 	 (mapcar (lambda (ref)
-;; 		   (cons ref 
-;; 			 (mapcar (lambda (suffix)
-;; 			     (concat ref suffix))
-;; 				 '("^" "^^" "^^^" "^^^^" "^^^^^"
-;; 				   "~0" "~1" "~2" "~3" "~4" "~5"))))
-;; 		 (egg-all-refs))))
 
 (defsubst egg-read-rev (prompt &optional default)
   (completing-read prompt 'egg-complete-rev nil nil default))
 
-(defun egg-read-remote (prompt &optional default)
+(defsubst egg-read-remote (prompt &optional default)
   (completing-read prompt (egg-config-get-all-remote-names) nil t default))
 
 ;;;========================================================
@@ -4036,7 +3995,7 @@ current file contains unstaged changes."
     (when (and action (symbolp action))
       action)))
 
-(defun egg-guess-next-action (desc)
+(defsubst egg-guess-next-action (desc)
   (cond ((memq :file-has-merged-conflict desc) :merge-file)
 	((memq :file-is-modified desc) 	       :stage-file)
 	((memq :wdir-has-merged-conflict desc) :status)
@@ -4109,7 +4068,7 @@ current file contains unstaged changes."
 		(setq desc (cons :file-has-merged-conflict desc)))))))
     desc))
 
-(defun egg-build-key-prompt (prefix default alternatives)
+(defsubst egg-build-key-prompt (prefix default alternatives)
   (let ((action-desc-alist (mapcar 'cdr egg-key-action-alist)))
     (concat prefix " default: "
 	    (nth 1 (assq default action-desc-alist))
