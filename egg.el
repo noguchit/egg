@@ -322,6 +322,14 @@ Different versions of git have different names for this subdir."
 		 (const "rebase-merge")
 		 string))
 
+(defcustom egg-show-key-help-in-buffers '(:log :status)
+  "Display keybinding help in egg special buffers."
+  :group 'egg
+  :type '(set (const :tag "Status Buffer" :status)
+	      (const :tag "Log Buffer"	  :log)
+	      (const :tag "Diff Buffer"   :diff)
+	      (const :tag "Commit Buffer" :commit)))
+
 
 (defcustom egg-dummy-option nil
   "Foo bar"
@@ -1730,6 +1738,28 @@ success."
   (egg-buffer-do-rebase :abort)
   (egg-status))
 
+
+(defsubst egg-help-text (str)
+  (propertize (substitute-command-keys str) 'face 'egg-text-2))
+
+(defun egg-pretty-help-text (&rest strings)
+  (let* ((map (current-local-map)) last-found)
+    (with-temp-buffer
+      (use-local-map map)
+      (save-match-data
+	(insert (substitute-command-keys
+		 (mapconcat 'identity strings "")))
+	(goto-char (point-min))
+	(while (re-search-forward "\\<\\([^\n \t:]+\\):" nil t)
+	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-term)
+	  (if last-found
+	      (put-text-property last-found (1- (match-beginning 0))
+				 'face 'egg-text-2))
+	  (setq last-found (point)))
+	(if last-found
+	    (put-text-property last-found (line-end-position) 'face 'egg-text-2))
+	(buffer-string)))))
+  
 (defun egg-sb-insert-repo-section ()
   (let* ((state (egg-repo-state))
 	 (sha1 (plist-get state :sha1))
@@ -1747,13 +1777,34 @@ success."
 		"\n")
     (setq context-beg (point))
     (setq inv-beg (1- context-beg))
-    (if (null rebase-step)
-	(call-process "git" nil t nil
-		    "log" "--max-count=5"
-		    "--abbrev-commit" "--pretty=oneline")
+    (when rebase-step 
       (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
       (setq context-keymap egg-status-buffer-rebase-map))
+    (when (memq :status egg-show-key-help-in-buffers)
+      (insert
+	"\n"
+	(propertize "Common Key Bindings:" 'face 'egg-text-3)
+	"\n"
+	(egg-pretty-help-text
+	 "\\[egg-buffer-cmd-navigate-prev]:previous section  "
+	 "\\[egg-buffer-cmd-navigate-next]:next section  " 
+	 "\\[egg-commit-log-edit]:commit staged modifications  "
+	 "\\[egg-log]:show repos history\n" 
+	 "\\[egg-stage-all-files]:stage all unstaged modifications  " 
+	 "\\<egg-hide-show-map>"
+	 "\\[egg-section-cmd-toggle-hide-show]:hide section  " 
+	 "\\[egg-section-cmd-toggle-hide-show-children]:hide section's sub-blocks\n")
+	"\n" 
+	(propertize "Extra Key Bindings for he Diff Sections:" 'face 'egg-text-3)
+	"\n"
+	(egg-pretty-help-text
+	 "\\<egg-unstaged-diff-section-map>"
+	 "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
+	 "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
+	 "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n"
+	 )))
     (setq context-end (point))
+
     (egg-delimit-section :section 'repo beg (point)
 			 inv-beg egg-section-map 'repo)
     (if context-keymap
