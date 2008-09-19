@@ -1874,6 +1874,7 @@ success."
     (define-key map (kbd "c") 'egg-commit-log-edit)
     (define-key map (kbd "o") 'egg-checkout-ref)
     (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
     map))
 
@@ -2713,6 +2714,7 @@ success."
 (defconst egg-log-ref-map 
   (let ((map (make-sparse-keymap "Egg:LogRef")))
     (set-keymap-parent map egg-log-commit-map)
+    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
     (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
     (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
     map))
@@ -2750,6 +2752,7 @@ success."
     (define-key map "n" 'egg-log-buffer-next-ref)
     (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-log-buffer-prev-ref)
+    (define-key map "L" 'egg-reflog)
     (define-key map "/" 'egg-search-changes)
     map))
 
@@ -3689,6 +3692,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defsubst egg-log-buffer-decorate-logs-simple (log-insert-func arg)
   (let ((beg (point)))
     (funcall log-insert-func arg)
+    (unless (= (char-before (point-max)) ?\n)
+      (goto-char (point-max))
+      (insert ?\n))
     (goto-char beg)
     (egg-decorate-log egg-log-commit-simple-map
 		      egg-log-commit-simple-map
@@ -3920,6 +3926,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer)
     (pop-to-buffer buffer t)))
+
+(defun egg-log-buffer-reflog-ref (pos)
+  (interactive "d")
+  (egg-reflog (car (get-text-property pos :ref))))
 
 ;;;========================================================
 ;;; annotated tag
@@ -4376,6 +4386,11 @@ current file contains unstaged changes."
   (define-key egg-minor-mode-map (read-kbd-macro val) egg-file-cmd-map)
   (custom-set-default var val))
 
+(defun egg-file-log-pickaxe (string)
+  (interactive (list (read-string "search history for: "
+				  (symbol-name (symbol-at-point)))))
+  (egg-search-changes string))
+
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
   (define-key map (kbd "b") 'egg-start-new-branch)
@@ -4385,12 +4400,14 @@ current file contains unstaged changes."
   (define-key map (kbd "g") 'egg-grep)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-log)
+  (define-key map (kbd "L") 'egg-reflog)
   (define-key map (kbd "h") 'egg-file-log)
   (define-key map (kbd "o") 'egg-file-checkout-other-version)
   (define-key map (kbd "s") 'egg-status)
   (define-key map (kbd "u") 'egg-file-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
+  (define-key map (kbd "/") 'egg-file-log-pickaxe)
   (define-key map (kbd "=") 'egg-file-diff)
   (define-key map (kbd "~") 'egg-file-version-other-window))
 
