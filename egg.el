@@ -322,7 +322,7 @@ Different versions of git have different names for this subdir."
 		 (const "rebase-merge")
 		 string))
 
-(defcustom egg-show-key-help-in-buffers '(:log :status)
+(defcustom egg-show-key-help-in-buffers '(:log :status :diff)
   "Display keybinding help in egg special buffers."
   :group 'egg
   :type '(set (const :tag "Status Buffer" :status)
@@ -1751,10 +1751,10 @@ success."
 	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-term)
 	  (if last-found
 	      (put-text-property last-found (1- (match-beginning 0))
-				 'face 'egg-text-2))
+				 'face 'egg-text-1))
 	  (setq last-found (point)))
 	(if last-found
-	    (put-text-property last-found (line-end-position) 'face 'egg-text-2))
+	    (put-text-property last-found (line-end-position) 'face 'egg-text-1))
 	(buffer-string)))))
   
 (defun egg-sb-insert-repo-section ()
@@ -2525,12 +2525,14 @@ success."
 	  (prologue (plist-get egg-diff-buffer-info :prologue))
 	  (src-prefix (plist-get egg-diff-buffer-info :src))
 	  (dst-prefix (plist-get egg-diff-buffer-info :dst))
+	  (help (plist-get egg-diff-buffer-info :help))
 	  (inhibit-read-only t)
 	  pos inv-beg)
       (erase-buffer)
       (insert (propertize title 'face 'egg-section-title) "\n")
       (setq inv-beg (point))
       (insert prologue "\n")
+      (if help (insert help ""))
       (apply 'call-process "git" nil t nil "diff" args)
       (egg-delimit-section :section 'top-level (point-min) (point))
       (apply 'egg-decorate-diff-section
@@ -2553,6 +2555,49 @@ success."
        'egg-diff-buffer-insert-diffs)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-diff-buffer-mode-hook))
+
+(defun egg-diff-info-add-help (info)
+  (let ((map (plist-get info :diff-map))
+	help)
+    (setq help
+	  (concat
+	   "\n"
+	   (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	   (egg-pretty-help-text
+	    "\\<egg-buffer-mode-map>\n"
+	    "\\[egg-buffer-cmd-navigate-prev]:previous block  "
+	    "\\[egg-buffer-cmd-navigate-next]:next block  " 
+	    "\\[egg-buffer-cmd-refresh]:redisplay  "
+	    "\\[quit-window]:quit\n"
+	    )
+	   "\n"
+	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-text-3)
+	   (cond ((eq map egg-unstaged-diff-section-map)
+		  (egg-pretty-help-text
+		   "\\<egg-unstaged-diff-section-map>\n"
+		   "\\[egg-diff-section-cmd-stage]:stage file/hunk  "
+		   "\\[egg-diff-section-cmd-undo]:undo file/hunk  "
+		   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n" 
+		   ))
+		 ((eq map egg-staged-diff-section-map)
+		  (egg-pretty-help-text
+		   "\\<egg-staged-diff-section-map>\n"
+		   "\\[egg-diff-section-cmd-stage]:unstage file/hunk  "
+		   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n" 
+		   ))
+		 ((eq map egg-diff-section-map)
+		  (egg-pretty-help-text
+		   "\\<egg-diff-section-map>\n"
+		   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n" 
+		   ))
+		 ((eq map egg-wdir-diff-section-map)
+		  (egg-pretty-help-text
+		   "\\<egg-wdir-diff-section-map>\n"
+		   "\\[egg-diff-section-cmd-undo]:undo file/hunk  "
+		   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n" 
+		   )))
+	   "\n"))
+    (plist-put info :help help)))
 
 (defun egg-do-diff (diff-info)
   (let* ((git-dir (egg-git-dir))
@@ -2603,6 +2648,8 @@ success."
 		       :src-revision src
 		       :diff-map egg-wdir-diff-section-map
 		       :hunk-map egg-wdir-hunk-section-map))))
+    (if (memq :diff egg-show-key-help-in-buffers)
+	(egg-diff-info-add-help info))
     (when (stringp file)
       (setq file (list file)))
     (when (consp file) 
