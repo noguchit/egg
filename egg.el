@@ -1780,7 +1780,7 @@ success."
     (when (memq :status egg-show-key-help-in-buffers)
       (insert
 	"\n"
-	(propertize "Common Key Bindings:" 'face 'egg-text-3)
+	(propertize "Common Key Bindings:" 'face 'egg-text-2)
 	"\n"
 	(egg-pretty-help-text
 	 "\\[egg-buffer-cmd-navigate-prev]:previous block  "
@@ -1795,7 +1795,7 @@ success."
 	 "\\[egg-buffer-cmd-refresh]:redisplay  "
 	 "\\[quit-window]:quit\n")
 	"\n" 
-	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-text-3)
+	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-text-2)
 	"\n"
 	(egg-pretty-help-text
 	 "\\<egg-unstaged-diff-section-map>"
@@ -2562,7 +2562,7 @@ success."
     (setq help
 	  (concat
 	   "\n"
-	   (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	   (propertize "Common Key Bindings:" 'face 'egg-text-2)
 	   (egg-pretty-help-text
 	    "\\<egg-buffer-mode-map>\n"
 	    "\\[egg-buffer-cmd-navigate-prev]:previous block  "
@@ -2571,7 +2571,7 @@ success."
 	    "\\[quit-window]:quit\n"
 	    )
 	   "\n"
-	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-text-3)
+	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-text-2)
 	   (cond ((eq map egg-unstaged-diff-section-map)
 		  (egg-pretty-help-text
 		   "\\<egg-unstaged-diff-section-map>\n"
@@ -3580,7 +3580,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (when (memq :log egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	       (propertize "Common Key Bindings:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3590,7 +3590,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-map>"
@@ -3607,7 +3607,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-create-new-branch]:create branch\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-map>"
@@ -3617,7 +3617,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-unmark]:unmark\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Extra Key Bindings for a Ref:" 'face 'egg-text-3)
+	       (propertize "Extra Extra Key Bindings for a Ref:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-local-ref-map>"
@@ -3627,7 +3627,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-push-head-to-local]:download\n"
 		)
 	       "\n"
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
@@ -3726,7 +3726,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (when (memq :log egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	       (propertize "Common Key Bindings:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3735,7 +3735,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-simple-map>"
@@ -3753,7 +3753,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
@@ -3883,7 +3883,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (when (memq :log egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-3)
+	       (propertize "Common Key Bindings:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3892,7 +3892,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-simple-map>"
@@ -3910,7 +3910,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-3)
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
