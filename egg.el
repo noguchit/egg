@@ -58,6 +58,11 @@ Many Egg faces inherit from this one by default."
   "Face for description text."
   :group 'egg-faces)
 
+(defface egg-text-help
+  '((t :inherit egg-text-base :height 0.8))
+  "Face for description text."
+  :group 'egg-faces)
+
 (defface egg-text-2
   '((t :inherit egg-text-base :height 1.1))
   "Face for description text."
@@ -322,13 +327,15 @@ Different versions of git have different names for this subdir."
 		 (const "rebase-merge")
 		 string))
 
-(defcustom egg-show-key-help-in-buffers '(:log :status :diff)
+(defcustom egg-show-key-help-in-buffers '(:log :status :diff :file-log :reflog)
   "Display keybinding help in egg special buffers."
   :group 'egg
-  :type '(set (const :tag "Status Buffer" :status)
-	      (const :tag "Log Buffer"	  :log)
-	      (const :tag "Diff Buffer"   :diff)
-	      (const :tag "Commit Buffer" :commit)))
+  :type '(set (const :tag "Status Buffer"   :status)
+	      (const :tag "Log Buffer"	    :log)
+	      (const :tag "File Log Buffer" :file-log)
+	      (const :tag "RefLog Buffer"   :reflog)
+	      (const :tag "Diff Buffer"     :diff)
+	      (const :tag "Commit Buffer"   :commit)))
 
 
 (defcustom egg-dummy-option nil
@@ -1177,6 +1184,7 @@ success."
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
     (define-key map (kbd "f") 'egg-diff-section-cmd-visit-file)
+    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
     map))
 
 (defconst egg-staged-diff-section-map 
@@ -1209,6 +1217,7 @@ success."
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
+    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
     (define-key map (kbd "f") 'egg-hunk-section-cmd-visit-file)
     map))
 
@@ -1522,6 +1531,23 @@ success."
   (find-file file)
   (egg-file-do-ediff ":0" "INDEX" "HEAD"))
 
+(defun egg-diff-section-cmd-ediff (file pos)
+  (interactive (list (car (get-text-property (point) :diff))
+		     (point)))
+  (let ((commit (get-text-property pos :commit))
+	(diff-info egg-diff-buffer-info)
+	src src-name dst commit)
+    (find-file file)
+    (cond (commit
+	   (setq src (egg-describe-rev (concat commit "^"))
+		 dst (egg-describe-rev commit)))
+	  ((setq src (plist-get diff-info :src-revision))
+	   (setq src (egg-describe-rev src)))
+	  ((setq src (and diff-info ":0"))
+	   (setq src-name "INDEX")))
+    (unless src (error "Ooops!"))
+    (egg-file-do-ediff src src-name dst nil 'ediff2)))
+
 (defun egg-hunk-compute-line-no (hunk-header hunk-beg)
   (let ((limit (line-end-position))
 	(line (string-to-number 
@@ -1765,10 +1791,10 @@ success."
 	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-term)
 	  (if last-found
 	      (put-text-property last-found (1- (match-beginning 0))
-				 'face 'egg-text-1))
+				 'face 'egg-text-help))
 	  (setq last-found (point)))
 	(if last-found
-	    (put-text-property last-found (line-end-position) 'face 'egg-text-1))
+	    (put-text-property last-found (line-end-position) 'face 'egg-text-help))
 	(buffer-string)))))
   
 (defun egg-sb-insert-repo-section ()
@@ -1794,7 +1820,7 @@ success."
     (when (memq :status egg-show-key-help-in-buffers)
       (insert
 	"\n"
-	(propertize "Common Key Bindings:" 'face 'egg-text-2)
+	(propertize "Common Key Bindings:" 'face 'egg-text-1)
 	"\n"
 	(egg-pretty-help-text
 	 "\\[egg-buffer-cmd-navigate-prev]:previous block  "
@@ -1809,7 +1835,7 @@ success."
 	 "\\[egg-buffer-cmd-refresh]:redisplay  "
 	 "\\[quit-window]:quit\n")
 	"\n" 
-	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-text-2)
+	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-text-1)
 	"\n"
 	(egg-pretty-help-text
 	 "\\<egg-unstaged-diff-section-map>"
@@ -2577,7 +2603,7 @@ success."
     (setq help
 	  (concat
 	   "\n"
-	   (propertize "Common Key Bindings:" 'face 'egg-text-2)
+	   (propertize "Common Key Bindings:" 'face 'egg-text-1)
 	   (egg-pretty-help-text
 	    "\\<egg-buffer-mode-map>\n"
 	    "\\[egg-buffer-cmd-navigate-prev]:previous block  "
@@ -2586,7 +2612,7 @@ success."
 	    "\\[quit-window]:quit\n"
 	    )
 	   "\n"
-	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-text-2)
+	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-text-1)
 	   (cond ((eq map egg-unstaged-diff-section-map)
 		  (egg-pretty-help-text
 		   "\\<egg-unstaged-diff-section-map>\n"
@@ -2751,6 +2777,7 @@ success."
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
     (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
+    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
     map))
 
 (defconst egg-log-hunk-map 
@@ -2758,6 +2785,7 @@ success."
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
     (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
+    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
     map))
 
 (defconst egg-log-buffer-mode-map
@@ -3597,7 +3625,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (when (memq :log egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-2)
+	       (propertize "Common Key Bindings:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3607,7 +3635,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-map>"
@@ -3624,7 +3652,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-create-new-branch]:create branch\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-map>"
@@ -3634,7 +3662,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-unmark]:unmark\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Extra Key Bindings for a Ref:" 'face 'egg-text-2)
+	       (propertize "Extra Extra Key Bindings for a Ref:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-local-ref-map>"
@@ -3644,7 +3672,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-push-head-to-local]:download\n"
 		)
 	       "\n"
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
@@ -3743,10 +3771,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       :closure `(lambda ()
 			   (egg-log-buffer-decorate-logs-simple
 			    #'egg-run-git-file-log-HEAD ,file-name)))))
-      (when (memq :log egg-show-key-help-in-buffers)
+      (when (memq :file-log egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-2)
+	       (propertize "Common Key Bindings:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3755,7 +3783,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-simple-map>"
@@ -3773,7 +3801,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
@@ -3900,10 +3928,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	     :closure `(lambda ()
 			 (egg-log-buffer-decorate-logs-simple
 			  #'egg-run-reflog-branch ,branch))))
-      (when (memq :log egg-show-key-help-in-buffers)
+      (when (memq :reflog egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-2)
+	       (propertize "Common Key Bindings:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3912,7 +3940,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-simple-map>"
@@ -3930,7 +3958,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-rebase]:rebase HEAD\n" 
 		)
 	       "\n" 
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-2)
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-1)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
@@ -4147,21 +4175,25 @@ current file contains unstaged changes."
       (error "Ooops!"))
     (ediff-buffers3 theirs ours (current-buffer))))
 
-(defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name)
+(defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name ediff2)
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
 	 (short-file (file-name-nondirectory file)) 
-	 (closer-name (concat closer-rev-name ":" short-file))
+	 (closer-name (concat (or closer-rev-name closer-rev)
+			      ":" short-file))
 	 (this (egg-file-get-other-version file closer-rev nil t closer-name))
-	 (further-name (and further-rev further-rev-name
-			    (concat further-rev-name ":" short-file)))
+	 (further-name (and further-rev
+			    (concat (or further-rev-name further-rev)
+				    ":" short-file)))
 	 (that (and further-rev
 		    (egg-file-get-other-version file further-rev nil t further-name))))
     (unless (bufferp this) (error "Ooops!"))
     (unless (or (null further-rev) (bufferp that)) (error "Ooops!"))
     (if (bufferp that)
-	(ediff-buffers3 that this (current-buffer))
+	(if ediff2
+	    (ediff-buffers that this)
+	  (ediff-buffers3 that this (current-buffer)))
       (ediff-buffers this (current-buffer)))))
 
 (defconst egg-key-action-alist 
