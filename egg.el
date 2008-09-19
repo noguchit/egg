@@ -1182,6 +1182,7 @@ success."
 (defconst egg-staged-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:StagedDiff")))
     (set-keymap-parent map egg-diff-section-map)
+    (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
     map))
 
@@ -1194,13 +1195,14 @@ success."
 (defconst egg-unstaged-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:UnstagedDiff")))
     (set-keymap-parent map egg-wdir-diff-section-map)
+    (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
     map))
 
 (defconst egg-unmerged-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:UnmergedDiff")))
     (set-keymap-parent map egg-unstaged-diff-section-map)
-    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff3)
+    (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
     map))
 
 (defconst egg-hunk-section-map 
@@ -1213,6 +1215,7 @@ success."
 (defconst egg-staged-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:StagedHunk")))
     (set-keymap-parent map egg-hunk-section-map)
+    (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
     map))
 
@@ -1225,6 +1228,7 @@ success."
 (defconst egg-unstaged-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:UnstagedHunk")))
     (set-keymap-parent map egg-wdir-hunk-section-map)
+    (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
     map))
 
@@ -1232,7 +1236,7 @@ success."
   (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
     ;; no hunking staging in unmerged file
     (set-keymap-parent map egg-wdir-hunk-section-map)
-    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff3)
+    (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
     map))
 
 (defun list-tp ()
@@ -1503,10 +1507,20 @@ success."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file-other-window file))
 
-(defun egg-diff-section-cmd-ediff3 (file)
+(defun egg-unmerged-section-cmd-ediff3 (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file)
   (egg-resolve-merge-with-ediff))
+
+(defun egg-unstaged-section-cmd-ediff (file)
+  (interactive (list (car (get-text-property (point) :diff))))
+  (find-file file)
+  (egg-file-do-ediff ":0" "INDEX"))
+
+(defun egg-staged-section-cmd-ediff3 (file)
+  (interactive (list (car (get-text-property (point) :diff))))
+  (find-file file)
+  (egg-file-do-ediff ":0" "INDEX" "HEAD"))
 
 (defun egg-hunk-compute-line-no (hunk-header hunk-beg)
   (let ((limit (line-end-position))
@@ -4065,7 +4079,7 @@ current file contains unstaged changes."
   (interactive)
   (egg-do-create-branch nil 'checkout "start new branch with name: "))
 
-(defun egg-file-get-other-version (file &optional rev prompt same-mode)
+(defun egg-file-get-other-version (file &optional rev prompt same-mode name)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
 	 (git-dir (egg-git-dir))
 	 (lbranch (egg-current-branch))
@@ -4075,7 +4089,7 @@ current file contains unstaged changes."
 	 (rev (or rev (egg-read-rev prompt rbranch)))
 	 (canon-name (egg-file-git-name file))
 	 (git-name (concat rev ":" canon-name))
-	 (buf (get-buffer-create (concat "*" git-name "*"))))
+	 (buf (get-buffer-create (concat "*" (or name git-name) "*"))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
 	(erase-buffer)
@@ -4126,11 +4140,29 @@ current file contains unstaged changes."
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
-	 (ours (egg-file-get-other-version file ":2" nil t))
-	 (theirs (egg-file-get-other-version file ":3" nil t)))
+	 (short-file (file-name-nondirectory file))
+	 (ours (egg-file-get-other-version file ":2" nil t (concat "our:" short-file)))
+	 (theirs (egg-file-get-other-version file ":3" nil t (concat "their:" short-file))))
     (unless (and (bufferp ours) (bufferp theirs))
       (error "Ooops!"))
-    (ediff-buffers3 ours (current-buffer) theirs)))
+    (ediff-buffers3 theirs ours (current-buffer))))
+
+(defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name)
+  (unless (buffer-file-name)
+    (error "Current buffer has no associated file!"))
+  (let* ((file buffer-file-name)
+	 (short-file (file-name-nondirectory file)) 
+	 (closer-name (concat closer-rev-name ":" short-file))
+	 (this (egg-file-get-other-version file closer-rev nil t closer-name))
+	 (further-name (and further-rev further-rev-name
+			    (concat further-rev-name ":" short-file)))
+	 (that (and further-rev
+		    (egg-file-get-other-version file further-rev nil t further-name))))
+    (unless (bufferp this) (error "Ooops!"))
+    (unless (or (null further-rev) (bufferp that)) (error "Ooops!"))
+    (if (bufferp that)
+	(ediff-buffers3 that this (current-buffer))
+      (ediff-buffers this (current-buffer)))))
 
 (defconst egg-key-action-alist 
   '((?m :merge-file "[m]erge current file" "Resolve merge conflict(s) in current file.")
