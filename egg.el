@@ -161,6 +161,11 @@ Many Egg faces inherit from this one by default."
   "Face for an important term."
   :group 'egg-faces)
 
+(defface egg-help-key 
+  '((t :inherit 'egg-term :height 0.9))
+  "Hilight Face in help text."
+  :group 'egg-faces)
+
 (defface egg-warning
   '((((class color) (background light))
      :foreground "Red" :inherit bold)
@@ -1307,7 +1312,7 @@ success."
 		section)))
     (format "%s-%s" current-nav desc)))
 
-(defsubst egg-delimit-section (sect-type section beg end 
+(defun egg-delimit-section (sect-type section beg end 
 					  &optional inv-beg
 					  keymap navigation)
   (let ((nav (cond ((functionp navigation)
@@ -1788,7 +1793,7 @@ success."
 		 (mapconcat 'identity strings "")))
 	(goto-char (point-min))
 	(while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~-]\\):" nil t)
-	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-term)
+	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-help-key)
 	  (if last-found
 	      (put-text-property last-found (1- (match-beginning 0))
 				 'face 'egg-text-help))
@@ -1845,8 +1850,8 @@ success."
 	 )))
     (setq context-end (point))
 
-    (egg-delimit-section :section 'repo beg (point)
-			 inv-beg egg-section-map 'repo)
+    (egg-delimit-section :section :help beg (point)
+			 inv-beg egg-section-map :help)
     (if context-keymap
 	(put-text-property context-beg context-end
 			   'keymap context-keymap))))
@@ -3521,10 +3526,12 @@ success."
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
 	      (if desc (concat "\n" desc "\n") "\n")
 	      "\n")
+      (setq inv-beg (- (point) 2))
       (when (stringp help) 
 	(insert help "\n"))
       (setq beg (point))
-      (setq inv-beg (- beg 2))
+      (egg-delimit-section :section :help inv-beg (point)
+			 inv-beg egg-section-map :help)
       (funcall closure)
       (goto-char beg)))
 
