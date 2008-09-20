@@ -60,7 +60,21 @@ Many Egg faces inherit from this one by default."
 
 (defface egg-text-help
   '((t :inherit egg-text-base :height 0.8))
-  "Face for description text."
+  "Face for help text."
+  :group 'egg-faces)
+
+(defface egg-help-header-1
+  '((t :inherit egg-text-base :weight bold))
+  "Face for help text."
+  :group 'egg-faces)
+
+(defface egg-help-header-2
+  '((((class color) (background light))
+     :foreground "Black" :inherit egg-text-1 :height 0.9)
+    (((class color) (background dark))
+     :foreground "LightSteelBlue" :inherit egg-text-1 :height 0.9)
+    (t :inherit egg-text-1))
+  "Face for help text."
   :group 'egg-faces)
 
 (defface egg-text-2
@@ -1604,7 +1618,7 @@ success."
 		     (get-text-property (point) :sect-type)))
   (unless pos
     (setq pos (point)))
-  (let ((end (next-single-property-change pos sect-type))
+  (let ((end (next-single-property-change pos sect-type nil (point-max)))
 	child-pos child-nav
 	currently-hidden)
     (setq child-pos (next-single-property-change pos :navigation nil end))
@@ -1810,8 +1824,7 @@ success."
 	 (beg (point))
 	 (rebase-step (plist-get state :rebase-step))
 	 (rebase-num (plist-get state :rebase-num))
-	 context-beg context-end context-keymap
-	 inv-beg)
+	 inv-beg help-beg help-inv-beg rebase-beg)
     (insert (propertize (egg-pretty-head-string state) 'face 'egg-branch) 
 		"\n"
 		(propertize sha1 'face 'font-lock-string-face)
@@ -1819,16 +1832,19 @@ success."
 		(propertize (plist-get state :gitdir)
 			    'face 'font-lock-constant-face)
 		"\n")
-    (setq context-beg (point))
-    (setq inv-beg (1- context-beg))
-    (when rebase-step 
+    (setq inv-beg (1- (point)))
+    (when rebase-step
+      (setq rebase-beg (point))
       (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
-      (setq context-keymap egg-status-buffer-rebase-map))
+      (put-text-property rebase-beg (1- (point)) 'keymap
+			 egg-status-buffer-rebase-map))
     (when (memq :status egg-show-key-help-in-buffers)
+      (insert "\n")
+      (setq help-beg (point))
+      (insert (propertize "Help" 'face 'egg-help-header-1) "\n")
+      (setq help-inv-beg (1- (point)))
       (insert
-	"\n"
-	(propertize "Common Key Bindings:" 'face 'egg-text-1)
-	"\n"
+	(propertize "Common Key Bindings:" 'face 'egg-help-header-2) "\n"
 	(egg-pretty-help-text
 	 "\\[egg-buffer-cmd-navigate-prev]:previous block  "
 	 "\\[egg-buffer-cmd-navigate-next]:next block  " 
@@ -1841,22 +1857,19 @@ success."
 	 "\\<egg-buffer-mode-map>"
 	 "\\[egg-buffer-cmd-refresh]:redisplay  "
 	 "\\[quit-window]:quit\n")
-	"\n" 
-	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-text-1)
-	"\n"
+	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-help-header-2) "\n"
 	(egg-pretty-help-text
 	 "\\<egg-unstaged-diff-section-map>"
 	 "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
 	 "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
 	 "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n"
 	 )))
-    (setq context-end (point))
-
-    (egg-delimit-section :section :help beg (point)
-			 inv-beg egg-section-map :help)
-    (if context-keymap
-	(put-text-property context-beg context-end
-			   'keymap context-keymap))))
+    (egg-delimit-section :section 'repo beg (point)
+			 inv-beg egg-section-map 'repo)
+    (when help-beg
+      (egg-delimit-section :help 'help help-beg (point)
+			 help-inv-beg egg-section-map 
+			 'egg-compute-navigation))))
 
 (defun egg-sb-insert-untracked-section ()
   (let ((beg (point)) inv-beg)
@@ -2575,14 +2588,26 @@ success."
 	  (dst-prefix (plist-get egg-diff-buffer-info :dst))
 	  (help (plist-get egg-diff-buffer-info :help))
 	  (inhibit-read-only t)
-	  pos inv-beg)
+	  pos beg inv-beg help-beg help-end help-inv-beg)
       (erase-buffer)
       (insert (propertize title 'face 'egg-section-title) "\n")
-      (setq inv-beg (point))
       (insert prologue "\n")
-      (if help (insert help ""))
+      (setq inv-beg (1- (point)))
+      (when help
+	(insert "\n")
+	(setq help-beg (point))
+	(insert (propertize "Help" 'face 'egg-help-header-1) "\n")
+	(setq help-inv-beg (1- (point)))
+	(insert help)
+	(setq help-end (point)))
+      (setq beg (point))
       (apply 'call-process "git" nil t nil "diff" args)
-      (egg-delimit-section :section 'top-level (point-min) (point))
+      (unless (> (point) beg)
+	(insert (propertize "No difference!\n" 'face 'egg-text-4)))
+      (egg-delimit-section :section 'file (point-min) (point) inv-beg
+			   egg-section-map 'file)
+      (egg-delimit-section :help 'help help-beg help-end help-inv-beg
+			   egg-section-map 'egg-compute-navigation)
       (apply 'egg-decorate-diff-section
 	     :begin (point-min)
 	     :end (point)
@@ -2609,8 +2634,7 @@ success."
 	help)
     (setq help
 	  (concat
-	   "\n"
-	   (propertize "Common Key Bindings:" 'face 'egg-text-1)
+	   (propertize "Common Key Bindings:" 'face 'egg-help-header-2)
 	   (egg-pretty-help-text
 	    "\\<egg-buffer-mode-map>\n"
 	    "\\[egg-buffer-cmd-navigate-prev]:previous block  "
@@ -2618,8 +2642,7 @@ success."
 	    "\\[egg-buffer-cmd-refresh]:redisplay  "
 	    "\\[quit-window]:quit\n"
 	    )
-	   "\n"
-	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-text-1)
+	   (propertize "Extra Bindings for Diff blocks:" 'face 'egg-help-header-2)
 	   (cond ((eq map egg-unstaged-diff-section-map)
 		  (egg-pretty-help-text
 		   "\\<egg-unstaged-diff-section-map>\n"
@@ -2702,11 +2725,10 @@ success."
       (setq file (list file)))
     (when (consp file) 
       (setq tmp (plist-get info :prologue))
-      (setq tmp (concat "\n"
-			(propertize (mapconcat 'identity file "\n")
+      (setq tmp (concat (propertize (mapconcat 'identity file "\n")
 				    'face 'egg-text-3)
-			"\n\n"
-			(propertize tmp 'face 'egg-text-2)))
+			"\n"
+			(propertize tmp 'face 'egg-text-1)))
       (plist-put info :prologue tmp)
       (setq tmp (plist-get info :args))
       (setq tmp (append tmp (cons "--" file)))
@@ -3579,6 +3601,8 @@ success."
 	      "\n")
       (setq inv-beg (- (point) 2))
       (when (stringp help) 
+	(insert (propertize "Help" 'face 'egg-help-header-1) "\n")
+	(setq inv-beg (1- (point)))
 	(insert help "\n"))
       (setq beg (point))
       (egg-delimit-section :section :help inv-beg (point)
@@ -3700,7 +3724,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (when (memq :log egg-show-key-help-in-buffers)
 	(setq help
 	      (concat
-	       (propertize "Common Key Bindings:" 'face 'egg-text-1)
+	       (propertize "Common Key Bindings:" 'face 'egg-help-header-2)
 	       "\n"
 	       (egg-pretty-help-text
 		"\\[egg-log-buffer-next-ref]:next thing  "
@@ -3709,9 +3733,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-status]:show repo's status  "
 		"\\[egg-buffer-cmd-refresh]:redisplay  " 
 		"\\[quit-window]:quit\n" )
-	       "\n" 
-	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-text-1)
-	       "\n"
+	       (propertize "Extra Key Bindings for a Commit line:" 'face 'egg-help-header-2) "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-map>"
 		"\\[egg-log-buffer-insert-commit]:load details  " 
@@ -3726,9 +3748,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-rebase]:rebase HEAD  " 
 		"\\[egg-log-buffer-create-new-branch]:create branch\n" 
 		)
-	       "\n" 
-	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-text-1)
-	       "\n"
+	       (propertize "Extra Key Bindings to prepare a (interactive) rebase:" 'face 'egg-help-header-2) "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-commit-map>"
 		"\\[egg-log-buffer-mark-pick]:mark as picked  " 
@@ -3736,9 +3756,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-mark-edit]:mark as edited  " 
 		"\\[egg-log-buffer-unmark]:unmark\n" 
 		)
-	       "\n" 
-	       (propertize "Extra Extra Key Bindings for a Ref:" 'face 'egg-text-1)
-	       "\n"
+	       (propertize "Extra Extra Key Bindings for a Ref:" 'face 'egg-help-header-2) "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-local-ref-map>"
 		"\\[egg-log-buffer-rm-ref]:delete ref  "
@@ -3746,13 +3764,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		"\\[egg-log-buffer-push-to-remote]:upload to remote  "
 		"\\[egg-log-buffer-push-head-to-local]:download\n"
 		)
-	       "\n"
-	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-text-1)
-	       "\n"
+	       (propertize "Extra Key Bindings for a Diff Block:" 'face 'egg-help-header-2) "\n"
 	       (egg-pretty-help-text
 		"\\<egg-log-diff-map>"
 		"\\[egg-log-diff-cmd-visit-file-other-window]:visit version/line\n")
-	       "\n"
 	       )))
       (set 
        (make-local-variable 'egg-internal-log-buffer-closure)
