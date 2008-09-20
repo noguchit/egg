@@ -672,7 +672,8 @@ Either a symbolic ref or a sha1."
 					       tag-face an-tag-face tag-keymap
 					       remote-site-face
 					       remote-rname-face 
-					       remote-keymap )
+					       remote-keymap &optional
+					       remote-site-keymap)
   (let ((refs-desc-list
 	 (egg-git-lines-matching-multi 
 	  "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
@@ -684,6 +685,7 @@ Either a symbolic ref or a sha1."
 	  ;; 6: remote-host
 	  ;; 7: is annotated tag 
 	  '(1 2 3 4 5 6 7) "show-ref" "-d"))
+	(remote-site-keymap (or remote-site-keymap remote-keymap))
 	annotated-tags)
     (setq refs-desc-list
 	  (delq nil 
@@ -720,7 +722,7 @@ Either a symbolic ref or a sha1."
 			     (concat
 			      (propertize remote
 					  'face remote-site-face
-					  'keymap remote-keymap
+					  'keymap remote-site-keymap
 					  :ref (cons name :remote))
 			      (propertize (substring name (length remote)) 
 					  'face remote-rname-face
@@ -2775,6 +2777,14 @@ success."
   (let ((map (make-sparse-keymap "Egg:LogRemoteRef")))
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "d") 'egg-log-buffer-fetch-remote-ref)
+    (define-key map (kbd "d") 'egg-log-buffer-fetch-remote-ref)
+    map))
+
+(defconst egg-log-remote-site-map 
+  (let ((map (make-sparse-keymap "Egg:LogRef")))
+    (set-keymap-parent map egg-log-commit-map)
+    (define-key map (kbd "d") 'egg-log-buffer-fetch)
+    (define-key map (kbd "U") 'egg-log-buffer-push)
     map))
 
 (defconst egg-log-diff-map 
@@ -2804,14 +2814,15 @@ success."
     map))
 
 
-(defun egg-decorate-log (&optional line-map head-map tag-map remote-map)
+(defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map)
   (let ((start (point))
 	(head-sha1 (egg-get-current-sha1)) 
 	(ov (make-overlay (point-min) (point-min) nil t))
 	(dec-ref-alist (egg-full-ref-decorated-alist
 			'egg-branch-mono head-map 
 			'egg-tag-mono 'egg-an-tag-mono tag-map
-			'egg-remote-mono 'egg-branch-mono remote-map))
+			'egg-remote-mono 'egg-branch-mono remote-map
+			remote-site-map))
 	(ref-string-len 0) 
 	(dashes-len 0)
 	(min-dashes-len 300)
@@ -2959,7 +2970,8 @@ success."
     (egg-decorate-log egg-log-commit-map 
 		      egg-log-local-ref-map
 		      egg-log-local-ref-map
-		      egg-log-remote-ref-map)))
+		      egg-log-remote-ref-map
+		      egg-log-remote-site-map)))
 
 
 (defun egg-log-diff-cmd-visit-file (file sha1)
@@ -3360,6 +3372,27 @@ success."
 			   (format "refs/heads/%s:refs/remotes/%s"
 				   name ref)))))
 
+(defun egg-log-buffer-fetch (pos)
+  (interactive "d")
+  (let* ((ref-at-point (get-text-property pos :ref))
+	 (ref (car ref-at-point))
+	 (type (cdr ref-at-point))
+	 site name def remote)
+    (unless (eq type :remote)
+      (error "No site here to fetch from!"))
+    (setq remote (egg-rbranch-to-remote ref))
+    (when remote
+      (setq name (read-string (format "fetch from %s (default all): "
+				      remote) nil nil "--all"))
+      (if (equal name "--all")
+	  (progn
+	    (message "GIT> fetching everything from %s..." remote)
+	    (egg-buffer-async-do nil "fetch" remote))
+	(message "GIT> fetching %s from %s..." name remote)
+	(egg-buffer-async-do nil "fetch" remote 
+			     (format "refs/heads/%s:refs/remotes/%s/%s"
+				     name remote name))))))
+
 (defun egg-log-buffer-push-to-local (pos &optional non-ff)
   (interactive "d\nP")
   (let* ((src (car (get-text-property pos :ref)))
@@ -3426,6 +3459,24 @@ success."
       (message "GIT> pushing %s to %s on %s..." lref rref remote)
       (egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") 
 			   remote spec))))
+
+(defun egg-log-buffer-push (pos)
+  (interactive "d")
+  (let* ((ref-at-point (get-text-property pos :ref))
+	 (ref (car ref-at-point))
+	 (type (cdr ref-at-point))
+	 site name def remote)
+    (unless (eq type :remote)
+      (error "No site here to push to!"))
+    (setq remote (egg-rbranch-to-remote ref))
+    (when remote
+      (setq name 
+	    (completing-read (format "push to %s (default all heads): "
+				     remote)
+			     (egg-local-refs) nil nil nil nil "--all"))
+      (message "GIT> pushing %s to %s..."
+	       (if (equal name "--all") "everything" name) remote) 
+      (egg-buffer-async-do nil "push" remote name))))
 
 (defun egg-log-buffer-goto-pos (pos)
   (goto-char pos)
@@ -3551,11 +3602,28 @@ success."
 	     (equal (current-buffer) (process-buffer egg-async-process)))
     (or 
      (save-excursion
-       (goto-char (point-min))
-       (save-match-data
-	 (when (re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
-	   (message "%s: %s" (match-string-no-properties 1)
-		    (match-string-no-properties 2)))))))
+       (let ((cmd "GIT>") cmd-sexp cmd-string pos done)
+	 (goto-char (point-min))
+	 (skip-chars-forward "^(")
+	 (setq cmd-sexp (read (current-buffer)))
+	 (when (consp cmd-sexp)
+	   (setq cmd-string (car cmd-sexp)
+		 cmd (cond ((string-equal "fetch" cmd-string) "GIT-FETCH>")
+			   ((string-equal "push" cmd-string) "GIT-PUSH>"))))
+	 (goto-char (point-min))
+	 (save-match-data
+	   (cond ((re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
+		  (message "%s %s: %s" cmd
+			   (match-string-no-properties 1)
+			   (match-string-no-properties 2))
+		  (setq done t))))
+	 (unless done
+	   (goto-char (point-min))
+	   (save-match-data
+	     (cond ((re-search-forward "^fatal: \\(.+\\)$" nil t)
+		    (message "%s fatal: %s" cmd 
+			     (match-string-no-properties 1))
+		    (setq done t)))))))))
   ;; update log buffer
   (egg-log-buffer-redisplay buffer))
 
