@@ -1822,6 +1822,7 @@ success."
   (let* ((state (egg-repo-state))
 	 (sha1 (plist-get state :sha1))
 	 (beg (point))
+	 (map egg-section-map)
 	 (rebase-step (plist-get state :rebase-step))
 	 (rebase-num (plist-get state :rebase-num))
 	 inv-beg help-beg help-inv-beg rebase-beg)
@@ -1836,8 +1837,7 @@ success."
     (when rebase-step
       (setq rebase-beg (point))
       (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
-      (put-text-property rebase-beg (1- (point)) 'keymap
-			 egg-status-buffer-rebase-map))
+      (setq map egg-status-buffer-rebase-map))
     (when (memq :status egg-show-key-help-in-buffers)
       (insert "\n")
       (setq help-beg (point))
@@ -1864,11 +1864,9 @@ success."
 	 "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
 	 "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n"
 	 )))
-    (egg-delimit-section :section 'repo beg (point)
-			 inv-beg egg-section-map 'repo)
+    (egg-delimit-section :section 'repo beg (point) inv-beg map 'repo)
     (when help-beg
-      (egg-delimit-section :help 'help help-beg (point)
-			 help-inv-beg egg-section-map 
+      (egg-delimit-section :help 'help help-beg (point) help-inv-beg map 
 			 'egg-compute-navigation))))
 
 (defun egg-sb-insert-untracked-section ()
