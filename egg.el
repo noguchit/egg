@@ -371,10 +371,26 @@ Different versions of git have different names for this subdir."
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
+;; (defmacro egg-text (text face)
+;;   (if (stringp text)
+;;       (propertize text 'face face)
+;;     `(propertize ,text 'face ,face)))
+
 (defmacro egg-text (text face)
   (if (stringp text)
-      (propertize text 'face face)
+      (propertize text 'face (if (symbolp face) face
+			       (nth 1 face))) 
     `(propertize ,text 'face ,face)))
+
+(defmacro egg-prop (text &rest prop)
+  (if (stringp text)
+      (apply 'propertize text
+	     (mapcar (lambda (sym)
+		       (if (consp sym)
+			   (nth 1 sym)
+			 sym))
+		     prop))
+    `(propertize ,text ,@prop)))
 
 (defsubst egg-prepend (str prefix &rest other-properties)
   "Make STR appear to have prefix PREFIX.
@@ -2577,10 +2593,9 @@ success."
 			   (egg-git-ok t "log" "--max-count=1"
 				       "--pretty=format:%s%n%n%b" "HEAD")))
 		 (list (lambda (state)
-			   (concat 
-			    (egg-text "Committing into  " 'egg-text-3)
-			    (propertize (egg-pretty-head-name)
-					'face 'egg-branch)))
+			 (concat 
+			  (egg-text "Committing into  " 'egg-text-3)
+			  (egg-text (egg-pretty-head-name) 'egg-branch)))
 		       #'egg-log-msg-commit
 		       nil)))
   (let* ((git-dir (egg-git-dir))
@@ -2607,9 +2622,9 @@ success."
     (set-marker-insertion-type egg-log-msg-text-beg nil)
     (put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg 
 		       :navigation 'commit-log-text)
-    (insert (propertize "\n------------------------ End of Commit Message ------------------------" 
-			'read-only t 'front-sticky nil
-			'face 'font-lock-comment-face))
+    (insert (egg-prop "\n------------------------ End of Commit Message ------------------------" 
+		      'read-only t 'front-sticky nil
+		      'face 'font-lock-comment-face))
     (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
     (egg-commit-log-buffer-show-diffs buf 'init)
@@ -4419,11 +4434,10 @@ current file contains unstaged changes."
 		  (with-current-buffer buf
 		    (let ((inhibit-read-only t))
 		      (erase-buffer)
-		      (insert (propertize "Select Action\n" 'face
-					  'egg-section-title))
-		      (insert (propertize banner 'face 'egg-text-1) "\n\n")
-		      (insert (propertize "select an action:" 
-					  'face 'egg-text-1)
+		      (insert (egg-text "Select Action\n" 
+					'egg-section-title))
+		      (insert (egg-text banner 'egg-text-1) "\n\n")
+		      (insert (egg-text "select an action:" 'egg-text-1)
 			      "\n\n")
 		      (put-text-property (point-min) (point)
 					 'intangible t)
@@ -4431,9 +4445,9 @@ current file contains unstaged changes."
 		      (insert 
 		       (mapconcat
 			(lambda (entry)
-			  (propertize (concat "- " (cdr entry))
-				      :action (car entry)
-				      'face 'egg-electrict-choice))
+			  (egg-prop (concat "- " (cdr entry))
+				    :action (car entry)
+				    'face 'egg-electrict-choice))
 			action-alist
 			"\n")
 		       "\n")
