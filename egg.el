@@ -856,10 +856,15 @@ Either a symbolic ref or a sha1."
 	 (egg-pick-file-records (concat rebase-dir "git-rebase-todo.backup")
 				"^[pes]" "$")) 
 	:rebase-step
-	(1+ (if (file-exists-p (concat rebase-dir "done")) 
-		(length (egg-pick-file-records (concat rebase-dir "done")
+	(if (file-exists-p (concat rebase-dir "done")) 
+	    (length (egg-pick-file-records (concat rebase-dir "done")
 					       "^[pes]" "$")) 
-	      0))))
+	  0)
+	:rebase-cherry
+	(if (file-exists-p (concat rebase-dir "done")) 
+	    (car (nreverse (egg-pick-file-records 
+			    (concat rebase-dir "done")
+			    "^[pes]" "$"))))))
 
 (defsubst egg-git-rebase-dir (&optional git-dir)
   (concat (or git-dir (egg-git-dir)) "/" egg-git-rebase-subdir "/"))
@@ -1835,7 +1840,6 @@ success."
 		"\n")
     (setq inv-beg (1- (point)))
     (when rebase-step
-      (setq rebase-beg (point))
       (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
       (setq map egg-status-buffer-rebase-map))
     (when (memq :status egg-show-key-help-in-buffers)
@@ -1844,26 +1848,36 @@ success."
       (insert (propertize "Help" 'face 'egg-help-header-1) "\n")
       (setq help-inv-beg (1- (point)))
       (insert
-	(propertize "Common Key Bindings:" 'face 'egg-help-header-2) "\n"
-	(egg-pretty-help-text
-	 "\\[egg-buffer-cmd-navigate-prev]:previous block  "
-	 "\\[egg-buffer-cmd-navigate-next]:next block  " 
-	 "\\[egg-commit-log-edit]:commit staged modifications  "
-	 "\\[egg-log]:show repo's history\n" 
-	 "\\[egg-stage-all-files]:stage all modifications  " 
-	 "\\<egg-hide-show-map>"
-	 "\\[egg-section-cmd-toggle-hide-show]:hide/show block  " 
-	 "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  "
-	 "\\<egg-buffer-mode-map>"
-	 "\\[egg-buffer-cmd-refresh]:redisplay  "
-	 "\\[quit-window]:quit\n")
-	(propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-help-header-2) "\n"
-	(egg-pretty-help-text
-	 "\\<egg-unstaged-diff-section-map>"
-	 "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
-	 "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
-	 "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n"
-	 )))
+       (propertize "Common Key Bindings:" 'face 'egg-help-header-2) "\n"
+       (egg-pretty-help-text
+	"\\[egg-buffer-cmd-navigate-prev]:previous block  "
+	"\\[egg-buffer-cmd-navigate-next]:next block  " 
+	"\\[egg-commit-log-edit]:commit staged modifications  "
+	"\\[egg-log]:show repo's history\n" 
+	"\\[egg-stage-all-files]:stage all modifications  " 
+	"\\<egg-hide-show-map>"
+	"\\[egg-section-cmd-toggle-hide-show]:hide/show block  " 
+	"\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  "
+	"\\<egg-buffer-mode-map>"
+	"\\[egg-buffer-cmd-refresh]:redisplay  "
+	"\\[quit-window]:quit\n"))
+      (when (eq egg-status-buffer-rebase-map map)
+	(insert
+	 (propertize "Key Bindings for Rebase Operations:" 'face 'egg-help-header-2)
+	 (egg-pretty-help-text
+	  "\\<egg-status-buffer-rebase-map>\n"
+	  "\\[egg-buffer-selective-rebase-continue]:resume rebase  "
+	  "\\[egg-buffer-rebase-skip]:skip this rebase step  "
+	  "\\[egg-buffer-rebase-abort]:abort current rebase session\n"
+	  )))
+      (insert
+       (propertize "Extra Key Bindings for the Diff Sections:" 'face 'egg-help-header-2) "\n"
+       (egg-pretty-help-text
+	"\\<egg-unstaged-diff-section-map>"
+	"\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
+	"\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
+	"\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n"
+	)))
     (egg-delimit-section :section 'repo beg (point) inv-beg map 'repo)
     (when help-beg
       (egg-delimit-section :help 'help help-beg (point) help-inv-beg map 
@@ -3147,38 +3161,33 @@ success."
 (defun egg-rebase-interactive-server-buffer-hook ()
   ;; run inside server buffer
   (when (egg-interactive-rebase-in-progress)
-    (let* ((rebase-i-op (car (egg-git-lines-matching-multi 
-			      ": \\(rebase -i\\) (\\(\\sw+\\)):" '( 1 2 )
-			      "log" "-g" "--max-count=1"
-			      "--pretty=oneline")))
-	   (is-rebase-i (assq 1 rebase-i-op))
-	   (cherry-op (cdr (assq 2 rebase-i-op)))
+    (let* ((state (egg-repo-state))
+	   (cherry (plist-get state :rebase-cherry))
+	   (cherry-op (save-match-data (car (split-string cherry))))
 	   (server-buffer (current-buffer))
 	   commit-title)
-      (when is-rebase-i
-	;; fix me
-	(if (boundp 'nowait)		;; hack to not show the window
-	    (set 'nowait t))
-	(egg-commit-log-edit 
-	 `(lambda (state)
-	    (concat (propertize "Rebasing " 'face 'egg-text-3)
-		    (propertize (plist-get state :rebase-head)
-				'face 'egg-branch) ": "
-		    (propertize
-		     (concat "Commit " ,cherry-op "ed cherry")
-		     'face 'egg-text-3)))
-	 `(lambda ()
-	    (let ((msg (buffer-substring-no-properties
-			egg-log-msg-text-beg egg-log-msg-text-end)))
-	      (with-current-buffer ,server-buffer 
-		(let ((require-final-newline nil))
-		  (erase-buffer)
-		  (insert msg)
-		  (save-buffer)
-		  (server-edit)))))
-	 `(lambda ()
-	    (insert-buffer-substring ,server-buffer)))
-	(bury-buffer server-buffer)))))
+      (if (boundp 'nowait) ;; hack to not show the window
+	  (set 'nowait t))
+      (egg-commit-log-edit 
+       `(lambda (state)
+	  (concat (propertize "Rebasing " 'face 'egg-text-3)
+		  (propertize (plist-get state :rebase-head)
+			      'face 'egg-branch) ": "
+		  (propertize
+		   (concat "Commit " ,cherry-op "ed cherry")
+		   'face 'egg-text-3)))
+       `(lambda ()
+	  (let ((msg (buffer-substring-no-properties
+		      egg-log-msg-text-beg egg-log-msg-text-end)))
+	    (with-current-buffer ,server-buffer 
+	      (let ((require-final-newline nil))
+		(erase-buffer)
+		(insert msg)
+		(save-buffer)
+		(server-edit)))))
+       `(lambda ()
+	  (insert-buffer-substring ,server-buffer)))
+      (bury-buffer server-buffer))))
 
 (add-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
 
