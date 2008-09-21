@@ -1118,8 +1118,8 @@ success."
 ;;;========================================================
 (defun egg-parse-git-blame (target-buf blame-buf &optional ov-attributes)
   (save-match-data
-    (let ((blank (propertize " " 'face 'egg-blame))
-	  (nl (propertize "\n" 'face 'egg-blame))
+    (let ((blank (egg-text " " 'egg-blame))
+	  (nl (egg-text "\n" 'egg-blame))
 	  (commit-hash (make-hash-table :test 'equal :size 577))
 	  commit commit-info old-line new-line num old-file subject author
 	  info ov beg end blame)
@@ -2570,16 +2570,15 @@ success."
   (interactive (if current-prefix-arg
 		   (list (lambda (state)
 			   (concat 
-			    (propertize "Amending  " 'face 'egg-text-3)
-			    (propertize (egg-pretty-head-name) 'face 'egg-branch)))
+			    (egg-text "Amending  " 'egg-text-3)
+			    (egg-text (egg-pretty-head-name) 'egg-branch)))
 			 #'egg-log-msg-amend-commit
 			 (lambda () 
 			   (egg-git-ok t "log" "--max-count=1"
 				       "--pretty=format:%s%n%n%b" "HEAD")))
 		 (list (lambda (state)
 			   (concat 
-			    (propertize "Committing into  "
-					'face 'egg-text-3)
+			    (egg-text "Committing into  " 'egg-text-3)
 			    (propertize (egg-pretty-head-name)
 					'face 'egg-branch)))
 		       #'egg-log-msg-commit
@@ -2599,8 +2598,8 @@ success."
 	 action-function)
     (insert (funcall title-function state) "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
-	    (propertize "--------------- Commit Message (type C-c C-c when done) ---------------"
-			'face 'font-lock-comment-face))
+	    (egg-text "--------------- Commit Message (type C-c C-c when done) ---------------"
+		      'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
     (insert "\n")
@@ -2645,14 +2644,14 @@ success."
       (when help
 	(insert "\n")
 	(setq help-beg (point))
-	(insert (propertize "Help" 'face 'egg-help-header-1) "\n")
+	(insert (egg-text "Help" 'egg-help-header-1) "\n")
 	(setq help-inv-beg (1- (point)))
 	(insert help)
 	(setq help-end (point)))
       (setq beg (point))
       (apply 'call-process "git" nil t nil "diff" args)
       (unless (> (point) beg)
-	(insert (propertize "No difference!\n" 'face 'egg-text-4)))
+	(insert (egg-text "No difference!\n" 'egg-text-4)))
       (egg-delimit-section :section 'file (point-min) (point) inv-beg
 			   egg-section-map 'file)
       (egg-delimit-section :help 'help help-beg help-end help-inv-beg
@@ -3008,7 +3007,7 @@ success."
 	(goto-char (line-end-position)))
       
       (if (= min-dashes-len 300)
-	  (insert (propertize "nothing found!" 'face 'egg-warning))
+	  (insert (egg-text "nothing found!" 'egg-warning))
 	
 
 	;; compute how many dashes can be deleted while
@@ -3218,7 +3217,7 @@ success."
 	  (set 'nowait t))
       (egg-commit-log-edit 
        `(lambda (state)
-	  (concat (propertize "Rebasing " 'face 'egg-text-3)
+	  (concat (egg-text "Rebasing " 'egg-text-3)
 		  (propertize (plist-get state :rebase-head)
 			      'face 'egg-branch) ": "
 		  (propertize
@@ -3266,7 +3265,7 @@ success."
 	    ((eq res :rebase-edit)
 	     (egg-commit-log-edit 
 	      (lambda (state)
-		(concat (propertize "Rebasing " 'face 'egg-text-3)
+		(concat (egg-text "Rebasing " 'egg-text-3)
 			(propertize (plist-get state :rebase-head)
 				    'face 'egg-branch) ": "
 			(propertize
@@ -3650,14 +3649,14 @@ success."
       (erase-buffer)
       (insert title
 	      (if subtitle (concat "\n" subtitle "\n") "\n")
-	      (propertize "repo: " 'face 'egg-text-2)
+	      (egg-text "repo: " 'egg-text-2)
 	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
 	      (if desc (concat "\n" desc "\n") "\n")
 	      "\n")
       (setq inv-beg (- (point) 2))
       (when (stringp help) 
 	(setq help-beg (point))
-	(insert (propertize "Help" 'face 'egg-help-header-1) "\n")
+	(insert (egg-text "Help" 'egg-help-header-1) "\n")
 	(setq inv-beg (1- (point)))
 	(insert help "\n"))
       (setq beg (point))
@@ -3833,14 +3832,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
        (make-local-variable 'egg-internal-log-buffer-closure)
        (if all
 	   (list :description (concat 
-			       (propertize "history scope: " 'face 'egg-text-2)
-			       (propertize "all refs" 'face 'egg-term))
+			       (egg-text "history scope: " 'egg-text-2)
+			       (egg-text "all refs" 'egg-term))
 		 :closure (lambda ()
 			    (egg-log-buffer-insert-n-decorate-logs
 			     'egg-run-git-log-all)))
 	 (list :description (concat 
-			     (propertize "history scope: " 'face 'egg-text-2)
-			     (propertize "HEAD" 'face 'egg-term))
+			     (egg-text "history scope: " 'egg-text-2)
+			     (egg-text "HEAD" 'egg-term))
 	       :closure (lambda ()
 			  (egg-log-buffer-insert-n-decorate-logs
 			   'egg-run-git-log-HEAD)))))
@@ -3934,7 +3933,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (unless (and file-name (file-exists-p file-name))
     (error "File does not exist: %s" file-name))
   (let ((buffer (egg-get-file-log-buffer 'create))
-	(title (concat (propertize "history of " 'face 'egg-text-2)
+	(title (concat (egg-text "history of " 'egg-text-2)
 		       (propertize file-name 'face 'egg-term)))
 	help)
     (with-current-buffer buffer
@@ -3942,14 +3941,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
        (make-local-variable 'egg-internal-log-buffer-closure)
        (if all
 	   (list :title title
-		 :description (concat (propertize "scope: " 'face 'egg-text-2)
-				      (propertize "all refs" 'face 'egg-branch-mono)) 
+		 :description (concat (egg-text "scope: " 'egg-text-2)
+				      (egg-text "all refs" 'egg-branch-mono)) 
 		 :closure `(lambda () 
 			     (egg-log-buffer-decorate-logs-simple
 			      #'egg-run-git-file-log-all ,file-name)))
 	 (list :title title
-	       :description (concat (propertize "scope: " 'face 'egg-text-2)
-				    (propertize "HEAD" 'face 'egg-branch-mono))
+	       :description (concat (egg-text "scope: " 'egg-text-2)
+				    (egg-text "HEAD" 'egg-branch-mono))
 	       :closure `(lambda ()
 			   (egg-log-buffer-decorate-logs-simple
 			    #'egg-run-git-file-log-HEAD ,file-name)))))
@@ -3979,9 +3978,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
 	   (list :description 
-		 (concat (propertize "history scope: " 'face 'egg-text-2)
-			 (propertize "HEAD" 'face 'egg-term)
-			 (propertize " and " 'face 'egg-text-2)
+		 (concat (egg-text "history scope: " 'egg-text-2)
+			 (egg-text "HEAD" 'egg-term)
+			 (egg-text " and " 'egg-text-2)
 			 (propertize sha1 'face 'egg-term))
 		 :closure 
 		 (lambda ()
@@ -4003,7 +4002,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (interactive (list (current-buffer)))
   (with-current-buffer buffer
     (plist-put egg-internal-log-buffer-closure :title
-	       (propertize "History Search" 'face 'egg-branch))
+	       (egg-text "History Search" 'egg-branch))
     (egg-generic-display-logs egg-internal-log-buffer-closure init)))
 
 (define-egg-buffer query:commit "*%s-query:commit@%s*"
@@ -4034,8 +4033,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let* ((git-dir (egg-git-dir (interactive-p)))
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-query:commit-buffer 'create))
-	 (desc (concat (propertize "Commits containing: "
-				   'face 'egg-text-2)
+	 (desc (concat (egg-text "Commits containing: " 'egg-text-2)
 		       (propertize string 'face 'egg-term)))
 	 (func `(lambda ()
 		  (egg-insert-n-decorate-pickaxed-logs ,string))))
@@ -4098,8 +4096,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (unless branch (setq branch "HEAD"))
   (let ((egg-internal-current-state (egg-repo-state :error-if-not-git))
 	(buffer (egg-get-reflog-buffer 'create))
-	(title (concat (propertize "history of " 'face 'egg-text-2)
-		       (propertize branch 'face 'egg-branch)))
+	(title (concat (egg-text "history of " 'egg-text-2)
+		       (egg-text branch 'egg-branch)))
 	help)
     (with-current-buffer buffer
       (set 
@@ -4160,13 +4158,13 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 'egg-tag-msg-create-tag)
     (set (make-local-variable 'egg-internal-annotated-tag-name) name)
     (set (make-local-variable 'egg-internal-annotated-tag-target) commit)
-    (insert (propertize "Create Annotated Tag" 'face 'egg-text-2) " "
+    (insert (egg-text "Create Annotated Tag" 'egg-text-2) " "
 	    (propertize name 'face 'egg-branch) "\n\n"
-	    (propertize "on commit:" 'face 'egg-text-2) " "
+	    (egg-text "on commit:" 'egg-text-2) " "
 	    (propertize commit 'face 'font-lock-string-face) "\n"
-	    (propertize "aka:" 'face 'egg-text-2) " "
+	    (egg-text "aka:" 'egg-text-2) " "
 	    (propertize pretty 'face 'font-lock-string-face) "\n"
-	    (propertize "Repository: " 'face 'egg-text-2)
+	    (egg-text "Repository: " 'egg-text-2)
 	    (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (propertize "----------------- Tag Message (type C-c C-c when done) ---------------"
 			'face 'font-lock-comment-face))
