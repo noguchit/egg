@@ -287,19 +287,25 @@ Many Egg faces inherit from this one by default."
     "Face to highlight HEAD in the log buffer."
     :group 'egg-faces)
 
-(defcustom egg-status-buffer-init-hiding-mode nil
-  "Initial hiding mode for status buffer."
+(defcustom egg-buffer-hide-sub-blocks-on-start nil
+  "Initially hide all sub-blocks."
   :group 'egg
-  :type '(choice :tag "Initial Hiding Mode"
-		 (const :tag "Show Everything" nil)
-		 (const :tag "Hide Everything" t)))
+  :type '(set (const :tag "Status Buffer"   egg-status-buffer-mode)
+	      (const :tag "Log Buffer"	    egg-log-buffer-mode)
+	      (const :tag "File Log Buffer" egg-file-log-buffer-mode)
+	      (const :tag "RefLog Buffer"   egg-reflog-buffer-mode)
+	      (const :tag "Diff Buffer"     egg-diff-buffer-mode)
+	      (const :tag "Commit Buffer"   egg-commit-buffer-mode)))
 
-(defcustom egg-commit-buffer-init-hiding-mode nil
-  "Initial hiding mode for commit log buffer."
+(defcustom egg-buffer-hide-help-on-start nil
+  "Initially hide keybindings help."
   :group 'egg
-  :type '(choice :tag "Initial Hiding Mode"
-		 (const :tag "Show Everything" nil)
-		 (const :tag "Hide Everything" t)))
+  :type '(set (const :tag "Status Buffer"   egg-status-buffer-mode)
+	      (const :tag "Log Buffer"	    egg-log-buffer-mode)
+	      (const :tag "File Log Buffer" egg-file-log-buffer-mode)
+	      (const :tag "RefLog Buffer"   egg-reflog-buffer-mode)
+	      (const :tag "Diff Buffer"     egg-diff-buffer-mode)
+	      (const :tag "Commit Buffer"   egg-commit-buffer-mode)))
 
 (defcustom egg-log-HEAD-max-len 1000
   "Maximum number of entries when showing the history of HEAD."
@@ -1326,12 +1332,22 @@ success."
   (put-text-property beg end 'face 'egg-diff-hunk-header)
   (put-text-property end line-end 'face 'egg-diff-none))
 
-(defun egg-compute-navigation (sect-type section beg end)
-  (let ((current-nav (get-text-property beg :navigation))
-	(desc (if (consp section)
-		  (car section)
-		section)))
-    (format "%s-%s" current-nav desc)))
+(defvar egg-internal-buffer-obarray nil)
+
+
+(defsubst egg-make-navigation (parent child)
+  (unless (vectorp egg-internal-buffer-obarray)
+    (error "Arrg! egg-internal-buffer-obarray is not an obarray!"))
+  (intern (format "%s-%s" parent child) egg-internal-buffer-obarray))
+
+(defsubst egg-do-compute-navigation (section pos)
+  (egg-make-navigation (get-text-property pos :navigation)
+		       (if (consp section)
+			   (car section)
+			 section)))
+
+(defun egg-compute-navigation (ignored-1 section pos ignored-2)
+  (egg-do-compute-navigation section pos))
 
 (defun egg-delimit-section (sect-type section beg end 
 					  &optional inv-beg
@@ -1722,7 +1738,9 @@ success."
 	 (update-buffer-no-create-sym (intern (concat "egg-update-" type-name "-buffer-no-create"))))
     `(progn
        (defun ,buffer-mode-sym ()
-	 ,@body)
+	 ,@body
+	 (set (make-local-variable 'egg-internal-buffer-obarray)
+	      (make-vector 67 0)))
 
        (defun ,get-buffer-sym (&optional create)
 	 (let ((buf (egg-get-buffer ,name-fmt create)))
@@ -1950,30 +1968,36 @@ success."
     (define-key map (kbd "S") 'egg-stage-all-files)
     map))
 
-(defun egg-buffer-hide-all ()
-  (let ((pos (point-min)))
-    (goto-char (setq pos (point-min)))
-    (while pos
-      (add-to-invisibility-spec (cons pos t))
-      (goto-char pos)
-      (setq pos (next-single-property-change (point)
-					     :navigation)))))
+(defsubst egg-buffer-hide-all ()
+  (let ((pos (point-min)) nav)
+    (while (setq pos (next-single-property-change (1+ pos) :navigation))
+      (setq nav (get-text-property pos :navigation))
+      (add-to-invisibility-spec (cons nav t)))))
+
+(defsubst egg-buffer-maybe-hide-all ()
+  (if (memq major-mode egg-buffer-hide-sub-blocks-on-start)
+      (egg-buffer-hide-all)))
+
+(defsubst egg-buffer-maybe-hide-help (help-nav &optional top-nav)
+  (if (memq major-mode egg-buffer-hide-help-on-start)
+      (add-to-invisibility-spec 
+       (cons (if (symbolp help-nav) help-nav
+	       (egg-make-navigation top-nav help-nav))
+	     t))))
 
 (defun egg-status-buffer-redisplay (buf &optional init)
   (with-current-buffer buf
     (let ((inhibit-read-only t)
 	  (orig-pos (point)))
       (erase-buffer)
-      (setq buffer-invisibility-spec nil)
 
       (dolist (sect egg-status-buffer-sections)
 	(cond ((eq sect 'repo) (egg-sb-insert-repo-section))
 	      ((eq sect 'unstaged) (egg-sb-insert-unstaged-section "Unstaged Changes:"))
 	      ((eq sect 'staged) (egg-sb-insert-staged-section "Staged Changes:"))
 	      ((eq sect 'untracked) (egg-sb-insert-untracked-section))))
-      
-      (when (and init egg-status-buffer-init-hiding-mode)
-	(egg-buffer-hide-all))
+      (if init (egg-buffer-maybe-hide-all))
+      (if init (egg-buffer-maybe-hide-help "help" 'repo))
       (goto-char orig-pos))))
 
 (defun egg-internal-background (proc msg)
@@ -2511,8 +2535,7 @@ success."
 
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
-      (when (and init egg-commit-buffer-init-hiding-mode)
-	(egg-buffer-hide-all))
+      (if init (egg-buffer-maybe-hide-all))
       (force-window-update buf))))
 
 (define-egg-buffer commit "*%s-commit@%s*"
@@ -3588,9 +3611,9 @@ success."
     (unless (equal (get-text-property pos :commit) sha1)
       (egg-log-buffer-do-insert-commit pos))))
 
-(defun egg-generic-display-logs (data)
+(defun egg-generic-display-logs (data &optional init)
   (buffer-disable-undo)
-  (setq buffer-invisibility-spec nil)
+  (and init (setq buffer-invisibility-spec nil))
   (let ((title (plist-get data :title))
 	(subtitle (plist-get data :subtitle))
 	(git-dir (egg-git-dir))
@@ -3614,10 +3637,11 @@ success."
       (setq beg (point))
       (egg-delimit-section :section :help inv-beg (point)
 			 inv-beg egg-section-map :help)
+      (if init (egg-buffer-maybe-hide-help :help))
       (funcall closure)
       (goto-char beg)))
 
-(defun egg-log-buffer-redisplay (buffer)
+(defun egg-log-buffer-redisplay (buffer &optional init)
   (with-current-buffer buffer
     (let* ((state (egg-repo-state))
 	   (sha1 (plist-get state :sha1)))
@@ -3625,7 +3649,7 @@ success."
 		 (propertize (egg-pretty-head-string state) 'face 'egg-branch))
       (plist-put egg-internal-log-buffer-closure :subtitle
 		 (propertize sha1 'face 'font-lock-string-face))
-      (egg-generic-display-logs egg-internal-log-buffer-closure))))
+      (egg-generic-display-logs egg-internal-log-buffer-closure init))))
 
 (defun egg-log-buffer-redisplay-from-command (buffer)
   ;; in process buffer
@@ -3792,7 +3816,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 			  (egg-log-buffer-insert-n-decorate-logs
 			   'egg-run-git-log-HEAD)))))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
-      (egg-log-buffer-redisplay buf))
+      (egg-log-buffer-redisplay buf 'init))
     (pop-to-buffer buf t)))
 ;;;========================================================
 ;;; file history
@@ -3840,9 +3864,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		      egg-log-commit-simple-map
 		      egg-log-commit-simple-map)))
 
-(defun egg-log-buffer-simple-redisplay (buffer)
+(defun egg-log-buffer-simple-redisplay (buffer &optional init)
   (with-current-buffer buffer
-    (egg-generic-display-logs egg-internal-log-buffer-closure)))
+    (egg-generic-display-logs egg-internal-log-buffer-closure init)))
 
 (defun egg-file-log (file-name &optional all)
   (interactive (list (buffer-file-name) current-prefix-arg))
@@ -3906,7 +3930,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       "\n"
 	       )))
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
-    (egg-log-buffer-simple-redisplay buffer)
+    (egg-log-buffer-simple-redisplay buffer 'init)
     (pop-to-buffer buffer t)))
 
 ;;;========================================================
@@ -3949,12 +3973,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (egg-log-buffer-goto-pos pos)
     (recenter)))
 
-(defun egg-query:commit-buffer-rerun (buffer)
+(defun egg-query:commit-buffer-rerun (buffer &optional init)
   (interactive (list (current-buffer)))
   (with-current-buffer buffer
     (plist-put egg-internal-log-buffer-closure :title
 	       (propertize "History Search" 'face 'egg-branch))
-    (egg-generic-display-logs egg-internal-log-buffer-closure)))
+    (egg-generic-display-logs egg-internal-log-buffer-closure init)))
 
 (define-egg-buffer query:commit "*%s-query:commit@%s*"
   (kill-all-local-variables)
@@ -3992,7 +4016,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
 	 (list :description desc :closure func))
-      (egg-query:commit-buffer-rerun buf))			 
+      (egg-query:commit-buffer-rerun buf 'init))
     (pop-to-buffer buf t)))
 ;;;========================================================
 ;;; reflog
@@ -4063,7 +4087,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       "\n"
 	       )))
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
-    (egg-log-buffer-simple-redisplay buffer)
+    (egg-log-buffer-simple-redisplay buffer 'init)
     (pop-to-buffer buffer t)))
 
 (defun egg-log-buffer-reflog-ref (pos)
