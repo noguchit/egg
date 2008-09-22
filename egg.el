@@ -545,11 +545,6 @@ like `my_tag' in `refs/tags/my_tag'."
        (> (length full-ref) 0)
        (file-name-nondirectory full-ref)))
 
-;; (defsubst egg-push-refspec (lbranch rbranch)
-;;    (setq rbranch (egg-rbranch-name rbranch))
-;;    (if (or lbranch rbranch)
-;;        (format "%s%s%s" (or lbranch "") (if rbranch ":" "") (or rbranch ""))))
-
 (defsubst egg-file-as-string-raw (file-name)
   (with-temp-buffer
     (insert-file-contents-literally file-name)
@@ -818,10 +813,10 @@ Either a symbolic ref or a sha1."
 			   :ref (cons name :tag)))
 	      ((string= type "remotes")
 	       (propertize
-		(concat (propertize (egg-rbranch-name name)
-				    'face 'egg-remote-mono)
-			(propertize (egg-rbranch-name name)
-				    'face 'egg-branch-mono))
+		(concat (egg-text (egg-rbranch-name name)
+				  'egg-remote-mono)
+			(egg-text (egg-rbranch-name name)
+				  'egg-branch-mono))
 		:ref (cons name :remote))))))))
 
 (defsubst egg-get-symbolic-HEAD (&optional file)
@@ -1187,13 +1182,13 @@ success."
 	  (setq ov (make-overlay beg end))
 	  (overlay-put ov :blame chunk)
 	  (setq blame (concat 
-		       (propertize (substring-no-properties commit 0 8)
-				   'face 'egg-blame)
+		       (egg-text (substring-no-properties commit 0 8)
+				 'egg-blame)
 		       blank
-		       (propertize (format "%-20s" author)
-				   'face 'egg-blame-culprit)
+		       (egg-text (format "%-20s" author)
+				 'egg-blame-culprit)
 		       blank
-		       (propertize subject 'face 'egg-blame-subject)
+		       (egg-text subject 'egg-blame-subject)
 		       blank nl))
 	  (overlay-put ov 'before-string blame))))))
 
@@ -1332,21 +1327,21 @@ success."
 (defsubst egg-decorate-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
 		     'display 
-		     (propertize
+		     (egg-text
 		      (concat "\n"
 			      (buffer-substring-no-properties beg
 							      (1+ beg)))
-		      'face 'egg-diff-file-header))
+		      'egg-diff-file-header))
   (put-text-property (1+ beg) end 'face 'egg-diff-file-header))
 
 (defsubst egg-decorate-cc-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
 		     'display 
-		     (propertize
+		     (egg-text
 		      (concat "\n"
 			      (buffer-substring-no-properties beg
 							      (1+ beg)))
-		      'face 'egg-unmerged-diff-file-header))
+		      'egg-unmerged-diff-file-header))
   (put-text-property (1+ beg) end 'face 'egg-unmerged-diff-file-header))
 
 (defsubst egg-decorate-diff-index-line (beg end line-beg line-end)
@@ -1932,13 +1927,10 @@ success."
 	 (rebase-step (plist-get state :rebase-step))
 	 (rebase-num (plist-get state :rebase-num))
 	 inv-beg help-beg help-inv-beg rebase-beg)
-    (insert (propertize (egg-pretty-head-string state) 'face 'egg-branch) 
-		"\n"
-		(propertize sha1 'face 'font-lock-string-face)
-		"\n"
-		(propertize (plist-get state :gitdir)
-			    'face 'font-lock-constant-face)
-		"\n")
+    (insert (egg-text (egg-pretty-head-string state) 'egg-branch) "\n"
+	    (egg-text sha1 'font-lock-string-face) "\n"
+	    (egg-text (plist-get state :gitdir) 'font-lock-constant-face)
+	    "\n")
     (setq inv-beg (1- (point)))
     (when rebase-step
       (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
@@ -2620,7 +2612,7 @@ success."
 		  ((stringp title-function) title-function)
 		  (t "Shit happens!"))
 	    "\n"
-	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
+	    "Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
 	    (egg-text "--------------- Commit Message (type C-c C-c when done) ---------------"
 		      'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
@@ -2663,7 +2655,7 @@ success."
 	  (inhibit-read-only t)
 	  pos beg inv-beg help-beg help-end help-inv-beg)
       (erase-buffer)
-      (insert (propertize title 'face 'egg-section-title) "\n")
+      (insert (egg-text title 'egg-section-title) "\n")
       (insert prologue "\n")
       (setq inv-beg (1- (point)))
       (when help
@@ -2809,10 +2801,10 @@ success."
       (setq file (list file)))
     (when (consp file) 
       (setq tmp (plist-get info :prologue))
-      (setq tmp (concat (propertize (mapconcat 'identity file "\n")
-				    'face 'egg-text-3)
+      (setq tmp (concat (egg-text (mapconcat 'identity file "\n")
+				  'egg-text-3)
 			"\n"
-			(propertize tmp 'face 'egg-text-1)))
+			(egg-text tmp 'egg-text-1)))
       (plist-put info :prologue tmp)
       (setq tmp (plist-get info :args))
       (setq tmp (append tmp (cons "--" file)))
@@ -3131,8 +3123,8 @@ success."
 		   (list :mark char
 			 'display 
 			 (and char 
-			      (propertize (char-to-string char)
-					  'face 'egg-log-buffer-mark))))
+			      (egg-text (char-to-string char)
+					'egg-log-buffer-mark))))
       (forward-line step)
       (while (not (or (get-text-property pos :commit)
 		      (eobp) (bobp)))
@@ -3229,46 +3221,6 @@ success."
       (egg-git-ok nil "checkout" onto)
       (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
 				    orig-head-sha1))))
-
-(defun egg-rebase-interactive-server-buffer-hook ()
-  ;; run inside server buffer
-  (when (egg-interactive-rebase-in-progress)
-    (let* ((state (egg-repo-state))
-	   (cherry (plist-get state :rebase-cherry))
-	   (cherry-op (save-match-data (car (split-string cherry))))
-	   (server-buffer (current-buffer))
-	   (server-win (get-buffer-window server-buffer))
-	   commit-title)
-      (if (boundp 'nowait) ;; hack to not show the window
-	  (set 'nowait t))
-      (egg-commit-log-edit 
-       `(lambda (state)
-	  (concat ,(egg-text "Rebasing " 'egg-text-3)
-		  (propertize (plist-get state :rebase-head)
-			      'face 'egg-branch) ": "
-		  (propertize
-		   (concat "Commit " ,cherry-op "ed cherry")
-		   'face 'egg-text-3)))
-       `(lambda ()
-	  (let ((msg (buffer-substring-no-properties
-		      egg-log-msg-text-beg egg-log-msg-text-end)))
-	    (with-current-buffer ,server-buffer 
-	      (let ((require-final-newline nil))
-		(erase-buffer)
-		(insert msg)
-		(save-buffer)
-		(server-edit)))))
-       `(lambda ()
-	  (insert-buffer-substring ,server-buffer)))
-      (save-excursion
-	(save-window-excursion
-	  (when (windowp server-win)
-	    (select-window server-win)
-	    (quit-window nil server-win))
-	  (bury-buffer server-buffer))))))
-
-;; (add-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
-(remove-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
 
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
