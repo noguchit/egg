@@ -879,6 +879,15 @@ Either a symbolic ref or a sha1."
 (defsubst egg-git-rebase-dir (&optional git-dir)
   (concat (or git-dir (egg-git-dir)) "/" egg-git-rebase-subdir "/"))
 
+(defsubst egg-rebase-author-info (rebase-dir)
+  (mapcar (lambda (lst) 
+	    (setcar (cdr lst) (substring (cadr lst) 1 -1))
+	    lst)
+   (mapcar (lambda (line)
+	     (save-match-data (split-string line "=" t)))
+	   (egg-pick-file-records (concat rebase-dir "author-script")
+				  "^GIT_\\(.+\\)" "$"))))
+
 (defsubst egg-interactive-rebase-in-progress ()
   (file-exists-p (concat (egg-git-dir) "/" egg-git-rebase-subdir 
 			 "/interactive") ))
@@ -2505,7 +2514,10 @@ success."
 		     (buffer-substring-no-properties egg-log-msg-text-beg
 						     egg-log-msg-text-end))
 	(funcall egg-log-msg-action)
-	(bury-buffer))
+	(let ((inhibit-read-only t)
+	      (win (get-buffer-window (current-buffer))))
+	  (erase-buffer)
+	  (if (windowp win) (quit-window nil win))))
     (message "Please enter a log message!")
     (ding)))
 
@@ -2603,39 +2615,40 @@ success."
 	 (head (or (cdr head-info) 
 		   (format "Detached HEAD! (%s)" (car head-info))))
 	 (inhibit-read-only inhibit-read-only))
-    (pop-to-buffer buf t)
-    (setq inhibit-read-only t)
-    (erase-buffer)
-    (set (make-local-variable 'egg-log-msg-action)
-	 action-function)
-    (insert (cond ((functionp title-function) 
-		   (funcall title-function state))
-		  ((stringp title-function) title-function)
-		  (t "Shit happens!"))
-	    "\n"
-	    "Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
-	    (egg-text "--------------- Commit Message (type C-c C-c when done) ---------------"
-		      'font-lock-comment-face))
-    (put-text-property (point-min) (point) 'read-only t)
-    (put-text-property (point-min) (point) 'rear-sticky nil)
-    (insert "\n")
-    (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
-    (set-marker-insertion-type egg-log-msg-text-beg nil)
-    (put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg 
-		       :navigation 'commit-log-text)
-    (insert (egg-prop "\n------------------------ End of Commit Message ------------------------" 
-		      'read-only t 'front-sticky nil
-		      'face 'font-lock-comment-face))
-    (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
-    (set-marker-insertion-type egg-log-msg-diff-beg nil)
-    (egg-commit-log-buffer-show-diffs buf 'init)
-    (goto-char egg-log-msg-text-beg)
-    (cond ((functionp insert-init-text-function)
-	   (funcall insert-init-text-function))
-	  ((stringp insert-init-text-function)
-	   (insert insert-init-text-function)))
-    (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
-    (set-marker-insertion-type egg-log-msg-text-end t)))
+    (with-current-buffer buf
+      (setq inhibit-read-only t)
+      (erase-buffer)
+      (set (make-local-variable 'egg-log-msg-action)
+	   action-function)
+      (insert (cond ((functionp title-function) 
+		     (funcall title-function state))
+		    ((stringp title-function) title-function)
+		    (t "Shit happens!"))
+	      "\n"
+	      "Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
+	      (egg-text "--------------- Commit Message (type C-c C-c when done) ---------------"
+			'font-lock-comment-face))
+      (put-text-property (point-min) (point) 'read-only t)
+      (put-text-property (point-min) (point) 'rear-sticky nil)
+      (insert "\n")
+      (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
+      (set-marker-insertion-type egg-log-msg-text-beg nil)
+      (put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg 
+			 :navigation 'commit-log-text)
+      (insert (egg-prop "\n------------------------ End of Commit Message ------------------------" 
+			'read-only t 'front-sticky nil
+			'face 'font-lock-comment-face))
+      (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
+      (set-marker-insertion-type egg-log-msg-diff-beg nil)
+      (egg-commit-log-buffer-show-diffs buf 'init)
+      (goto-char egg-log-msg-text-beg)
+      (cond ((functionp insert-init-text-function)
+	     (funcall insert-init-text-function))
+	    ((stringp insert-init-text-function)
+	     (insert insert-init-text-function)))
+      (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
+      (set-marker-insertion-type egg-log-msg-text-end t))
+    (pop-to-buffer buf t)))
 
 ;;;========================================================
 ;;; diff-mode
@@ -3226,7 +3239,7 @@ success."
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
 	(proc egg-async-process)
-	state buffer res msg)
+	state buffer res msg rebase-dir)
     (goto-char (point-min))
     (save-match-data
       (re-search-forward 
@@ -3248,8 +3261,10 @@ success."
       (egg-run-buffers-update-hook)
       (egg-revert-all-visited-files) ;; too heavy ???
       (setq state (egg-repo-state :force))
+      (setq rebase-dir (plist-get state :rebase-dir))
       (cond ((eq res :rebase-done)
 	     (message "GIT-REBASE-INTERACTIVE: %s" msg))
+
 	    ((eq res :rebase-commit)
 	     (egg-commit-log-edit 
 	      (let* ((cherry (plist-get state :rebase-cherry))
@@ -3262,13 +3277,18 @@ success."
 		 (egg-text (concat "Commit " cherry-op "ed cherry")
 			   'egg-text-3))) 
 	      `(lambda ()
-		 (egg-log-msg-commit)
+		 (let ((process-environment process-environment))
+		   (mapcar (lambda (env-lst)
+			     (setenv (car env-lst) (cadr env-lst)))
+			   (egg-rebase-author-info ,rebase-dir))
+		   (egg-log-msg-commit))
 		 (with-current-buffer ,buffer
 		   (egg-do-async-rebase-continue
 		    #'egg-handle-rebase-interactive-exit
 		    ,orig-sha1)))
-	      (egg-file-as-string
-	       (concat (plist-get state :rebase-dir) "message"))))
+	      (egg-file-as-string (concat rebase-dir "message"))))
+
+
 	    ((eq res :rebase-edit)
 	     (egg-commit-log-edit 
 	      (lambda (state)
@@ -3278,7 +3298,11 @@ success."
 			(egg-text "Re-edit cherry's commit log" 
 				  'egg-text-3)))
 	      `(lambda ()
-		 (egg-log-msg-amend-commit)
+		 (let ((process-environment process-environment))
+		   (mapcar (lambda (env-lst)
+			     (setenv (car env-lst) (cadr env-lst)))
+			   (egg-rebase-author-info ,rebase-dir))
+		   (egg-log-msg-amend-commit))
 		 (with-current-buffer ,buffer
 		   (egg-do-async-rebase-continue
 		    #'egg-handle-rebase-interactive-exit
@@ -3287,6 +3311,7 @@ success."
 		(egg-git-ok t "log" "--max-count=1"
 			    "--pretty=format:%s%n%n%b"
 			    "HEAD"))))
+
 	    ((eq res :rebase-conflict)
 	     (egg-status)
 	     (ding)
