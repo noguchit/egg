@@ -877,9 +877,9 @@ Either a symbolic ref or a sha1."
 	  0)
 	:rebase-cherry
 	(if (file-exists-p (concat rebase-dir "done")) 
-	    (car (nreverse (egg-pick-file-records 
-			    (concat rebase-dir "done")
-			    "^[pes]" "$"))))))
+	    (car (egg-pick-file-records 
+		  (concat rebase-dir "done")
+		  "^[pes]" "$")))))
 
 (defsubst egg-git-rebase-dir (&optional git-dir)
   (concat (or git-dir (egg-git-dir)) "/" egg-git-rebase-subdir "/"))
@@ -1097,6 +1097,9 @@ success."
 
 (defsubst egg-async-0 (func-args &rest args)
   (egg-async-do nil func-args args))
+
+(defsubst egg-async-1 (func-args &rest args)
+  (egg-async-do 1 func-args args))
 
 (defvar egg-async-process nil)
 (defvar egg-async-cmds nil)
@@ -1355,7 +1358,6 @@ success."
   (put-text-property end line-end 'face 'egg-diff-none))
 
 (defvar egg-internal-buffer-obarray nil)
-
 
 (defsubst egg-make-navigation (parent child)
   (unless (vectorp egg-internal-buffer-obarray)
@@ -1834,13 +1836,15 @@ success."
   (unless (egg-buffer-do-rebase :continue)
     (egg-status)))
 
-(defsubst egg-do-async-rebase-continue (callback closure &optional action)
+(defsubst egg-do-async-rebase-continue (callback closure &optional
+						 action
+						 exit-code)
   (let ((process-environment process-environment)
 	(action (or action "--continue"))
 	(buffer (current-buffer))
 	proc)
-    (setenv "EDITOR" "emacsclient")
-    (setq proc (egg-async-0 (list callback closure) "rebase" action))
+    (setenv "EDITOR" "\nplease commit in egg")
+    (setq proc (egg-async-1 (list callback closure) "rebase" action))
     (process-put proc :orig-buffer buffer)
     proc))
 
@@ -2611,7 +2615,11 @@ success."
     (erase-buffer)
     (set (make-local-variable 'egg-log-msg-action)
 	 action-function)
-    (insert (funcall title-function state) "\n"
+    (insert (cond ((functionp title-function) 
+		   (funcall title-function state))
+		  ((stringp title-function) title-function)
+		  (t "Shit happens!"))
+	    "\n"
 	    "Repository: " (propertize git-dir 'face 'font-lock-constant-face) "\n"
 	    (egg-text "--------------- Commit Message (type C-c C-c when done) ---------------"
 		      'font-lock-comment-face))
@@ -2629,8 +2637,10 @@ success."
     (set-marker-insertion-type egg-log-msg-diff-beg nil)
     (egg-commit-log-buffer-show-diffs buf 'init)
     (goto-char egg-log-msg-text-beg)
-    (when (functionp insert-init-text-function)
-      (funcall insert-init-text-function))
+    (cond ((functionp insert-init-text-function)
+	   (funcall insert-init-text-function))
+	  ((stringp insert-init-text-function)
+	   (insert insert-init-text-function)))
     (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
     (set-marker-insertion-type egg-log-msg-text-end t)))
 
@@ -3227,12 +3237,13 @@ success."
 	   (cherry (plist-get state :rebase-cherry))
 	   (cherry-op (save-match-data (car (split-string cherry))))
 	   (server-buffer (current-buffer))
+	   (server-win (get-buffer-window server-buffer))
 	   commit-title)
       (if (boundp 'nowait) ;; hack to not show the window
 	  (set 'nowait t))
       (egg-commit-log-edit 
        `(lambda (state)
-	  (concat (egg-text "Rebasing " 'egg-text-3)
+	  (concat ,(egg-text "Rebasing " 'egg-text-3)
 		  (propertize (plist-get state :rebase-head)
 			      'face 'egg-branch) ": "
 		  (propertize
@@ -3249,43 +3260,71 @@ success."
 		(server-edit)))))
        `(lambda ()
 	  (insert-buffer-substring ,server-buffer)))
-      (bury-buffer server-buffer))))
+      (save-excursion
+	(save-window-excursion
+	  (when (windowp server-win)
+	    (select-window server-win)
+	    (quit-window nil server-win))
+	  (bury-buffer server-buffer))))))
 
-(add-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
+;; (add-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
+(remove-hook 'server-switch-hook 'egg-rebase-interactive-server-buffer-hook)
 
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
 	(proc egg-async-process)
-	buffer res msg)
+	(egg-internal-current-state nil)
+	state buffer res msg)
     (goto-char (point-min))
     (save-match-data
       (re-search-forward 
        (eval-when-compile 
 	 (concat "^\\(?:"
+		 "\\(please commit in egg.+$\\)"             "\\|"
 		 "\\(Successfully rebased and updated.+$\\)" "\\|"
 		 "\\(You can amend the commit now\\)" 	     "\\|"
 		 "\\(Automatic cherry-pick failed\\)"	     "\\|"
 		 "\\(\\(?:Cannot\\|Could not\\).+\\)" "\\)")) nil t)
       (setq msg (match-string-no-properties 0))
-      (setq res (cond ((match-beginning 1) :rebase-done)
-		      ((match-beginning 2) :rebase-edit)
-		      ((match-beginning 3) :rebase-conflict)
-		      ((match-beginning 4) :rebase-fail))))
+      (setq res (cond ((match-beginning 1) :rebase-commit)
+		      ((match-beginning 2) :rebase-done)
+		      ((match-beginning 3) :rebase-edit)
+		      ((match-beginning 4) :rebase-conflict)
+		      ((match-beginning 5) :rebase-fail))))
     (setq buffer (process-get proc :orig-buffer))
     (with-current-buffer buffer
       (egg-run-buffers-update-hook)
       (egg-revert-all-visited-files) ;; too heavy ???
+      (setq state (egg-repo-state))
       (cond ((eq res :rebase-done)
 	     (message "GIT-REBASE-INTERACTIVE: %s" msg))
+	    ((eq res :rebase-commit)
+	     (egg-commit-log-edit 
+	      (let* ((cherry (plist-get state :rebase-cherry))
+		     (cherry-op (save-match-data 
+				  (car (split-string cherry)))))
+		(concat 
+		 (egg-text "Rebasing " 'egg-text-3)
+		 (egg-text (plist-get state :rebase-head) 'egg-branch)
+		 ": "
+		 (egg-text (concat "Commit " cherry-op "ed cherry")
+			   'egg-text-3))) 
+	      `(lambda ()
+		 (egg-log-msg-commit)
+		 (with-current-buffer ,buffer
+		   (egg-do-async-rebase-continue
+		    #'egg-handle-rebase-interactive-exit
+		    ,orig-sha1)))
+	      (egg-file-as-string
+	       (concat (plist-get state :rebase-dir) "message"))))
 	    ((eq res :rebase-edit)
 	     (egg-commit-log-edit 
 	      (lambda (state)
 		(concat (egg-text "Rebasing " 'egg-text-3)
-			(propertize (plist-get state :rebase-head)
-				    'face 'egg-branch) ": "
-			(propertize
-			 (concat "Re-edit cherry's commit log")
-			 'face 'egg-text-3)))
+			(egg-text (plist-get state :rebase-head) 
+				  'egg-branch) ": "
+			(egg-text "Re-edit cherry's commit log" 
+				  'egg-text-3)))
 	      `(lambda ()
 		 (egg-log-msg-amend-commit)
 		 (with-current-buffer ,buffer
@@ -3665,7 +3704,7 @@ success."
       (insert title
 	      (if subtitle (concat "\n" subtitle "\n") "\n")
 	      (egg-text "repo: " 'egg-text-2)
-	      (propertize (egg-git-dir) 'face 'font-lock-constant-face)
+	      (egg-text (egg-git-dir) 'font-lock-constant-face)
 	      (if desc (concat "\n" desc "\n") "\n")
 	      "\n")
       (setq inv-beg (- (point) 2))
@@ -3686,9 +3725,9 @@ success."
     (let* ((state (egg-repo-state))
 	   (sha1 (plist-get state :sha1)))
       (plist-put egg-internal-log-buffer-closure :title
-		 (propertize (egg-pretty-head-string state) 'face 'egg-branch))
+		 (egg-text (egg-pretty-head-string state) 'egg-branch))
       (plist-put egg-internal-log-buffer-closure :subtitle
-		 (propertize sha1 'face 'font-lock-string-face))
+		 (egg-text sha1 'font-lock-string-face))
       (egg-generic-display-logs egg-internal-log-buffer-closure init))))
 
 (defun egg-log-buffer-redisplay-from-command (buffer)
@@ -3949,7 +3988,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (error "File does not exist: %s" file-name))
   (let ((buffer (egg-get-file-log-buffer 'create))
 	(title (concat (egg-text "history of " 'egg-text-2)
-		       (propertize file-name 'face 'egg-term)))
+		       (egg-text file-name 'egg-term)))
 	help)
     (with-current-buffer buffer
       (set 
@@ -3996,7 +4035,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		 (concat (egg-text "history scope: " 'egg-text-2)
 			 (egg-text "HEAD" 'egg-term)
 			 (egg-text " and " 'egg-text-2)
-			 (propertize sha1 'face 'egg-term))
+			 (egg-text sha1 'egg-term))
 		 :closure 
 		 (lambda ()
 		   (egg-log-buffer-insert-n-decorate-logs
@@ -4049,7 +4088,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (default-directory (file-name-directory git-dir))
 	 (buf (egg-get-query:commit-buffer 'create))
 	 (desc (concat (egg-text "Commits containing: " 'egg-text-2)
-		       (propertize string 'face 'egg-term)))
+		       (egg-text string 'egg-term)))
 	 (func `(lambda ()
 		  (egg-insert-n-decorate-pickaxed-logs ,string))))
     (with-current-buffer buf
@@ -4174,15 +4213,15 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (set (make-local-variable 'egg-internal-annotated-tag-name) name)
     (set (make-local-variable 'egg-internal-annotated-tag-target) commit)
     (insert (egg-text "Create Annotated Tag" 'egg-text-2) " "
-	    (propertize name 'face 'egg-branch) "\n\n"
+	    (egg-text name 'egg-branch) "\n\n"
 	    (egg-text "on commit:" 'egg-text-2) " "
-	    (propertize commit 'face 'font-lock-string-face) "\n"
+	    (egg-text commit 'font-lock-string-face) "\n"
 	    (egg-text "aka:" 'egg-text-2) " "
-	    (propertize pretty 'face 'font-lock-string-face) "\n"
+	    (egg-text pretty 'font-lock-string-face) "\n"
 	    (egg-text "Repository: " 'egg-text-2)
-	    (propertize git-dir 'face 'font-lock-constant-face) "\n"
-	    (propertize "----------------- Tag Message (type C-c C-c when done) ---------------"
-			'face 'font-lock-comment-face))
+	    (egg-text git-dir 'font-lock-constant-face) "\n"
+	    (egg-text "----------------- Tag Message (type C-c C-c when done) ---------------"
+			'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
     (insert "\n")
