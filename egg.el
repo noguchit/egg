@@ -926,8 +926,9 @@ Either a symbolic ref or a sha1."
     (egg-set-mode-info state)
     state))
 
-(defsubst egg-repo-state (&rest extras)
-  (or egg-internal-current-state (egg-get-repo-state extras)))
+(defsubst egg-repo-state (&rest args)
+  (or (unless (memq :force args) egg-internal-current-state)
+      (egg-get-repo-state args)))
 
 (defsubst egg-repo-clean (&optional state)
   (unless state 
@@ -3225,7 +3226,6 @@ success."
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
 	(proc egg-async-process)
-	(egg-internal-current-state nil)
 	state buffer res msg)
     (goto-char (point-min))
     (save-match-data
@@ -3247,7 +3247,7 @@ success."
     (with-current-buffer buffer
       (egg-run-buffers-update-hook)
       (egg-revert-all-visited-files) ;; too heavy ???
-      (setq state (egg-repo-state))
+      (setq state (egg-repo-state :force))
       (cond ((eq res :rebase-done)
 	     (message "GIT-REBASE-INTERACTIVE: %s" msg))
 	    ((eq res :rebase-commit)
