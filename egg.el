@@ -2679,6 +2679,7 @@ success."
 	(setq help-inv-beg (1- (point)))
 	(insert help)
 	(setq help-end (point)))
+      (setq pos (point))
       (setq beg (point))
       (apply 'call-process "git" nil t nil "diff" args)
       (unless (> (point) beg)
@@ -2692,7 +2693,8 @@ success."
 	     :end (point)
 	     :src-prefix src-prefix
 	     :dst-prefix dst-prefix
-	     egg-diff-buffer-info))))
+	     egg-diff-buffer-info)
+      (goto-char pos))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
   "Major mode to display the git diff output."
