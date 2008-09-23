@@ -400,6 +400,18 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
   (put-text-property 0 1 'display prefix str)
   str)
 
+(defsubst egg-commit-contents (rev)
+  (with-temp-buffer
+    (call-process "git" nil t nil "cat-file" "commit" rev)
+    (buffer-string)))
+
+(defsubst egg-commit-message (rev)
+  (with-temp-buffer
+    (call-process "git" nil t nil "cat-file" "commit" rev)
+    (goto-char (point-min))
+    (re-search-forward "^\n")
+    (buffer-substring-no-properties (match-end 0) (point-max))))
+
 
 (defsubst egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
@@ -2111,7 +2123,7 @@ success."
   (add-to-list 'egg-internal-status-buffer-names-list (buffer-name))
   (run-mode-hooks 'egg-status-buffer-mode-hook))
 
-(defun egg-status (&optional no-update)
+(defun egg-status (&optional no-update caller)
   (interactive "P")
   (let* ((egg-internal-current-state 
 	  (egg-repo-state (if (interactive-p) :error-if-not-git)))
@@ -2119,7 +2131,9 @@ success."
     (unless no-update
       (with-current-buffer buf
 	(egg-status-buffer-redisplay buf 'init)))
-    (display-buffer buf t)))
+    (cond ((interactive-p) (display-buffer buf t))
+	  ((eq caller :sentinel) (pop-to-buffer buf))
+	  (t (pop-to-buffer buf t)))))
 
 ;;;========================================================
 ;;; action
@@ -2593,18 +2607,14 @@ success."
 			    action-function
 			    insert-init-text-function)
   (interactive (if current-prefix-arg
-		   (list (lambda (state)
-			   (concat 
-			    (egg-text "Amending  " 'egg-text-3)
-			    (egg-text (egg-pretty-head-name) 'egg-branch)))
+		   (list (concat 
+			  (egg-text "Amending  " 'egg-text-3)
+			  (egg-text (egg-pretty-head-name) 'egg-branch)) 
 			 #'egg-log-msg-amend-commit
-			 (lambda () 
-			   (egg-git-ok t "log" "--max-count=1"
-				       "--pretty=format:%s%n%n%b" "HEAD")))
-		 (list (lambda (state)
-			 (concat 
-			  (egg-text "Committing into  " 'egg-text-3)
-			  (egg-text (egg-pretty-head-name) 'egg-branch)))
+			 (egg-commit-message "HEAD"))
+		 (list (concat 
+			(egg-text "Committing into  " 'egg-text-3)
+			(egg-text (egg-pretty-head-name) 'egg-branch))
 		       #'egg-log-msg-commit
 		       nil)))
   (let* ((git-dir (egg-git-dir))
@@ -3075,7 +3085,8 @@ success."
 	  (overlay-put ov 'face 'egg-log-HEAD)
 	  (overlay-put ov 'evaporate t)
 	  (move-overlay ov (line-beginning-position)
-			(1+ (line-end-position))))))))
+			(1+ (line-end-position))))
+	head-line))))
 
 (defsubst egg-log-buffer-insert-n-decorate-logs (log-insert-func)
   (let ((beg (point)))
@@ -3293,12 +3304,11 @@ success."
 
 	    ((eq res :rebase-edit)
 	     (egg-commit-log-edit 
-	      (lambda (state)
-		(concat (egg-text "Rebasing " 'egg-text-3)
-			(egg-text (plist-get state :rebase-head) 
-				  'egg-branch) ": "
-			(egg-text "Re-edit cherry's commit log" 
-				  'egg-text-3)))
+	      (concat (egg-text "Rebasing " 'egg-text-3)
+		      (egg-text (plist-get state :rebase-head) 
+				'egg-branch) ": "
+				(egg-text "Re-edit cherry's commit log" 
+					  'egg-text-3))
 	      `(lambda ()
 		 (let ((process-environment process-environment))
 		   (mapcar (lambda (env-lst)
@@ -3309,17 +3319,14 @@ success."
 		   (egg-do-async-rebase-continue
 		    #'egg-handle-rebase-interactive-exit
 		    ,orig-sha1)))
-	      (lambda () 
-		(egg-git-ok t "log" "--max-count=1"
-			    "--pretty=format:%s%n%n%b"
-			    "HEAD"))))
+	      (egg-commit-message "HEAD")))
 
 	    ((eq res :rebase-conflict)
-	     (egg-status)
+	     (egg-status nil :sentinel)
 	     (ding)
 	     (message "automatic rebase stopped! please resolve conflict(s)"))
 	    ((eq res :rebase-fail)
-	     (egg-status)
+	     (egg-status nil :sentinel)
 	     (ding)
 	     (message "Automatic rebase failed!"))))))
 
@@ -3693,11 +3700,11 @@ success."
 	(setq inv-beg (1- (point)))
 	(insert help "\n"))
       (setq beg (point))
-      (egg-delimit-section :section :help help-beg (point)
-			 inv-beg egg-section-map :help)
+      (when help-beg
+	(egg-delimit-section :section :help help-beg (point)
+			     inv-beg egg-section-map :help))
       (if init (egg-buffer-maybe-hide-help :help))
-      (funcall closure)
-      (goto-char beg)))
+      (goto-char (or (funcall closure) beg))))
 
 (defun egg-log-buffer-redisplay (buffer &optional init)
   (with-current-buffer buffer
@@ -4059,7 +4066,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (egg-git-ok t "log" "--pretty=oneline" "--decorate" 
 		(concat "-S" string))
     (goto-char beg)
-    (egg-decorate-log egg-query:commit-commit-map)))
+    (egg-decorate-log egg-query:commit-commit-map
+		      egg-query:commit-commit-map
+		      egg-query:commit-commit-map
+		      egg-query:commit-commit-map)))
 
 (defun egg-search-changes (string)
   (interactive "ssearch history for changes containing: ")
