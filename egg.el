@@ -1826,7 +1826,7 @@ physical offsets."
 
 (defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg
 					     &rest ignored)
-  "Visit FILE and goto the...."
+  "Visit FILE and goto the current line of the hunk."
   (interactive (egg-hunk-info-at (point)))
   (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
     (find-file file)
@@ -1834,12 +1834,14 @@ physical offsets."
 
 (defun egg-hunk-section-cmd-visit-file-other-window (file hunk-header hunk-beg
 							  &rest ignored)
+  "Visit FILE in other-window and goto the current line of the hunk."
   (interactive (egg-hunk-info-at (point)))
   (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
     (find-file file)
     (goto-line line)))
 
 (defun egg-section-cmd-toggle-hide-show (nav)
+  "Toggle the hidden state of the current navigation section of type NAV."
   (interactive (list (get-text-property (point) :navigation)))
   (if (assoc nav buffer-invisibility-spec)
       (remove-from-invisibility-spec (cons nav t))
@@ -1847,6 +1849,7 @@ physical offsets."
   (force-window-update (current-buffer)))
 
 (defun egg-section-cmd-toggle-hide-show-children (pos sect-type)
+  "Toggle the hidden state of the subsections of the current navigation section at POS."
   (interactive (list (previous-single-property-change (1+ (point))
 						      :navigation)
 		     (get-text-property (point) :sect-type)))
@@ -1855,6 +1858,7 @@ physical offsets."
   (let ((end (next-single-property-change pos sect-type nil (point-max)))
 	child-pos child-nav
 	currently-hidden)
+    ;; guess the current state
     (setq child-pos (next-single-property-change pos :navigation nil end))
     (when child-pos
       (setq child-nav (get-text-property child-pos :navigation))
@@ -1862,6 +1866,7 @@ physical offsets."
 				  (assoc child-nav
 					 buffer-invisibility-spec))))
     (setq child-pos pos)
+    ;; toggle every child
     (while (< (setq child-pos (next-single-property-change child-pos :navigation nil end))
 	      end)
       (setq child-nav (get-text-property child-pos :navigation))
@@ -1871,18 +1876,21 @@ physical offsets."
     (force-window-update (current-buffer))))
 
 (defun egg-diff-section-patch-string (&optional pos)
+  "Build a file patch based on the diff section at POS."
   (let* ((diff-info (get-text-property (or pos (point)) :diff))
 	 (beg (nth 1 diff-info))
 	 (end (+ (nth 2 diff-info) beg)))
     (buffer-substring-no-properties beg end)))
 
 (defun egg-hunk-section-patch-string (&optional pos)
+  "Build a single hunk patch based on the delta hunk at POS."
   (let* ((diff-info (get-text-property (or pos (point)) :diff))
 	 (head-beg (nth 1 diff-info))
 	 (head-end (+ (nth 3 diff-info) head-beg))
 	 (hunk-info (get-text-property (or pos (point)) :hunk))
 	 (hunk-beg (+ (nth 1 hunk-info) head-beg))
 	 (hunk-end (+ (nth 2 hunk-info) head-beg)))
+    ;; append hunk to diff header
     (concat (buffer-substring-no-properties head-beg head-end)
 	    (buffer-substring-no-properties hunk-beg hunk-end))))
 
@@ -1894,6 +1902,8 @@ physical offsets."
 (defvar egg-internal-update-index-timer nil)
 
 (defsubst egg-buffer-async-do (accepted-code &rest args)
+  "Run git asynchronously and refresh the current buffer on exit.
+exit code ACCEPTED-CODE is considered a success."
   (egg-async-do accepted-code 
 		(cons (or egg-buffer-async-cmd-refresh-func
 			  egg-buffer-refresh-func) 
@@ -1901,11 +1911,13 @@ physical offsets."
 		args))
 
 (defsubst egg-run-buffers-update-hook (&optional newly-read-state)
+  "Update all egg special buffers."
   (let ((egg-internal-current-state 
 	 (or newly-read-state (egg-get-repo-state))))
     (run-hooks 'egg-buffers-refresh-hook)))
 
 (defun egg-buffer-cmd-refresh ()
+  "Refresh the current egg special buffer."
   (interactive)
   (when (and (egg-git-dir)
 	     (functionp egg-buffer-refresh-func))
@@ -1913,11 +1925,13 @@ physical offsets."
     (recenter)))
 
 (defun egg-buffer-cmd-navigate-next ()
+  "Move to the next section."
   (interactive)
   (goto-char (or (next-single-property-change (point) :navigation)
 		 (point))))
 
 (defun egg-buffer-cmd-navigate-prev ()
+  "Move to the previous section."
   (interactive)
   (goto-char (previous-single-property-change (point) :navigation
 					      nil (point-min))))
@@ -1928,9 +1942,13 @@ physical offsets."
     (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
-    map))
+    map)
+  "Common map for an egg special buffer.\\{egg-buffer-mode-map}" )
 
 (defun egg-get-buffer (fmt create)
+  "Get a special egg buffer. If buffer doesn't exist and CREATE was not nil then
+creat the buffer. FMT is used to construct the buffer name. The name is built as:
+(format FMT current-dir-name git-dir-full-path)."
   (let* ((git-dir (egg-git-dir))
 	 (dir (file-name-directory git-dir))
 	 (dir-name (file-name-nondirectory
@@ -1943,6 +1961,7 @@ physical offsets."
     buf))
 
 (defmacro define-egg-buffer (type name-fmt &rest body)
+  "Define an egg-special-file type."
   (let* ((type-name (symbol-name type))
 	 (get-buffer-sym (intern (concat "egg-get-" type-name "-buffer")))
 	 (buffer-mode-sym (intern (concat "egg-" type-name "-buffer-mode")))
