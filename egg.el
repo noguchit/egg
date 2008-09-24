@@ -371,18 +371,15 @@ Different versions of git have different names for this subdir."
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
-;; (defmacro egg-text (text face)
-;;   (if (stringp text)
-;;       (propertize text 'face face)
-;;     `(propertize ,text 'face ,face)))
-
 (defmacro egg-text (text face)
+  "Format TEXT with face FACE at compile-time or run-time."
   (if (stringp text)
       (propertize text 'face (if (symbolp face) face
 			       (nth 1 face))) 
     `(propertize ,text 'face ,face)))
 
 (defmacro egg-prop (text &rest prop)
+  "Propertize TEXT with properties list PROP at compile-time or run-time."
   (if (stringp text)
       (apply 'propertize text
 	     (mapcar (lambda (sym)
@@ -401,11 +398,13 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
   str)
 
 (defsubst egg-commit-contents (rev)
+  "Retrieve the raw-contents of the commit REV."
   (with-temp-buffer
     (call-process "git" nil t nil "cat-file" "commit" rev)
     (buffer-string)))
 
 (defsubst egg-commit-message (rev)
+  "Retrieve the commit message of REV."
   (with-temp-buffer
     (call-process "git" nil t nil "cat-file" "commit" rev)
     (goto-char (point-min))
@@ -662,8 +661,7 @@ END-RE is the regexp to match the end of a record."
     (egg-git-dir)))
 
 (defun egg-HEAD ()
-  "return HEAD.
-Either a symbolic ref or a sha1."
+  "return HEAD. Either a symbolic ref or a sha1."
   (let* ((git-dir (egg-git-dir))) 
     (if git-dir
 	(egg-pick-file-contents (concat git-dir "/HEAD")
@@ -680,15 +678,16 @@ Either a symbolic ref or a sha1."
 		       head))
 		 '("HEAD" "ORIG_HEAD" "MERGE_HEAD" "FETCH_HEAD")))))
 
-(defun egg-sha1-ref-alist ()
-  (mapcar (lambda (line)
-	    (when (string-match "\\`\\(\\S-+\\) refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'" line)
-	      (list (match-string-no-properties 1 line)
-		    (match-string-no-properties 3 line)
-		    (match-string-no-properties 2 line))))
-	  (egg-git-to-lines "show-ref")))
+;; (defun egg-sha1-ref-alist ()
+;;   (mapcar (lambda (line)
+;; 	    (when (string-match "\\`\\(\\S-+\\) refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'" line)
+;; 	      (list (match-string-no-properties 1 line)
+;; 		    (match-string-no-properties 3 line)
+;; 		    (match-string-no-properties 2 line))))
+;; 	  (egg-git-to-lines "show-ref")))
 
 (defun egg-ref-type-alist ()
+  "Build an alist of (REF-NAME . :type) cells."
   (mapcar (lambda (ref-desc)
 	    (cons (cdr (assq 5 ref-desc))
 		  (cond ((assq 2 ref-desc) :head)
@@ -710,6 +709,13 @@ Either a symbolic ref or a sha1."
 					       remote-rname-face 
 					       remote-keymap &optional
 					       remote-site-keymap)
+  "Build an alist of (REF . :type) cells.
+A REF string of a head will be formatted with HEAD-FACE and
+HEAD-KEYMAP.  A REF string of a tag will be formatted with
+TAG-FACE (or AN-TAG-FACE if it was an annotated tag) and
+TAG-KEYMAP.  A REF string of a remote will be formatted with
+REMOTE-SITE-FACE/REMOTE-RNAME-FACE and
+RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
   (let ((refs-desc-list
 	 (egg-git-lines-matching-multi 
 	  "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
@@ -721,8 +727,10 @@ Either a symbolic ref or a sha1."
 	  ;; 6: remote-host
 	  ;; 7: is annotated tag 
 	  '(1 2 3 4 5 6 7) "show-ref" "-d"))
+	;; if null remote-site-map then use remote-keymap for the site
 	(remote-site-keymap (or remote-site-keymap remote-keymap))
 	annotated-tags)
+    ;; remove the annotated tags from the list
     (setq refs-desc-list
 	  (delq nil 
 		(mapcar (lambda (desc)
@@ -733,17 +741,20 @@ Either a symbolic ref or a sha1."
 					annotated-tags))
 			    nil))
 			refs-desc-list)))
+    ;; decorate the ref alist
     (mapcar (lambda (desc)
 	      (let ((full-name (cdr (assq 1 desc)))
 		    (name (cdr (assq 5 desc)))
 		    (remote (cdr (assq 6 desc))))
 		(cond ((assq 2 desc) 
+		       ;; head
 		       (cons full-name
 			     (propertize name 
 					 'face head-face 
 					 'keymap head-keymap
 					 :ref (cons name :head))))
 		      ((assq 3 desc) 
+		       ;; tag
 		       (cons full-name
 			     (propertize name 
 					 'face 
@@ -754,6 +765,7 @@ Either a symbolic ref or a sha1."
 					 'keymap tag-keymap
 					 :ref (cons name :tag))))
 		      ((assq 4 desc)
+		       ;; remote
 		       (cons full-name
 			     (concat
 			      (propertize remote
@@ -767,28 +779,41 @@ Either a symbolic ref or a sha1."
 	    refs-desc-list)))
 
 
-(defsubst egg-full-ref-alist ()
-  (mapcar (lambda (desc)
-	    (cons (cdr (assq 1 desc))
-		  (cdr (assq 2 desc))))
-	  (egg-git-lines-matching-multi 
-	   "^.+ \\(refs/\\(?:heads\\|tags\\|remotes\\)/\\(.+\\)\\)$"
-	   '(1 2) "show-ref")))
+;; (defsubst egg-full-ref-alist ()
+;;   (mapcar (lambda (desc)
+;; 	    (cons (cdr (assq 1 desc))
+;; 		  (cdr (assq 2 desc))))
+;; 	  (egg-git-lines-matching-multi 
+;; 	   "^.+ \\(refs/\\(?:heads\\|tags\\|remotes\\)/\\(.+\\)\\)$"
+;; 	   '(1 2) "show-ref")))
 
 (defun egg-complete-rev (string &optional ignored all)
+  "Do revision completion"
   (save-match-data
-    (cond ((string-match "\\`:[0-3]*" string)
+    (cond ((string-match "\\`:[0-3]*" string) ;; stages
 	   (funcall (if all 'all-completions 'try-completion)
 		    string '(":0" ":1" ":2" ":3")))
+
+	  ;; rev^, rev~10 etc.
 	  ((string-match "[\\^~][\\^~0-9]*\\'" string)
+	   ;; check with rev-parse
 	   (if (egg-git-ok nil "rev-parse" string) 
-	       (if all (list string)
+	       ;; rev-parse ok
+	       (if all 
+		   ;; fixme: how to do a full expansion?
+		   (list string)
+		 ;; match
 		 string)))
+
+	  ;; normal rev name
 	  (t (let ((matches 
+		    ;; match all types of refs
 		    (egg-git-to-lines "for-each-ref" "--format=%(refname)"
 				      (concat "refs/*/" string "*")
 				      (concat "refs/*/" string "*/*")))
 		   prefix)
+	       ;; get the short name
+	       ;; with 1.6.x: for-each-ref" "--format=%(refname=short)
 	       (setq matches
 		     (mapcar (lambda (long)
 			       (string-match 
@@ -796,6 +821,7 @@ Either a symbolic ref or a sha1."
 				long)
 			       (match-string-no-properties 1 long))
 			     matches))
+	       ;; do the completion
 	       (setq prefix 
 		     (funcall (if all 'all-completions 'try-completion)
 			      string 
@@ -804,40 +830,41 @@ Either a symbolic ref or a sha1."
 				     matches)))
 	       (cond (all prefix)
 		     ((stringp prefix) prefix)
-		     ((stringp prefix) prefix)
 		     ((null prefix) nil)
 		     (t string)))))))
 
-(defun egg-decorate-ref (full-name)
-  (save-match-data
-    (let (name type)
-      (if (not (string-match
-	      "\\`refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'"
-	      full-name))
-	full-name
-	(setq name (match-string-no-properties 2 full-name)
-	      type (match-string-no-properties 1 full-name))
-	(cond ((string= type "heads")
-	       (propertize name 'face 'egg-branch-mono
-			   :ref (cons name :head)))
-	      ((string= type "tags")
-	       (propertize name 'face 'egg-tag-mono
-			   :ref (cons name :tag)))
-	      ((string= type "remotes")
-	       (propertize
-		(concat (egg-text (egg-rbranch-name name)
-				  'egg-remote-mono)
-			(egg-text (egg-rbranch-name name)
-				  'egg-branch-mono))
-		:ref (cons name :remote))))))))
+;; (defun egg-decorate-ref (full-name)
+;;   (save-match-data
+;;     (let (name type)
+;;       (if (not (string-match
+;; 	      "\\`refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'"
+;; 	      full-name))
+;; 	full-name
+;; 	(setq name (match-string-no-properties 2 full-name)
+;; 	      type (match-string-no-properties 1 full-name))
+;; 	(cond ((string= type "heads")
+;; 	       (propertize name 'face 'egg-branch-mono
+;; 			   :ref (cons name :head)))
+;; 	      ((string= type "tags")
+;; 	       (propertize name 'face 'egg-tag-mono
+;; 			   :ref (cons name :tag)))
+;; 	      ((string= type "remotes")
+;; 	       (propertize
+;; 		(concat (egg-text (egg-rbranch-name name)
+;; 				  'egg-remote-mono)
+;; 			(egg-text (egg-rbranch-name name)
+;; 				  'egg-branch-mono))
+;; 		:ref (cons name :remote))))))))
 
 (defsubst egg-get-symbolic-HEAD (&optional file)
+  ;; get the symbolic name of HEAD
   (setq file (or file (concat (egg-git-dir) "/HEAD")))
   (egg-pick-file-contents file
 			  "^ref: refs/heads/\\(.+\\)"
 			  1))
 
 (defsubst egg-get-full-symbolic-HEAD (&optional file)
+  ;; get the symbolic full name of HEAD
   (setq file (or file (concat (egg-git-dir) "/HEAD")))
   (egg-pick-file-contents file
 			  "^ref: \\(refs/heads/.+\\)"
@@ -847,6 +874,8 @@ Either a symbolic ref or a sha1."
   (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
 
 (defsubst egg-set-mode-info (state)
+  "Set the mode-line string for buffers visiting files in the current repo.
+The string is built based on the current state STATE."
   (set (intern (concat "egg-" egg-git-dir "-HEAD"))
        (format " Git:%s" (cond ((plist-get state :rebase-dir)
 				"(rebasing)")
@@ -857,17 +886,21 @@ Either a symbolic ref or a sha1."
 			       (t "(detached)")))))
 
 (defsubst egg-get-rebase-merge-state (rebase-dir)
+  "Build a plist of rebase info of REBASE-DIR.
+this is for rebase -m variant."
   (list :rebase-dir rebase-dir
 	:rebase-head 
 	(egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
 	:rebase-upstream
 	(egg-describe-rev (egg-file-as-string (concat rebase-dir "onto_name")))
-	:rebase-step
+	:rebase-step			;; string-to-number?
 	(egg-file-as-string (concat rebase-dir "msgnum"))
-	:rebase-num
+	:rebase-num			;; string-to-number?
 	(egg-file-as-string (concat rebase-dir "end"))))
 
 (defsubst egg-get-rebase-interactive-state (rebase-dir)
+  "Build a plist of rebase info of REBASE-DIR.
+this is for rebase -i variant."
   (list :rebase-dir rebase-dir
 	:rebase-head 
 	(egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
@@ -892,20 +925,35 @@ Either a symbolic ref or a sha1."
   (concat (or git-dir (egg-git-dir)) "/" egg-git-rebase-subdir "/"))
 
 (defsubst egg-rebase-author-info (rebase-dir)
+  "Retrieve an alist of commit environment variables of the current
+cherry in REBASE-DIR."
   (mapcar (lambda (lst) 
+	    ;; chop the ' '
 	    (setcar (cdr lst) (substring (cadr lst) 1 -1))
 	    lst)
    (mapcar (lambda (line)
+	     ;; name-value split
 	     (save-match-data (split-string line "=" t)))
+	   ;; grab the GIT_xxx=yyy
 	   (egg-pick-file-records (concat rebase-dir "author-script")
 				  "^GIT_\\(.+\\)" "$"))))
 
 (defsubst egg-interactive-rebase-in-progress ()
+  "Is an interactive rebase in progress in the current repo?"
   (file-exists-p (concat (egg-git-dir) "/" egg-git-rebase-subdir 
 			 "/interactive") ))
 
 (defvar egg-internal-current-state nil)
 (defun egg-get-repo-state (&optional extras)
+  "Retrieve current repo's state as a plist.
+The properties:
+:gitdir :head :branch :sha1 :merge-heads :rebase-dir :rebase-head
+:rebase-upstream :rebase-steop :rebase-num :rebase-cherry
+
+EXTRAS contains the extra properties to retrieve: :staged :unstaged
+
+if EXTRAS contains :error-if-not-git then error-out if not a git repo.
+"
   (let* ((git-dir (egg-git-dir (memq :error-if-not-git extras)))
 	 (head-file (concat git-dir "/HEAD"))
 	 (merge-file (concat git-dir "/MERGE_HEAD"))
@@ -944,14 +992,19 @@ Either a symbolic ref or a sha1."
 				(egg-git-to-lines "diff" "--cached"
 						  "--name-only"))
 				state)))))
+    ;; update mode-line
     (egg-set-mode-info state)
     state))
 
 (defsubst egg-repo-state (&rest args)
+  "return the cached repo state or re-read it.
+if ARGS contained :force then ignore the cached state."
   (or (unless (memq :force args) egg-internal-current-state)
       (egg-get-repo-state args)))
 
 (defsubst egg-repo-clean (&optional state)
+  "Whether the current repos is clean base on the current repo state.
+use STATE as repo state if it was not nil. Otherwise re-read the repo state."
   (unless state 
     (setq state (egg-repo-state :staged :unstaged)))
   (and 
@@ -965,18 +1018,26 @@ Either a symbolic ref or a sha1."
 	  (egg-index-empty)))))
 
 (defsubst egg-current-branch (&optional state)
+  "The current symbolic value of HEAD. i.e. name of a branch. if STATE
+was not nil then use it as repo state instead of re-read from disc."
   (plist-get (or state (egg-repo-state)) :branch))
 
 (defsubst egg-current-sha1 (&optional state)
+  "The immutable sha1 of HEAD.  if STATE was not nil then use it
+as repo state instead of re-read from disc."
   (plist-get (or state (egg-repo-state)) :sha1))
 
 (defsubst egg-head (&optional state)
+  "a cons cell (branch . sha1) of HEAD.  if STATE was not nil then use it
+as repo state instead of re-read from disc."
   (if (egg-git-dir)
       (let ((state (or state (egg-repo-state))))
 	(cons (egg-current-sha1 state) 
 	      (egg-current-branch state)))))
 
 (defun egg-pretty-head-string (&optional state)
+  "Pretty description of HEAD.  if STATE was not nil then use it
+as repo state instead of re-read from disc."
   (let* ((state (or state (egg-repo-state)))
 	 (branch (plist-get state :branch))
 	 (merge-heads (plist-get state :merge-heads))
@@ -995,6 +1056,8 @@ Either a symbolic ref or a sha1."
 	  (t (concat "Detached HEAD: " (egg-describe-rev sha1))))))
 
 (defsubst egg-pretty-head-name (&optional state)
+  "Pretty name for HEAD.  if STATE was not nil then use it
+as repo state instead of re-read from disc."
   (let* ((state (or state (egg-repo-state)))
 	 (branch (plist-get state :branch)))
     (or branch (egg-describe-rev (plist-get state :sha1)))))
@@ -1058,9 +1121,11 @@ Either a symbolic ref or a sha1."
 
 
 (defsubst egg-read-rev (prompt &optional default)
+  "Query user for a revision using PROMPT. DEFAULT is the default value."
   (completing-read prompt 'egg-complete-rev nil nil default))
 
 (defsubst egg-read-remote (prompt &optional default)
+  "Query user for a remote using PROMPT. DEFAULT is the default value."
   (completing-read prompt (egg-config-get-all-remote-names) nil t default))
 
 ;;;========================================================
@@ -1142,6 +1207,7 @@ success."
       (widen)
       (goto-char (point-max))
       (re-search-backward "^EGG-GIT-CMD:" nil t)
+      ;; Narrow to the last command
       (narrow-to-region (point) (point-max))
       (if (functionp callback-func)
 	  (let ((egg-async-process proc)
@@ -1153,6 +1219,8 @@ success."
 ;;; Blame utils
 ;;;========================================================
 (defun egg-parse-git-blame (target-buf blame-buf &optional ov-attributes)
+  "Parse blame-info in buffer BLAME-BUF and decorate TARGET-BUF buffer.
+OV-ATTRIBUTES are the extra decorations for each blame chunk."
   (save-match-data
     (let ((blank (egg-text " " 'egg-blame))
 	  (nl (egg-text "\n" 'egg-blame))
@@ -1161,6 +1229,7 @@ success."
 	  info ov beg end blame)
       (with-current-buffer blame-buf
 	(goto-char (point-min))
+	;; search for a ful commit info
 	(while (re-search-forward "^\\([0-9a-f]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\) \\([0-9]+\\)$" nil t)
 	  (setq commit (match-string-no-properties 1)
 		old-line (string-to-number
@@ -1169,7 +1238,9 @@ success."
 			  (match-string-no-properties 3))
 		num (string-to-number
 		     (match-string-no-properties 4)))
+	  ;; was this commit already seen (and stored in the hash)?
 	  (setq commit-info (gethash commit commit-hash))
+	  ;; Nope, this is the 1st time, the full commit-info follow.
 	  (unless commit-info
 	    (re-search-forward "^author \\(.+\\)$")
 	    (setq author (match-string-no-properties 1))
@@ -1181,11 +1252,15 @@ success."
 			       (list :sha1 commit :author author 
 				     :subject subject :file old-file)
 			       ov-attributes))
+	    ;; save it in the hash
 	    (puthash commit commit-info commit-hash))
+	  ;; add the current blame-block into the list INFO.
 	  (setq info (cons (list old-line new-line num commit-info)
 			   info))))
+      ;; now do from beginning
       (setq info (nreverse info))
       (with-current-buffer target-buf
+	;; for every blame chunk
 	(dolist (chunk info)
 	  (setq commit-info (nth 3 chunk)
 		old-line (nth 0 chunk)
@@ -1200,7 +1275,11 @@ success."
 		end (save-excursion
 		      (forward-line num)
 		      (line-beginning-position)))
+	  ;; mark the blame chunk
 	  (put-text-property beg end :blame chunk)
+
+	  ;; make an overlay with blame info as 'before-string
+	  ;; on the current chunk.
 	  (setq ov (make-overlay beg end))
 	  (overlay-put ov :blame chunk)
 	  (setq blame (concat 
@@ -1244,14 +1323,17 @@ success."
   (let ((map (make-sparse-keymap "Egg:HideShow")))
     (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
     (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
-    map))
+    map)
+  "Keymap for a section than can be hidden/shown.\\{egg-hide-show-map}")
 
 (defconst egg-section-map 
   (let ((map (make-sparse-keymap "Egg:Section")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
-    map))
+    map)
+  "Keymap for a section in sequence that can be navigated back and forth.
+\\{egg-section-map}")
 
 (defconst egg-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:Diff")))
@@ -1259,33 +1341,43 @@ success."
     (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
     (define-key map (kbd "f") 'egg-diff-section-cmd-visit-file)
     (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
-    map))
+    map)
+  "Keymap for a diff section in sequence of deltas.
+\\{egg-diff-section-map}")
 
 (defconst egg-staged-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:StagedDiff")))
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
-    map))
+    map)
+  "Keymap for a diff section in sequence of staged deltas.
+\\{egg-staged-diff-section-map}")
 
 (defconst egg-wdir-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:WdirDiff")))
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "u") 'egg-diff-section-cmd-undo)
-    map))
+    map)
+  "Keymap for a diff section in sequence of deltas between the workdir and
+the index. \\{egg-wdir-diff-section-map}")
 
 (defconst egg-unstaged-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:UnstagedDiff")))
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
-    map))
+    map)
+  "Keymap for a diff section in sequence of unstaged deltas.
+\\{egg-unstaged-diff-section-map}")
 
 (defconst egg-unmerged-diff-section-map 
   (let ((map (make-sparse-keymap "Egg:UnmergedDiff")))
     (set-keymap-parent map egg-unstaged-diff-section-map)
     (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
-    map))
+    map)
+  "Keymap for a diff section in sequence of unmerged deltas.
+\\{egg-unmerged-diff-section-map}")
 
 (defconst egg-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:Hunk")))
@@ -1293,34 +1385,43 @@ success."
     (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
     (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
     (define-key map (kbd "f") 'egg-hunk-section-cmd-visit-file)
-    map))
+    map)
+  "Keymap for a hunk in a diff section. \\{egg-hunk-section-map}")
 
 (defconst egg-staged-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:StagedHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
-    map))
+    map)
+  "Keymap for a hunk in a staged diff section.
+\\{egg-staged-hunk-section-map}")
 
 (defconst egg-wdir-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:WdirHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
-    map))
+    map)
+  "Keymap for a hunk in a diff section between the workdir and the index.
+\\{egg-wdir-hunk-section-map}")
 
 (defconst egg-unstaged-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:UnstagedHunk")))
     (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
-    map))
+    map)
+  "Keymap for a hunk in a unstaged diff section.
+\\{egg-unstaged-hunk-section-map}")
 
 (defconst egg-unmerged-hunk-section-map 
   (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
     ;; no hunking staging in unmerged file
     (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
-    map))
+    map)
+  "Keymap for a hunk in a unmerged diff section.
+\\{egg-unmerged-hunk-section-map}")
 
 (defun list-tp ()
   (interactive)
@@ -1377,22 +1478,36 @@ success."
 (defvar egg-internal-buffer-obarray nil)
 
 (defsubst egg-make-navigation (parent child)
+  "Make a symbolic and unique navigation id.
+return a symbol PARENT-CHILD from an internal obarray."
   (unless (vectorp egg-internal-buffer-obarray)
     (error "Arrg! egg-internal-buffer-obarray is not an obarray!"))
   (intern (format "%s-%s" parent child) egg-internal-buffer-obarray))
 
 (defsubst egg-do-compute-navigation (section pos)
+  "Come up with a symbolic and unique navigation id for
+section SECTION at position POS."
   (egg-make-navigation (get-text-property pos :navigation)
 		       (if (consp section)
 			   (car section)
 			 section)))
 
 (defun egg-compute-navigation (ignored-1 section pos ignored-2)
+  "Come up with a symbolic and unique navigation id for
+section SECTION at position POS."
   (egg-do-compute-navigation section pos))
 
 (defun egg-delimit-section (sect-type section beg end 
 					  &optional inv-beg
 					  keymap navigation)
+  "Mark section for navigation and add local/context keymap.
+SECT-TYPE is the type of the section (usually a :symbol).
+SECTION is the name of the section (usually a string).  BEG and
+END are limits of the section.  INV-BEG is the position after the
+position that would remain visible when the section is hidden.
+KEYMAP is the local/context keymap for the section.
+NAVIGATION is the navigation id of the section. NAVIGATION can also
+a function to call to compute the navigation id of the section."
   (let ((nav (cond ((functionp navigation)
 		    (funcall navigation sect-type section beg end))
 		   ((null navigation) beg)
@@ -1408,16 +1523,34 @@ success."
 	(put-text-property inv-beg (1- end) 'invisible current-inv)))))
 
 (defsubst egg-make-hunk-info (name beg end diff)
+  "Build a hunk info NAME from BEG to END based on DIFF.
+Hunk info contains name and posistions of the hunk. Positions are offsets
+from DIFF because it can the whole diff can be pushed around inside
+the buffer."
   (let ((b (nth 1 diff)))
     (list name (- beg b) (- end b))))
 
 (defsubst egg-make-diff-info (name beg end head-end)
+  "Build a diff info NAME from BEG to END. HEAD-END is the end position
+of the diff header.
+
+Diff info contains name and posistions of the diff. The beginning position
+is stored as a marker and the others are offset from the beginning posistion
+ because the whole diff can be pushed around inside the buffer."  
   (let ((b (make-marker)))
     (set-marker b beg)
+    ;; no insertion indo the diff
     (set-marker-insertion-type b t)
+    ;; all other posistions are offsets from B.
     (list name b (- end beg) (- head-end beg))))
 
 (defun egg-decorate-diff-sequence (args)
+  "Decorate a sequence of deltas. ARGS is a plist containing the
+positions of the sequence as well as the decorations.
+
+:begin :end :diff-map :hunk-map :cc-diff-map :cc-hunk-map 
+:conflict-map :src-prefix :dst-prefix
+"
   (let* ((beg		(plist-get args	:begin))
 	 (end		(plist-get args	:end))
 	 (diff-map 	(plist-get args	:diff-map))
@@ -1428,6 +1561,7 @@ success."
 	 (a 		(plist-get args	:src-prefix))
 	 (b 		(plist-get args	:dst-prefix))
 
+	 ;; the sub match id of the regexp below
 	 (diff-no	1)
 	 (cc-diff-no	2)
 	 (hunk-no	3)
@@ -1459,7 +1593,9 @@ success."
 		  "\\( .*\\)"				;13 none
 		  "\\)$"))
 
+	 ;; where the hunk end?
 	 (hunk-end-re "^\\(?:diff\\|@@\\)")
+	 ;; where the diff end?
 	 (diff-end-re "^diff ")
 	 
 	 sub-beg sub-end head-end m-b-0 m-e-0 m-b-x m-e-x 
@@ -1493,12 +1629,13 @@ success."
 		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-del)
 		 (put-text-property m-b-x m-e-x 'face 'egg-diff-none))
 
-		((match-beginning conf-beg-no)
+		((match-beginning conf-beg-no) ;;++<<<<<<<
 		 (setq m-b-x (match-beginning conf-beg-no)
 		       m-e-x (match-end conf-beg-no))
 		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-conflict)
 		 (put-text-property m-b-x m-e-x 'face 'egg-branch-mono)
 		 (put-text-property m-e-x m-e-0 'face 'egg-diff-none)
+		 ;; mark the whole conflict section
 		 (setq sub-end (egg-safe-search "^++>>>>>>>.+$" end))
 		 (put-text-property m-b-0 sub-end 'keymap
 				    conflict-map))
@@ -1506,19 +1643,28 @@ success."
 		((match-beginning conf-end-no)
 		 (setq m-b-x (match-beginning conf-end-no)
 		       m-e-x (match-end conf-end-no))
+		 ;; just decorate, no mark.
+		 ;; the section was already mark when the conf-beg-no
+		 ;; matched.
 		 (put-text-property m-b-0 m-b-x 'face 'egg-diff-conflict)
 		 (put-text-property m-b-x m-e-x 'face 'egg-branch-mono)
 		 (put-text-property m-e-x m-e-0 'face 'egg-diff-none))
 
-		((match-beginning conf-div-no)
+		((match-beginning conf-div-no) ;;++=======
+		 ;; just decorate, no mark.
+		 ;; the section was already mark when the conf-beg-no
+		 ;; matched.
 		 (put-text-property m-b-0 m-e-0 'face 'egg-diff-conflict))
 
-		((match-beginning hunk-no) ;; hunk
+		((match-beginning hunk-no) ;; hunk @@
 		 (setq m-b-x (match-beginning hunk-no)
 		       m-e-x (match-end hunk-no)
+		       ;; find the end of the hunk section
 		       sub-end (or (egg-safe-search hunk-end-re end)
 				   end))
+		 ;; decorate the header
 		 (egg-decorate-hunk-header m-b-x m-e-x m-b-0 m-e-0)
+		 ;; mark the whole hunk based on the last diff header
 		 (egg-delimit-section 
 		  :hunk (egg-make-hunk-info 
 			 (match-string-no-properties hunk-no)
@@ -1529,9 +1675,12 @@ success."
 		((match-beginning cc-hunk-no) ;; cc-hunk
 		 (setq m-b-x (match-beginning cc-hunk-no)
 		       m-e-x (match-end cc-hunk-no)
+		       ;; find the end of the hunk section
 		       sub-end (or (egg-safe-search hunk-end-re end)
 				   end))
+		 ;; decorate the header
 		 (egg-decorate-hunk-header m-b-x m-e-x m-b-0 m-e-0)
+		 ;; mark the whole hunk based on the last cc-diff header
 		 (egg-delimit-section 
 		  :hunk (egg-make-hunk-info 
 			 (match-string-no-properties cc-hunk-no)
@@ -1543,8 +1692,11 @@ success."
 		 (setq m-b-x (match-beginning diff-no)
 		       m-e-x (match-end diff-no)
 		       sub-end (or (egg-safe-search diff-end-re end) end)
+		       ;; find the end of the header
 		       head-end (or (egg-safe-search "^@@" end) end))
+		 ;; decorate the header
 		 (egg-decorate-diff-header m-b-x m-e-x m-b-0 m-e-0)
+		 ;; mark the whole diff
 		 (egg-delimit-section
 		  :diff (setq last-diff
 			      (egg-make-diff-info
@@ -1556,8 +1708,11 @@ success."
 		 (setq m-b-x (match-beginning cc-diff-no)
 		       m-e-x (match-end cc-diff-no)
 		       sub-end (or (egg-safe-search diff-end-re end) end)
+		       ;; find the end of the header
 		       head-end (or (egg-safe-search "^@@@" end) end))
+		 ;; decorate the header
 		 (egg-decorate-cc-diff-header m-b-x m-e-x m-b-0 m-e-0)
+		 ;; mark the whole diff
 		 (egg-delimit-section
 		  :diff (setq last-cc
 			      (egg-make-diff-info
@@ -1578,6 +1733,8 @@ success."
     nil))
 
 (defun egg-decorate-diff-section (&rest args)
+  "Decorate a section containing a sequence of diffs.
+See egg-decorate-diff-sequence."
   (let ((beg (plist-get args	 :begin))
 	(end (plist-get args	 :end))
 	(a   (or (plist-get args :src-prefix) "a/"))
@@ -1592,24 +1749,29 @@ success."
      (nconc (list :src-prefix a :dst-prefix b) args))))
   
 (defun egg-diff-section-cmd-visit-file (file)
+  "Visit file FILE."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
 (defun egg-diff-section-cmd-visit-file-other-window (file)
+  "Visit file FILE in other window."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file-other-window file))
 
 (defun egg-unmerged-section-cmd-ediff3 (file)
+  "Run ediff3 to resolve merge conflicts in FILE."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file)
   (egg-resolve-merge-with-ediff))
 
 (defun egg-unstaged-section-cmd-ediff (file)
+  "Compare FILE and its staged copy using ediff."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file)
   (egg-file-do-ediff ":0" "INDEX"))
 
 (defun egg-staged-section-cmd-ediff3 (file)
+  "Compare the staged copy of FILE and the version in HEAD using ediff."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file)
   (egg-file-do-ediff ":0" "INDEX" "HEAD"))
@@ -1617,6 +1779,7 @@ success."
 (defvar egg-diff-buffer-info nil)
 
 (defun egg-diff-section-cmd-ediff (file pos)
+  "Ediff src and dest versions of FILE based on the diff at POS."
   (interactive (list (car (get-text-property (point) :diff))
 		     (point)))
   (let ((commit (get-text-property pos :commit))
@@ -1634,6 +1797,9 @@ success."
     (egg-file-do-ediff src src-name dst nil 'ediff2)))
 
 (defun egg-hunk-compute-line-no (hunk-header hunk-beg)
+  "Calaculate the effective line number in the original file based
+on the position of point in a hunk. HUNK-HEADER is the header and
+HUNK-BEG is the starting position of the current hunk."
   (let ((limit (line-end-position))
 	(line (string-to-number 
 	       (nth 2 (save-match-data
@@ -1648,6 +1814,9 @@ success."
     (+ line adjust)))
 
 (defsubst egg-hunk-info-at (pos)
+  "Rebuild the hunk info at POS.
+Hunk info are relative offsets. This function compute the
+physical offsets."
   (let* ((diff-info (get-text-property pos :diff))
 	 (head-beg (nth 1 diff-info))
 	 (hunk-info (get-text-property pos :hunk))
@@ -1657,6 +1826,7 @@ success."
 
 (defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg
 					     &rest ignored)
+  "Visit FILE and goto the...."
   (interactive (egg-hunk-info-at (point)))
   (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
     (find-file file)
