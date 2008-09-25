@@ -1734,7 +1734,7 @@ positions of the sequence as well as the decorations.
 
 (defun egg-decorate-diff-section (&rest args)
   "Decorate a section containing a sequence of diffs.
-See egg-decorate-diff-sequence."
+See `egg-decorate-diff-sequence'."
   (let ((beg (plist-get args	 :begin))
 	(end (plist-get args	 :end))
 	(a   (or (plist-get args :src-prefix) "a/"))
@@ -2008,7 +2008,8 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     (define-key map (kbd "l") 'egg-log)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
-    map))
+    map)
+  "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
 
 (defconst egg-status-buffer-rebase-map 
   (let ((map (make-sparse-keymap "Egg:StatusBufferRebase")))
@@ -2016,10 +2017,14 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     (define-key map (kbd "x") 'egg-buffer-rebase-abort)
     (define-key map (kbd "u") 'egg-buffer-rebase-skip)
     (define-key map (kbd "RET") 'egg-buffer-selective-rebase-continue)
-    map))
+    map)
+  "Context keymap for the repo section of the status buffer when
+  rebase is in progress.\\{egg-status-buffer-rebase-map}")
 
 (defun egg-buffer-do-rebase (upstream-or-action 
 			     &optional old-base prompt)
+  "Perform rebase action from an egg special buffer.
+See `egg-do-rebase-head'."
   (let ((git-dir (egg-git-dir))
 	modified-files res)
     (if (stringp upstream-or-action)
@@ -2037,6 +2042,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     (plist-get res :success)))
 
 (defun egg-buffer-rebase-continue ()
+  "Continue the current rebase session."
   (interactive)
   (message "continue with current rebase")
   (unless (egg-buffer-do-rebase :continue)
@@ -2045,6 +2051,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 (defsubst egg-do-async-rebase-continue (callback closure &optional
 						 action
 						 exit-code)
+  "Continue the current rebase session asynchronously."
   (let ((process-environment process-environment)
 	(action (or action "--continue"))
 	(buffer (current-buffer))
@@ -2055,6 +2062,9 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     proc))
 
 (defun egg-buffer-selective-rebase-continue ()
+  "Continue the current rebase session.
+The mode, sync or async, will depend on the nature of the current
+rebase session."
   (interactive)
   (if (not (egg-interactive-rebase-in-progress))
       (egg-buffer-rebase-continue)
@@ -2077,13 +2087,16 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 
 
 (defsubst egg-pretty-help-text (&rest strings)
+  "Perform key bindings substitutions and highlighting in STRINGS."
   (let* ((map (current-local-map)) last-found)
     (with-temp-buffer
       (use-local-map map)
       (save-match-data
+	;; key substitutions
 	(insert (substitute-command-keys
 		 (mapconcat 'identity strings "")))
 	(goto-char (point-min))
+	;; key highlighting
 	(while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~-]\\):" nil t)
 	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-help-key)
 	  (if last-found
@@ -2092,6 +2105,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	  (setq last-found (point)))
 	(if last-found
 	    (put-text-property last-found (line-end-position) 'face 'egg-text-help))
+	;; return the total
 	(buffer-string)))))
 
 (defconst egg-status-buffer-common-help-text
@@ -2131,6 +2145,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n")))
   
 (defun egg-sb-insert-repo-section ()
+  "Insert the repo section into the status buffer."
   (let* ((state (egg-repo-state))
 	 (sha1 (plist-get state :sha1))
 	 (beg (point))
@@ -2138,15 +2153,19 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	 (rebase-step (plist-get state :rebase-step))
 	 (rebase-num (plist-get state :rebase-num))
 	 inv-beg help-beg help-inv-beg rebase-beg)
+    ;; head, sha1 and git-dir
     (insert (egg-text (egg-pretty-head-string state) 'egg-branch) "\n"
 	    (egg-text sha1 'font-lock-string-face) "\n"
 	    (egg-text (plist-get state :gitdir) 'font-lock-constant-face)
 	    "\n")
+    ;; invisibility start at the newline
     (setq inv-beg (1- (point)))
     (when rebase-step
+      ;; Rebase info and keybindings
       (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
       (setq map egg-status-buffer-rebase-map))
     (when (memq :status egg-show-key-help-in-buffers)
+      ;; Help
       (insert "\n")
       (setq help-beg (point))
       (insert (egg-text "Help" 'egg-help-header-1) "\n")
@@ -2155,12 +2174,15 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
       (when (eq egg-status-buffer-rebase-map map)
 	(insert egg-status-buffer-rebase-help-text))
       (insert egg-status-buffer-diff-help-text))
+    ;; Mark the repo section
     (egg-delimit-section :section 'repo beg (point) inv-beg map 'repo)
     (when help-beg
+      ;; Mark the help sub-section so it can be hidden
       (egg-delimit-section :help 'help help-beg (point) help-inv-beg map 
 			 'egg-compute-navigation))))
 
 (defun egg-sb-insert-untracked-section ()
+  "Insert the untracked files section into the status buffer."
   (let ((beg (point)) inv-beg)
     (insert (egg-prepend "Untracked Files:" "\n\n" 
 			 'face 'egg-section-title)
@@ -2172,6 +2194,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 			  inv-beg egg-section-map 'untracked)))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
+  "Insert the unstaged changes section into the status buffer."
   (let ((beg (point)) inv-beg diff-beg)
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
 	    "\n")
@@ -2182,6 +2205,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
+    ;; this section might contains merge conflicts, thus cc-diff
     (egg-decorate-diff-section :begin diff-beg 
 			       :end (point) 
 			       :src-prefix "INDEX:/"
@@ -2194,6 +2218,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 			       )))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
+  "Insert the staged changes section into the status buffer."
   (let ((beg (point)) inv-beg diff-beg)
     (insert (egg-prepend title "\n\n"
 			  'face 'egg-section-title)
@@ -2205,6 +2230,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
+    ;; this section never contains merge conflicts, thus no cc-diff
     (egg-decorate-diff-section :begin diff-beg 
 			       :end (point) 
 			       :src-prefix "HEAD:/"
@@ -2213,21 +2239,27 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 			       :hunk-map egg-staged-hunk-section-map)))
 
 (defun egg-checkout-ref (&optional default)
+  "Prompt a revision to checkout. Default is DEFAULT."
   (interactive (list (car (get-text-property (point) :ref))))
   (egg-do-checkout (completing-read "checkout: " (egg-all-refs)
 				    nil nil (or default "HEAD"))))
 
 (defsubst egg-buffer-hide-all ()
+  "Hide all sections in current special egg buffer."
   (let ((pos (point-min)) nav)
     (while (setq pos (next-single-property-change (1+ pos) :navigation))
       (setq nav (get-text-property pos :navigation))
       (add-to-invisibility-spec (cons nav t)))))
 
 (defsubst egg-buffer-maybe-hide-all ()
+  "If requsted, hide all sections in current special egg buffer.
+See `egg-buffer-hide-sub-blocks-on-start'."
   (if (memq major-mode egg-buffer-hide-sub-blocks-on-start)
       (egg-buffer-hide-all)))
 
 (defsubst egg-buffer-maybe-hide-help (help-nav &optional top-nav)
+  "If requested, hide the help section in the current special buffer.
+See `egg-buffer-hide-help-on-start'."
   (if (memq major-mode egg-buffer-hide-help-on-start)
       (add-to-invisibility-spec 
        (cons (if (symbolp help-nav) help-nav
@@ -2235,6 +2267,8 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	     t))))
 
 (defun egg-status-buffer-redisplay (buf &optional init)
+  "(Re)Display the contents of the status buffer in BUF.
+If INIT was not nil, then perform 1st-time initializations as well."
   (with-current-buffer buf
     (let ((inhibit-read-only t)
 	  (orig-pos (point)))
@@ -2250,6 +2284,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
       (goto-char orig-pos))))
 
 (defun egg-internal-background (proc msg)
+  "Background job sentinel."
   (let ((name (process-name proc)))
     (cond ((string= msg "finished\n")
 	   (message "EGG BACKGROUND: %s finished." name))
