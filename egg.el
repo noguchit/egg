@@ -4116,7 +4116,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    "\n"
    (egg-pretty-help-text
     "\\<egg-log-diff-map>"
-    "\\[egg-log-diff-cmd-visit-file-other-window]:visit version/line\n")))
+    "\\[egg-log-diff-cmd-visit-file-other-window]:visit version/line\n")
+   (egg-text "References:" 'egg-help-header-2) "\n"
+   (egg-text "local-branch" 'egg-branch-mono) " "
+   (egg-text "lightweight-tag" 'egg-tag-mono) " "
+   (egg-text "annotated-tag" 'egg-an-tag-mono) " "
+   (egg-text "remote/" 'egg-remote-mono)
+   (egg-text "branch" 'egg-branch-mono)
+   "\n"))
 
 (defun egg-log (&optional all)
   (interactive "P")
