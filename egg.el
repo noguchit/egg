@@ -27,6 +27,7 @@
 (require 'cl)
 (require 'electric)
 (require 'ediff)
+(require 'ffap)
 
 (defgroup egg nil
   "Controlling Git from Emacs."
@@ -388,6 +389,9 @@ Different versions of git have different names for this subdir."
 			 sym))
 		     prop))
     `(propertize ,text ,@prop)))
+
+(defalias 'egg-string-at-point 'ffap-string-at-point)
+(defalias 'egg-find-file-at-point 'find-file-at-point)
 
 (defsubst egg-prepend (str prefix &rest other-properties)
   "Make STR appear to have prefix PREFIX.
@@ -2181,17 +2185,50 @@ rebase session."
       (egg-delimit-section :help 'help help-beg (point) help-inv-beg map 
 			 'egg-compute-navigation))))
 
+(defun egg-ignore-pattern-from-string-at-point ()
+  (interactive)
+  (let ((string (egg-string-at-point))
+	(file (ffap-file-at-point))
+	dir pattern gitignore)
+    (setq pattern (read-string "ignore pattern: "
+			       (if (string-match "\\.[^.]+\\'" string)
+				   (match-string-no-properties 0 string)
+				 string)))
+    (when (equal pattern "")
+      (error "Can't ignore empty string!"))
+    (setq dir (if (stringp file)
+		  (file-name-directory (expand-file-name file))
+		default-directory))
+    (setq gitignore 
+	  (read-file-name (format "add pattern `%s' to: " pattern)
+			  dir nil nil ".gitignore"))
+    (save-excursion
+      (with-current-buffer (find-file-noselect gitignore t t)
+	(goto-char (point-max))
+	(insert pattern "\n")
+	(save-buffer)
+	(kill-buffer (current-buffer))))
+    (egg-buffer-cmd-refresh)))
+
+(defconst egg-untracked-file-map
+  (let ((map (make-sparse-keymap "Egg:UntrackedFile")))
+    (define-key map (kbd "RET") 'egg-find-file-at-point)
+    (define-key map (kbd "DEL") 'egg-ignore-pattern-from-string-at-point)
+    map))
+
 (defun egg-sb-insert-untracked-section ()
   "Insert the untracked files section into the status buffer."
-  (let ((beg (point)) inv-beg)
+  (let ((beg (point)) inv-beg end)
     (insert (egg-prepend "Untracked Files:" "\n\n" 
 			 'face 'egg-section-title)
 	    "\n")
     (setq inv-beg (1- (point)))
-    (call-process "git" nil t nil "ls-files" "--others" 
+    (call-process "git" nil t nil "ls-files" "--others"  
 		  "--exclude-standard")
-    (egg-delimit-section :section 'untracked beg (point)
-			  inv-beg egg-section-map 'untracked)))
+    (setq end (point))
+    (egg-delimit-section :section 'untracked beg end 
+			  inv-beg egg-section-map 'untracked)
+    (put-text-property beg end 'keymap egg-untracked-file-map)))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
@@ -4861,7 +4898,7 @@ current file contains unstaged changes."
 
 (defun egg-file-log-pickaxe (string)
   (interactive (list (read-string "search history for: "
-				  (symbol-name (symbol-at-point)))))
+				  (egg-string-at-point))))
   (egg-search-changes string))
 
 (let ((map egg-file-cmd-map))
