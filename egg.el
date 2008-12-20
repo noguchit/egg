@@ -345,6 +345,11 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
+(defcustom egg-enable-tooltip nil
+  "Whether to refresh the index in the background when emacs is idle."
+  :group 'egg
+  :type 'boolean)
+
 (defcustom egg-git-rebase-subdir ".dotest-merge"
   "Name of the rebase's workdir.
 Different versions of git have different names for this subdir."
@@ -707,6 +712,12 @@ END-RE is the regexp to match the end of a record."
 	   ;; 6: remote-host
 	   '(1 2 3 4 5 6) "show-ref")))
 
+(defsubst egg-tooltip-func ()
+  (cond ((null egg-enable-tooltip) nil)
+	((eq major-mode 'egg-log-buffer-mode)
+	 'egg-log-buffer-help-echo)
+	(t nil)))
+
 (defun egg-full-ref-decorated-alist (head-face head-keymap
 					       tag-face an-tag-face tag-keymap
 					       remote-site-face
@@ -756,7 +767,8 @@ RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
 			     (propertize name 
 					 'face head-face 
 					 'keymap head-keymap
-					 :ref (cons name :head))))
+					 :ref (cons name :head)
+					 'help-echo (egg-tooltip-func))))
 		      ((assq 3 desc) 
 		       ;; tag
 		       (cons full-name
@@ -767,7 +779,8 @@ RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
 					     an-tag-face
 					   tag-face)
 					 'keymap tag-keymap
-					 :ref (cons name :tag))))
+					 :ref (cons name :tag)
+					 'help-echo (egg-tooltip-func))))
 		      ((assq 4 desc)
 		       ;; remote
 		       (cons full-name
@@ -779,7 +792,8 @@ RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
 			      (propertize (substring name (length remote)) 
 					  'face remote-rname-face
 					  'keymap remote-keymap
-					  :ref (cons name :remote))))))))
+					  :ref (cons name :remote)
+					  'help-echo (egg-tooltip-func))))))))
 	    refs-desc-list)))
 
 
@@ -3120,6 +3134,78 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (egg-git-ok t "log" "--pretty=oneline" "--decorate"
 	      (concat "-S" string)))
 
+(defun egg-commit-at-pointer ()
+  (get-text-property (point) :commit))
+
+(defun egg-ref-at-pointer ()
+  (get-text-property (point) :ref))
+
+(defun egg-head-at-pointer ()
+  (eq (cdr (get-text-property (point) :ref)) :head))
+
+(defun egg-tag-at-pointer ()
+  (eq (cdr (get-text-property (point) :ref)) :tag))
+
+(defun egg-remote-at-pointer ()
+  (eq (cdr (get-text-property (point) :ref)) :remote))
+
+(defun egg-references-at-pointer ()
+  (get-text-property (point) :references))
+
+(defconst egg-log-commit-line-menu (make-sparse-keymap))
+
+(let ((map egg-log-commit-line-menu))
+  (define-key map [ic] '(menu-item "(Re)Load Commit Details" 
+				   egg-log-buffer-insert-commit
+				   :enable (egg-commit-at-pointer)))
+  (define-key map [cb] '(menu-item "Create New Branch" 
+				  egg-log-buffer-create-new-branch
+				  :enable (egg-commit-at-pointer)))
+  (define-key map [sb] '(menu-item "Start New Branch" 
+				  egg-log-buffer-start-new-branch
+				  :enable (egg-commit-at-pointer)))
+  (define-key map [co] '(menu-item "Checkout Branch" 
+				  egg-log-buffer-checkout-commit
+				  :enable (egg-head-at-pointer)))
+  (define-key map [co-dh] '(menu-item "Detach HEAD and Checkout" 
+				      egg-log-buffer-checkout-commit
+				      :enable (egg-commit-at-pointer)))
+  (define-key map [sp1] '("--"))
+  (define-key map [tc] '(menu-item "Tag (Lightweight)" 
+				   egg-log-buffer-tag-commit
+				   :enable (egg-commit-at-pointer)))
+  )
+
+(defun egg-log-commit-line-menu-heading (pos)
+  (let ((ref (get-text-property pos :ref))
+	(references (get-text-property pos :references))
+	(commit (get-text-property pos :commit)))
+    (cond ((consp ref)
+	   (format "(Git/Egg) %s: %s"
+		   (cond ((eq (cdr ref) :head) "Branch")
+			 ((eq (cdr ref) :remote) "Remote")
+			 ((eq (cdr ref) :tag) "Tag"))
+		   (car ref)))
+	  ((consp references)
+	   (concat "(Git/Egg) Ref: " (car (last references))))
+	  (t 
+	   (concat "(Git/Egg) Commit: "
+		   (file-name-nondirectory 
+		    (egg-name-rev commit)))))))
+
+(defun egg-log-popup-commit-line-menu (event)
+  (interactive "e")
+  (let* ((menu (nconc (list 'keymap 
+			    (egg-log-commit-line-menu-heading (point)))
+		      (cdr egg-log-commit-line-menu)))
+	 (keys (x-popup-menu event menu))      
+	 (cmd (and keys (lookup-key menu (apply 'vector keys)))))
+    (when (and cmd (commandp cmd))
+      (call-interactively cmd))))
+
+;; (define-key egg-log-local-ref-map [C-down-mouse-2] 'egg-popup-log-local-ref-menu)
+;; (define-key egg-log-local-ref-map [C-mouse-2] 'egg-popup-log-local-ref-menu)
+
 (defconst egg-log-commit-base-map
   (let ((map (make-sparse-keymap "Egg:LogCommitBase")))
     (set-keymap-parent map egg-hide-show-map)
@@ -3141,6 +3227,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
+
+    (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
+    (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
+
     map))
 
 (defconst egg-log-ref-map 
@@ -3156,6 +3246,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
     (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
+
+    (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
+    (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
+
     map))
 
 (defconst egg-log-remote-ref-map 
@@ -3163,6 +3257,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "d") 'egg-log-buffer-fetch-remote-ref)
     (define-key map (kbd "d") 'egg-log-buffer-fetch-remote-ref)
+
+    (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
+    (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
+
     map))
 
 (defconst egg-log-remote-site-map 
@@ -3198,6 +3296,71 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map "/" 'egg-search-changes)
     map))
 
+;; (define-key egg-log-buffer-mode-map [menu-bar egg-log-buffer-mode]
+;;   (cons "Git/Egg" egg-log-commit-menu))
+;; (define-key egg-log-local-ref-map [menu-bar egg]
+;;   (cons "Egg" egg-log-local-ref-menu))
+
+
+;; I'm here
+(defconst egg-log-cmd-help-text-fmt-alist
+  '((egg-log-buffer-push-to-local ref "update another branch with %s")
+    (egg-log-buffer-push remote "push branches to remote %s")
+    (egg-log-buffer-fetch ref "(re)-fetch %s")
+    (egg-log-buffer-rm-ref ref "remove %s")
+    (egg-log-buffer-reflog-ref ref "show history (reflog) of %s")
+    (egg-log-buffer-unmark commit "unmark %s for upcoming rebase")
+    (egg-log-buffer-mark-edit commit "mark %s to be edited in upcoming rebase")
+    (egg-log-buffer-mark-squash commit "mark %s to be squashed in upcoming rebase")
+    (egg-log-buffer-mark-pick commit "mark %s to be picked in upcoming rebase")
+    (egg-log-buffer-rebase commit "rebase HEAD to %s")
+    (egg-log-buffer-attach-head commit "anchor HEAD at %s")
+    (egg-log-buffer-atag-commit commit "create new annotated-tag at %s")
+    (egg-log-buffer-tag-commit commit "create new tag at %s")
+    (egg-log-buffer-checkout-commit commit "checkout %s")
+    (egg-log-buffer-start-new-branch commit "start a new branch at %s")
+    (egg-log-buffer-create-new-branch commit "create a new branch at %s")
+    (egg-log-buffer-insert-commit commit "load %s's details")
+    (egg-section-cmd-toggle-hide-show-children nil "toggle hide/show details")
+    (egg-section-cmd-toggle-hide-show nil "toggle hide/show")
+    (egg-log-buffer-merge ref "merge %s to HEAD")
+    ))
+
+(defun egg-format-key-cmd-for-help-echo (key cmd alist ref commit)
+  (let* ((howto (assq cmd alist))
+	 (target-id (nth 1 howto))
+	 (fmt-string (nth 2 howto)))
+    (when (stringp fmt-string)
+      (format "%s : %s\n" 
+	      (format fmt-string
+		      (cond ((eq target-id 'ref)  ref)
+			    ((eq target-id 'remote)
+			     (egg-rbranch-to-remote ref))
+			    ((eq target-id 'commit) commit)
+			    ((null target-id) nil)))
+	      (format-kbd-macro (char-to-string key))))))
+
+(defun egg-log-buffer-help-echo (window buffer pos)
+  (let ((keymap (get-text-property pos 'keymap buffer))
+	(ref (car (get-text-property pos :ref buffer)))
+	(references (get-text-property pos :references buffer))
+	(commit (get-text-property pos :commit buffer))
+	nice-name)
+    (when (keymapp keymap)
+      (when (stringp commit)
+	(setq nice-name (or ref
+			    (car (last references))
+			    (file-name-nondirectory 
+			     (egg-name-rev commit)))))
+      (mapconcat 
+       (lambda (mapping)
+	 (if (consp mapping)
+	     (egg-format-key-cmd-for-help-echo 
+	      (car mapping) (cdr mapping)
+	      egg-log-cmd-help-text-fmt-alist
+	      ref nice-name)
+	   ""))
+       keymap ""))))
 
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map)
   (let ((start (point))
@@ -3286,6 +3449,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
  	(delete-region (+ sha-beg 8) sha-end)
 	(put-text-property sha-beg (+ sha-beg 8) 
 			   'face 'font-lock-constant-face)
+	(put-text-property sha-beg (+ sha-beg 8) 
+			   'help-echo (egg-tooltip-func))
 	
 	(setq dashes-len (- 300 graph-len 1 
 			    (if refs (1+ ref-string-len) 0)))
