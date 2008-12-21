@@ -3161,92 +3161,96 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (egg-log-buffer-attach-head pos 16))
 
 
-(defconst egg-log-commit-line-menu (make-sparse-keymap))
+(defun egg-log-make-commit-line-menu ()
+  (let ((map (make-sparse-keymap)))
+    (define-key map [ic] (list 'menu-item "(Re)Load Commit Details" 
+			       'egg-log-buffer-insert-commit
+			       :visible '(egg-commit-at-pointer)))
+    (define-key map [sp9] '("--"))
+    (define-key map [rpush] (list 'menu-item "Fetch Refs from Remote" 
+				  'egg-log-buffer-fetch
+				  :visible '(egg-remote-at-pointer))) 
+    (define-key map [rfetch] (list 'menu-item "Push Refs to Remote" 
+				   'egg-log-buffer-push
+				   :visible '(egg-remote-at-pointer))) 
+    (define-key map [rdown] (list 'menu-item "Fetch Remote Ref" 
+				  'egg-log-buffer-fetch-remote-ref
+				  :visible '(egg-ref-at-pointer))) 
+    (define-key map [ldown] (list 'menu-item "Push HEAD To Ref" 
+				  'egg-log-buffer-push-head-to-local
+				  :visible '(egg-ref-at-pointer))) 
+    (define-key map [upload] (list 'menu-item "Push Ref to Remote" 
+				   'egg-log-buffer-push-to-remote
+				   :visible '(egg-ref-at-pointer))) 
+    (define-key map [update] (list 'menu-item "Push to Another Local Branch" 
+				   'egg-log-buffer-push-to-local
+				   :visible '(egg-ref-at-pointer))) 
+    (define-key map [sp5] '("--"))
+    (define-key map [irebase] (list 'menu-item "Rebase HEAD interratively" 
+				    'egg-log-buffer-rebase
+				    :visible (egg-commit-at-pointer)
+				    :eanble (egg-log-buffer-get-marked-alist)))
+    (define-key map [unmark] (list 'menu-item "Unmark for interractive Rebase " 
+				   'egg-log-buffer-unmark
+				   :visible '(egg-commit-at-pointer))) 
+    (define-key map [edit] (list 'menu-item "Mark for Editing in upcoming interractive Rebase " 
+				 'egg-log-buffer-mark-edit
+				 :visible '(egg-commit-at-pointer))) 
+    (define-key map [squash] (list 'menu-item "Mark to be Squashed in upcoming interractive Rebase " 
+				   'egg-log-buffer-mark-squash
+				   :visible '(egg-commit-at-pointer))) 
+    (define-key map [pick] (list 'menu-item "Mark to be Picked in upcoming interractive Rebase " 
+				 'egg-log-buffer-mark-pick
+				 :visible '(egg-commit-at-pointer))) 
+    (define-key map [sp4] '("--"))
+    (define-key map [rebase] (list 'menu-item "Rebase HEAD" 
+				   'egg-log-buffer-rebase
+				   :visible '(egg-commit-at-pointer)))
+    (define-key map [merge] (list 'menu-item "Merge to HEAD" 
+				  'egg-log-buffer-merge
+				  :visible '(egg-commit-at-pointer)))
+    (define-key map [sp3] '("--"))
+    (define-key map [rh-16] (list 'menu-item "Anchor HEAD (update INDEX and Workdir)" 
+				  'egg-log-commit-line-menu-attach-head-index-wdir
+				  :visible '(egg-commit-at-pointer)))
+    (define-key map [rh-4] (list 'menu-item "Anchor HEAD (update INDEX)" 
+				 'egg-log-commit-line-menu-attach-head-index
+				 :visible '(egg-commit-at-pointer)))
+    (define-key map [rh-0] (list 'menu-item "Anchor HEAD" 
+				 'egg-log-buffer-attach-head
+				 :visible '(egg-commit-at-pointer)))
+    (define-key map [sp2] '("--"))
+    (define-key map [reflog] (list 'menu-item "Show Ref History (Reflog)" 
+				   'egg-log-buffer-reflog-ref
+				   :visible '(egg-ref-at-pointer))) 
+    (define-key map [rm-ref] (list 'menu-item "Remove Ref " 
+				   'egg-log-buffer-rm-ref
+				   :visible '(egg-ref-at-pointer))) 
+    (define-key map [cb] (list 'menu-item "Create New Branch" 
+			       'egg-log-buffer-create-new-branch
+			       :visible '(egg-commit-at-pointer)))
+    (define-key map [co-dh] (list 'menu-item "Detach HEAD and Checkout" 
+				  'egg-log-buffer-checkout-commit
+				  :visible '(egg-commit-at-pointer)))
+    (define-key map [sp1] '("--"))
+    (define-key map [sb] (list 'menu-item "Start New Branch" 
+			       'egg-log-buffer-start-new-branch
+			       :visible '(egg-commit-at-pointer)))
+    (define-key map [co] (list 'menu-item "Checkout Branch" 
+			       'egg-log-buffer-checkout-commit
+			       :visible '(egg-head-at-pointer)))
+    (define-key map [tag] (list 'menu-item "Tag (Lightweight)" 
+				'egg-log-buffer-tag-commit
+				:visible '(egg-commit-at-pointer)))
+    (define-key map [atag] (list 'menu-item "Tag (Annotated)" 
+				 'egg-log-buffer-atag-commit
+				 :visible '(egg-commit-at-pointer)))
+    map))
 
-(let ((map egg-log-commit-line-menu))
-  (define-key map [ic] '(menu-item "(Re)Load Commit Details" 
-				   egg-log-buffer-insert-commit
-				   :enable (egg-commit-at-pointer)))
-  (define-key map [sp9] '("--"))
-  (define-key map [rpush] '(menu-item "Fetch Refs from Remote" 
-				       egg-log-buffer-fetch
-				     :enable (egg-remote-at-pointer))) 
-  (define-key map [rfetch] '(menu-item "Push Refs to Remote" 
-				       egg-log-buffer-push
-				     :enable (egg-remote-at-pointer))) 
-  (define-key map [rdown] '(menu-item "Fetch Remote Ref" 
-				     egg-log-buffer-fetch-remote-ref
-				     :enable (egg-ref-at-pointer))) 
-  (define-key map [ldown] '(menu-item "Push HEAD To Ref" 
-				     egg-log-buffer-push-head-to-local
-				     :enable (egg-ref-at-pointer))) 
-  (define-key map [upload] '(menu-item "Push Ref to Remote" 
-				     egg-log-buffer-push-to-remote
-				     :enable (egg-ref-at-pointer))) 
-  (define-key map [update] '(menu-item "Push to Another Local Branch" 
-				       egg-log-buffer-push-to-local
-				       :enable (egg-ref-at-pointer))) 
-  (define-key map [sp5] '("--"))
-  (define-key map [irebase] '(menu-item "Rebase HEAD interratively" 
-					egg-log-buffer-rebase
-					:enable (and (egg-commit-at-pointer)
-						     (egg-log-buffer-get-marked-alist)))) 
-  (define-key map [unmark] '(menu-item "Unmark for interractive Rebase " 
-				       egg-log-buffer-unmark
-				       :enable (egg-commit-at-pointer))) 
-  (define-key map [edit] '(menu-item "Mark for Editing in upcoming interractive Rebase " 
-				       egg-log-buffer-mark-edit
-				       :enable (egg-commit-at-pointer))) 
-  (define-key map [squash] '(menu-item "Mark to be Squashed in upcoming interractive Rebase " 
-				       egg-log-buffer-mark-squash
-				       :enable (egg-commit-at-pointer))) 
-  (define-key map [pick] '(menu-item "Mark to be Picked in upcoming interractive Rebase " 
-				     egg-log-buffer-mark-pick
-				     :enable (egg-commit-at-pointer))) 
-  (define-key map [sp4] '("--"))
-  (define-key map [rebase] '(menu-item "Rebase HEAD" 
-				       egg-log-buffer-rebase
-				       :enable (egg-commit-at-pointer)))
-  (define-key map [merge] '(menu-item "Merge to HEAD" 
-				      egg-log-buffer-merge
-				      :enable (egg-commit-at-pointer)))
-  (define-key map [sp3] '("--"))
-  (define-key map [rh-16] '(menu-item "Anchor HEAD (update INDEX and Workdir)" 
-				     egg-log-commit-line-menu-attach-head-index-wdir
-				     :enable (egg-commit-at-pointer)))
-  (define-key map [rh-4] '(menu-item "Anchor HEAD (update INDEX)" 
-				     egg-log-commit-line-menu-attach-head-index
-				     :enable (egg-commit-at-pointer)))
-  (define-key map [rh-0] '(menu-item "Anchor HEAD" 
-				     egg-log-buffer-attach-head
-				     :enable (egg-commit-at-pointer)))
-  (define-key map [sp2] '("--"))
-  (define-key map [reflog] '(menu-item "Show Ref History (Reflog)" 
-				       egg-log-buffer-reflog-ref
-				       :enable (egg-ref-at-pointer))) 
-  (define-key map [rm-ref] '(menu-item "Remove Ref " 
-				       egg-log-buffer-rm-ref
-				       :enable (egg-ref-at-pointer))) 
-  (define-key map [cb] '(menu-item "Create New Branch" 
-				   egg-log-buffer-create-new-branch
-				   :enable (egg-commit-at-pointer)))
-  (define-key map [co-dh] '(menu-item "Detach HEAD and Checkout" 
-				      egg-log-buffer-checkout-commit
-				      :enable (egg-commit-at-pointer)))
-  (define-key map [sp1] '("--"))
-  (define-key map [sb] '(menu-item "Start New Branch" 
-				   egg-log-buffer-start-new-branch
-				   :enable (egg-commit-at-pointer)))
-  (define-key map [co] '(menu-item "Checkout Branch" 
-				   egg-log-buffer-checkout-commit
-				   :enable (egg-head-at-pointer)))
-  (define-key map [tc] '(menu-item "Tag (Lightweight)" 
-				   egg-log-buffer-tag-commit
-				   :enable (egg-commit-at-pointer)))
-  (define-key map [atc] '(menu-item "Tag (Annotated)" 
-				    egg-log-buffer-atag-commit
-				    :enable (egg-commit-at-pointer)))
-  )
+(defconst egg-log-buffer-commit-line-menu (egg-log-make-commit-line-menu))
+(defconst egg-log-buffer-local-ref-menu (egg-log-make-commit-line-menu))
+(defconst egg-log-buffer-remote-ref-menu (egg-log-make-commit-line-menu))
+(defconst egg-log-buffer-remote-site-menu (egg-log-make-commit-line-menu))
 
 (defun egg-log-commit-line-menu-heading (pos)
   (let ((ref (get-text-property pos :ref))
@@ -3265,15 +3269,32 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		   (file-name-nondirectory 
 		    (egg-name-rev commit)))))))
 
-(defun egg-log-popup-commit-line-menu (event)
-  (interactive "e")
+(defun egg-log-popup-commit-line-menu-1 (event menu)
   (let* ((menu (nconc (list 'keymap 
-			    (egg-log-commit-line-menu-heading (point)))
-		      (cdr egg-log-commit-line-menu)))
-	 (keys (x-popup-menu event menu))      
+			     (egg-log-commit-line-menu-heading (point)))
+		      (cdr menu)))
+	 (keys (progn
+		 (force-mode-line-update)
+		 (x-popup-menu event menu)))      
 	 (cmd (and keys (lookup-key menu (apply 'vector keys)))))
     (when (and cmd (commandp cmd))
       (call-interactively cmd))))
+
+(defun egg-log-popup-local-ref-menu (event)
+  (interactive "e")
+  (egg-log-popup-commit-line-menu-1 event egg-log-buffer-local-ref-menu))
+
+(defun egg-log-popup-remote-ref-menu (event)
+  (interactive "e")
+  (egg-log-popup-commit-line-menu-1 event egg-log-buffer-remote-ref-menu))
+
+(defun egg-log-popup-remote-site-menu (event)
+  (interactive "e")
+  (egg-log-popup-commit-line-menu-1 event egg-log-buffer-remote-site-menu))
+
+(defun egg-log-popup-commit-line-menu (event)
+  (interactive "e")
+  (egg-log-popup-commit-line-menu-1 event egg-log-buffer-commit-line-menu))
 
 ;; (define-key egg-log-local-ref-map [C-down-mouse-2] 'egg-popup-log-local-ref-menu)
 ;; (define-key egg-log-local-ref-map [C-mouse-2] 'egg-popup-log-local-ref-menu)
@@ -3319,8 +3340,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
     (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
 
-    (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
-    (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
+    (define-key map [C-down-mouse-2] 'egg-log-popup-local-ref-menu)
+    (define-key map [C-mouse-2] 'egg-log-popup-local-ref-menu)
 
     map))
 
@@ -3329,8 +3350,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "d") 'egg-log-buffer-fetch-remote-ref)
 
-    (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
-    (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
+    (define-key map [C-down-mouse-2] 'egg-log-popup-remote-ref-menu)
+    (define-key map [C-mouse-2] 'egg-log-popup-remote-ref-menu)
 
     map))
 
@@ -3339,6 +3360,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (set-keymap-parent map egg-log-commit-map)
     (define-key map (kbd "d") 'egg-log-buffer-fetch)
     (define-key map (kbd "U") 'egg-log-buffer-push)
+
+    (define-key map [C-down-mouse-2] 'egg-log-popup-remote-site-menu)
+    (define-key map [C-mouse-2] 'egg-log-popup-remote-site-menu)
+
     map))
 
 (defconst egg-log-diff-map 
