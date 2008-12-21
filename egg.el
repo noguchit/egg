@@ -3175,13 +3175,16 @@ If INIT was not nil, then perform 1st-time initializations as well."
 				   :visible '(egg-remote-at-pointer))) 
     (define-key map [rdown] (list 'menu-item "Fetch Remote Ref" 
 				  'egg-log-buffer-fetch-remote-ref
-				  :visible '(egg-ref-at-pointer))) 
+				  :visible '(egg-ref-at-pointer)
+				  :enable '(egg-remote-at-pointer))) 
     (define-key map [ldown] (list 'menu-item "Push HEAD To Ref" 
 				  'egg-log-buffer-push-head-to-local
-				  :visible '(egg-ref-at-pointer))) 
+				  :visible '(egg-ref-at-pointer)
+				  :enable '(not (egg-remote-at-pointer)))) 
     (define-key map [upload] (list 'menu-item "Push Ref to Remote" 
 				   'egg-log-buffer-push-to-remote
-				   :visible '(egg-ref-at-pointer))) 
+				   :visible '(egg-ref-at-pointer)
+				   :enable '(not (egg-remote-at-pointer)))) 
     (define-key map [update] (list 'menu-item "Push to Another Local Branch" 
 				   'egg-log-buffer-push-to-local
 				   :visible '(egg-ref-at-pointer))) 
@@ -3189,7 +3192,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map [irebase] (list 'menu-item "Rebase HEAD interratively" 
 				    'egg-log-buffer-rebase
 				    :visible (egg-commit-at-pointer)
-				    :eanble (egg-log-buffer-get-marked-alist)))
+				    :enable (egg-log-buffer-get-marked-alist)))
     (define-key map [unmark] (list 'menu-item "Unmark for interractive Rebase " 
 				   'egg-log-buffer-unmark
 				   :visible '(egg-commit-at-pointer))) 
