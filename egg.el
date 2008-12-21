@@ -3191,8 +3191,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map [sp5] '("--"))
     (define-key map [irebase] (list 'menu-item "Rebase HEAD interratively" 
 				    'egg-log-buffer-rebase
-				    :visible (egg-commit-at-pointer)
-				    :enable (egg-log-buffer-get-marked-alist)))
+				    :visible '(egg-commit-at-pointer)
+				    :enable '(egg-log-buffer-get-marked-alist)))
     (define-key map [unmark] (list 'menu-item "Unmark for interractive Rebase " 
 				   'egg-log-buffer-unmark
 				   :visible '(egg-commit-at-pointer))) 
