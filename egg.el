@@ -1462,6 +1462,12 @@ the index. \\{egg-wdir-diff-section-map}")
 (defsubst egg-hunk-at-point ()
   (get-text-property (point) :hunk))
 
+(defsubst egg-diff-at-point ()
+  (get-text-property (point) :diff))
+
+(defsubst egg-point-in-section (section-id)
+   (eq (get-text-property (point) :section) section-id))
+
 (defsubst egg-safe-search (re limit &optional no)
   (save-excursion
     (save-match-data
@@ -2407,6 +2413,74 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (add-to-list 'egg-internal-status-buffer-names-list (buffer-name))
   (run-mode-hooks 'egg-status-buffer-mode-hook))
 
+
+;;; I'm here
+(defun egg-status-make-section-menu ()
+  (let ((map (make-sparse-keymap)))
+    (define-key map [f-stage] (list 'menu-item "Stage File" 
+				    'egg-diff-section-cmd-stage
+				    :visible '(egg-diff-at-point)
+				    :enable '(egg-point-in-section 'unstaged)))
+    
+    (define-key map [f-unstage] (list 'menu-item "Unstage File" 
+				      'egg-diff-section-cmd-unstage
+				      :visible '(egg-diff-at-point)
+				      :enable '(egg-point-in-section 'staged)))
+    
+    (define-key map [f-undo] (list 'menu-item "Undo File's Modifications" 
+				   'egg-diff-section-cmd-undo
+				   :visible '(egg-diff-at-point)
+				   :enable '(egg-point-in-section 'unstaged)))
+
+    (define-key map [h-stage] (list 'menu-item "Stage Hunk" 
+				    'egg-hunk-section-cmd-stage
+				    :visible '(egg-hunk-at-point)
+				    :enable '(egg-point-in-section 'unstaged)))
+    
+    (define-key map [h-unstage] (list 'menu-item "Unstage Hunk" 
+				      'egg-hunk-section-cmd-unstage
+				      :visible '(egg-hunk-at-point)
+				      :enable '(egg-point-in-section 'staged)))
+    
+    (define-key map [h-undo] (list 'menu-item "Undo Hunk" 
+				   'egg-hunk-section-cmd-undo
+				   :visible '(egg-hunk-at-point)
+				   :enable '(egg-point-in-section 'unstaged)))
+
+    (define-key map [sp9] '("--"))
+    (define-key map [prev] (list 'menu-item "Goto Prev Block"
+				 'egg-buffer-cmd-navigate-prev
+				 :enable '(egg-navigation-at-point)))
+    (define-key map [next] (list 'menu-item "Goto Next Block"
+				 'egg-buffer-cmd-navigate-next
+				 :enable '(egg-navigation-at-point)))
+    (define-key map [hs] (list 'menu-item "Toggle Hide/Show"
+			       'egg-section-cmd-toggle-hide-show
+			       :enable '(egg-navigation-at-point)))
+    (define-key map [hs-sub] (list 'menu-item "Toggle Hide/Show Subsections"
+				   'egg-section-cmd-toggle-hide-show-children
+				   :enable '(egg-navigation-at-point)))
+    (define-key map [sp8] '("--"))
+    (define-key map [goto-file] (list 'menu-item "Open File"
+				      'egg-diff-section-cmd-visit-file-other-window
+				      :visble '(and (egg-diff-at-point) (not (egg-hunk-at-point)))))
+    (define-key map [goto-line] (list 'menu-item "Locate Line"
+				      'egg-hunk-section-cmd-visit-file-other-window
+				      :visible '(egg-hunk-at-point)))
+    (define-key map [ediff] (list 'menu-item "Ediff: WorkDir vs INDEX"
+				  'egg-unstaged-section-cmd-ediff
+				  :visible '(egg-diff-at-point)
+				  :enable '(egg-point-in-section 'unstaged)))
+    (define-key map [ediff3] (list 'menu-item "Ediff3: WorkDir vs INDEX vs HEAD"
+				   'egg-staged-section-cmd-ediff3
+				   :visible '(egg-diff-at-point)
+				   :enable '(egg-point-in-section 'staged)))
+    map))
+
+(defconst egg-status-buffer-diff-menu (egg-status-make-section-menu))
+(defconst egg-status-buffer-hunk-menu (egg-status-make-section-menu))
+(defconst egg-status-buffer-mode-delta-menu (egg-status-make-section-menu))
+
 (defconst egg-status-buffer-menu (make-sparse-keymap "Egg (Git)"))
 
 (define-key egg-status-buffer-mode-map 
@@ -2415,9 +2489,15 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (let ((menu egg-status-buffer-menu))
   (define-key menu [quit] '(menu-item "Quit History View" quit-window))
   (define-key menu [refresh] '(menu-item "ReDisplay View" egg-buffer-cmd-refresh))
-  (define-key menu [goto] '(menu-item "Locate Line in File"
-				      egg-log-hunk-cmd-visit-file-other-window
-				      :enable (egg-hunk-at-point)))
+  (define-key menu [log] '(menu-item "Show Branch History" egg-log))
+  (define-key menu [sp2] '("--"))
+  (define-key menu [delta] (list 'menu-item "Delta"
+				 egg-status-buffer-mode-delta-menu
+				 :enable '(egg-diff-at-point)))
+  (define-key menu [commit] '(menu-item "Commit Staged Changes"
+					egg-commit-log-edit))
+  (define-key menu [stage] '(menu-item "Stage All Modifications"
+					egg-stage-all-files))
   (define-key menu [sp1] '("--"))
   (define-key menu [hs] '(menu-item "Toggle Hide/Show"
 				    egg-section-cmd-toggle-hide-show
@@ -2425,9 +2505,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (define-key menu [hs-sub] '(menu-item "Toggle Hide/Show Subsections"
 					egg-section-cmd-toggle-hide-show-children
 					:enable (egg-navigation-at-point)))
-  (define-key menu [prev] '(menu-item "Goto Previous Block" egg-log-buffer-prev-ref
+  (define-key menu [prev] '(menu-item "Goto Previous Block" egg-buffer-cmd-navigate-prev
 				      :enable (egg-navigation-at-point)))
-  (define-key menu [next] '(menu-item "Goto Next Block" egg-log-buffer-next-ref
+  (define-key menu [next] '(menu-item "Goto Next Block" egg-buffer-cmd-navigate-next
 				      :enable (egg-navigation-at-point))))
 
 
@@ -3266,7 +3346,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
 ;;   (cons "Egg" egg-log-local-ref-menu))
 
 
-;; I'm here
 (defconst egg-log-cmd-help-text-fmt-alist
   '((egg-log-buffer-push-to-local ref "update another branch with %s")
     (egg-log-buffer-push remote "push branches to remote %s")
