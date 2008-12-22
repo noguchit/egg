@@ -1368,6 +1368,10 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
+
+    (define-key map [C-down-mouse-2] 'egg-status-popup-staged-diff-menu)
+    (define-key map [C-mouse-2] 'egg-status-popup-staged-diff-menu)
+
     map)
   "Keymap for a diff section in sequence of staged deltas.
 \\{egg-staged-diff-section-map}")
@@ -1385,6 +1389,10 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
+
+    (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-diff-menu)
+    (define-key map [C-mouse-2] 'egg-status-popup-unstaged-diff-menu)
+
     map)
   "Keymap for a diff section in sequence of unstaged deltas.
 \\{egg-unstaged-diff-section-map}")
@@ -1411,6 +1419,10 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
+
+    (define-key map [C-down-mouse-2] 'egg-status-popup-staged-hunk-menu)
+    (define-key map [C-mouse-2] 'egg-status-popup-staged-hunk-menu)
+
     map)
   "Keymap for a hunk in a staged diff section.
 \\{egg-staged-hunk-section-map}")
@@ -1428,6 +1440,10 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
+
+    (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-hunk-menu)
+    (define-key map [C-mouse-2] 'egg-status-popup-unstaged-hunk-menu)
+
     map)
   "Keymap for a hunk in a unstaged diff section.
 \\{egg-unstaged-hunk-section-map}")
@@ -2415,8 +2431,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 
 ;;; I'm here
-(defun egg-status-make-section-menu ()
-  (let ((map (make-sparse-keymap)))
+(defun egg-status-make-section-menu (&optional name)
+  (let ((map (make-sparse-keymap name)))
     (define-key map [f-stage] (list 'menu-item "Stage File" 
 				    'egg-diff-section-cmd-stage
 				    :visible '(egg-diff-at-point)
@@ -2477,9 +2493,36 @@ If INIT was not nil, then perform 1st-time initializations as well."
 				   :enable '(egg-point-in-section 'staged)))
     map))
 
-(defconst egg-status-buffer-diff-menu (egg-status-make-section-menu))
-(defconst egg-status-buffer-hunk-menu (egg-status-make-section-menu))
+(defconst egg-status-buffer-unstaged-diff-menu (egg-status-make-section-menu "Unstaged Delta"))
+(defconst egg-status-buffer-unstaged-hunk-menu (egg-status-make-section-menu "Unstaged Hunk"))
+(defconst egg-status-buffer-staged-diff-menu (egg-status-make-section-menu "Staged Delta"))
+(defconst egg-status-buffer-staged-hunk-menu (egg-status-make-section-menu "Staged Hunk"))
 (defconst egg-status-buffer-mode-delta-menu (egg-status-make-section-menu))
+
+(defun egg-status-popup-delta-menu (event menu)
+  (let* ((keys (progn
+		 (force-mode-line-update)
+		 (x-popup-menu event menu)))      
+	 (cmd (and keys (lookup-key menu (apply 'vector keys)))))
+    (when (and cmd (commandp cmd))
+      (call-interactively cmd))))
+
+(defun egg-status-popup-unstaged-diff-menu (event)
+  (interactive "e")
+  (egg-status-popup-delta-menu event egg-status-buffer-unstaged-diff-menu))
+
+(defun egg-status-popup-staged-diff-menu (event)
+  (interactive "e")
+  (egg-status-popup-delta-menu event egg-status-buffer-staged-diff-menu))
+
+(defun egg-status-popup-unstaged-hunk-menu (event)
+  (interactive "e")
+  (egg-status-popup-delta-menu event egg-status-buffer-unstaged-hunk-menu))
+
+(defun egg-status-popup-staged-hunk-menu (event)
+  (interactive "e")
+  (egg-status-popup-delta-menu event egg-status-buffer-staged-hunk-menu))
+
 
 (defconst egg-status-buffer-menu (make-sparse-keymap "Egg (Git)"))
 
