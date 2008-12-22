@@ -463,6 +463,8 @@ is used as input to GIT."
   (egg-git-ok nil "diff" "--quiet" "--" file))
 (defsubst egg-file-committed (file) 
   (egg-git-ok nil "diff" "--quiet" "HEAD" "--" file))
+(defsubst egg-file-index-empty (file) 
+  (egg-git-ok nil "diff" "--quiet" "--cached" "--" file))
 (defsubst egg-index-empty () (egg-git-ok nil "diff" "--cached" "--quiet"))
 
 
@@ -5389,6 +5391,40 @@ current file contains unstaged changes."
   (define-key map (kbd "/") 'egg-file-log-pickaxe)
   (define-key map (kbd "=") 'egg-file-diff)
   (define-key map (kbd "~") 'egg-file-version-other-window))
+
+(defconst egg-minor-mode-menu (make-sparse-keymap "Egg (Git)"))
+(define-key egg-minor-mode-map [menu-bar egg-minor-mode-menu]
+  (cons "Egg (Git)" egg-minor-mode-menu))
+
+(let ((menu egg-minor-mode-menu))
+  (define-key menu [reflog] '(menu-item "View RefLog" egg-reflog))
+  (define-key menu [log] '(menu-item "View Project History" egg-log))
+  (define-key menu [status] '(menu-item "View Project Status" egg-status))
+  (define-key menu [blame] '(menu-item "Toggle Blame Mode" egg-file-toggle-blame-mode))
+  (define-key menu [sp3] '("--"))
+  (define-key menu [grep] '(menu-item "Search Project's Other Versions (grep)" egg-grep))
+  (define-key menu [pickaxe] '(menu-item "Search File History" egg-file-log-pickaxe))
+  (define-key menu [vother] '(menu-item "View File Other Version" egg-file-version-other-window))
+  (define-key menu [filelog] '(menu-item "View File History" egg-log))
+  (define-key menu [sp2] '("--"))
+  (define-key menu [cother] '(menu-item "Checkout File's Other Version" egg-file-checkout-other-version))
+  (define-key menu [undo]
+    '(menu-item "Cancel Modifications (revert to INDEX)" egg-file-cancel-modifications
+		:enable (not (egg-file-updated (buffer-file-name)))))
+  (define-key menu [ediff]
+    '(menu-item "EDiff File (vs INDEX)" egg-file-ediff
+		:enable (not (egg-file-updated (buffer-file-name)))))
+  (define-key menu [diff]
+    '(menu-item "Diff File (vs INDEX)" egg-file-diff
+		:enable (not (egg-file-updated (buffer-file-name)))))
+  (define-key menu [sp1] '("--"))
+  (define-key menu [commit]
+    '(menu-item "Commit File's Staged Changes" egg-commit-log-edit
+		:enable (not (egg-file-index-empty (buffer-file-name)))))
+  (define-key menu [stage]
+    '(menu-item "Stage File's Modifications" egg-file-stage-current-file
+		:enable (not (egg-file-updated (buffer-file-name)))))
+  (define-key menu [next] '(menu-item "Next Action" egg-next-action)))
 
 (defcustom egg-mode-key-prefix "C-x v"
   "Prefix keystrokes for egg minor-mode commands."
