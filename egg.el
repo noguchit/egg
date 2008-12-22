@@ -4354,10 +4354,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map [load] (list 'menu-item "(Re)Load Commit Details" 
 				 'egg-log-buffer-insert-commit
 				 :visible '(egg-commit-at-point)))
-    (define-key map [prev] (list 'menu-item "Goto Prev Commit"
+    (define-key map [prev] (list 'menu-item "Goto Prev Ref"
 				 'egg-log-buffer-prev-ref
 				 :visible '(egg-navigation-at-point)))
-    (define-key map [next] (list 'menu-item "Goto Next Commit"
+    (define-key map [next] (list 'menu-item "Goto Next Ref"
 				 'egg-log-buffer-next-ref
 				 :visible '(egg-navigation-at-point)))
     (define-key map [hs] (list 'menu-item "Toggle Hide/Show"
@@ -4528,10 +4528,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (define-key menu [hs-sub] '(menu-item "Toggle Hide/Show Subsections"
 					egg-section-cmd-toggle-hide-show-children
 					:enable (egg-navigation-at-point)))
-  (define-key menu [prev] '(menu-item "Goto Previous Commit" egg-log-buffer-prev-ref
-				      :enable (egg-navigation-at-point)))
-  (define-key menu [next] '(menu-item "Goto Next Commit" egg-log-buffer-next-ref
-				      :enable (egg-navigation-at-point))))
+  (define-key menu [prev] '(menu-item "Goto Previous Ref" egg-log-buffer-prev-ref))
+  (define-key menu [next] '(menu-item "Goto Next Ref" egg-log-buffer-next-ref)))
 
 (defconst egg-log-buffer-help-text
   (concat
@@ -5443,7 +5441,7 @@ current file contains unstaged changes."
     '(menu-item "Cancel Modifications (revert to INDEX)" egg-file-cancel-modifications
 		:enable (not (egg-file-updated (buffer-file-name)))))
   (define-key menu [commit]
-    '(menu-item "Commit File's Staged Changes" egg-commit-log-edit
+    '(menu-item "Commit Staged Changes" egg-commit-log-edit
 		:enable (not (egg-file-index-empty (buffer-file-name)))))
   (define-key menu [stage]
     '(menu-item "Stage File's Modifications" egg-file-stage-current-file
@@ -5451,6 +5449,7 @@ current file contains unstaged changes."
   (define-key menu [sp0] '("--"))
   (define-key menu [next]
     '(menu-item (egg-file-next-action-menu-name) egg-next-action
+		:keys "\\[egg-next-action]"
 		:filter egg-file-next-action-menu-binding)))
 
 (defcustom egg-mode-key-prefix "C-x v"
