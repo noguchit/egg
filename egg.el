@@ -2530,8 +2530,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
   [menu-bar egg-status-buffer-mode] (cons "Egg (Git)" egg-status-buffer-menu))
 
 (let ((menu egg-status-buffer-menu))
-  (define-key menu [quit] '(menu-item "Quit History View" quit-window))
-  (define-key menu [refresh] '(menu-item "ReDisplay View" egg-buffer-cmd-refresh))
+  (define-key menu [quit] '(menu-item "Close Status View" quit-window))
+  (define-key menu [refresh] '(menu-item "Refresh Status View" egg-buffer-cmd-refresh))
   (define-key menu [log] '(menu-item "Show Branch History" egg-log))
   (define-key menu [sp2] '("--"))
   (define-key menu [delta] (list 'menu-item "Delta"
@@ -4507,8 +4507,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   [menu-bar egg-log-buffer-mode] (cons "Egg (Git)" egg-log-buffer-menu))
 
 (let ((menu egg-log-buffer-menu))
-  (define-key menu [quit] '(menu-item "Quit History View" quit-window))
-  (define-key menu [refresh] '(menu-item "ReDisplay View" egg-buffer-cmd-refresh))
+  (define-key menu [quit] '(menu-item "Close History View" quit-window))
+  (define-key menu [refresh] '(menu-item "Refresh History View" egg-buffer-cmd-refresh))
   (define-key menu [pickaxe] '(menu-item "Search History for Changes"
 					 egg-search-changes))
   (define-key menu [goto] '(menu-item "Locate Line in File"
