@@ -5139,6 +5139,17 @@ current file contains unstaged changes."
     (:new-branch	. egg-start-new-branch)
     (:quit		. (lambda () (interactive) (message "do nothing now! later.") (ding) nil))))
 
+(defconst egg-action-menu-name-alist
+  '((:merge-file	. "Resolve File's Merge Conflicts using Ediff")
+    (:stage-file	. "Stage File's Modifications")
+    (:status		. "View Project Status")
+    (:stage-all		. "Stage All Project's Modifications")
+    (:rebase-continue	. "Continue Rebase Session")
+    (:diff-file		. "Show File's Modifications (Diff)")
+    (:commit		. "Commit Staged Changes")
+    (:sync		. "Show Project History")
+    (:new-branch	. "Start a New Branch")))
+
 (defconst egg-electrict-select-action-buffer 
   (get-buffer-create "*Egg:Select Action*"))
 
@@ -5359,6 +5370,19 @@ current file contains unstaged changes."
      
      (call-interactively (cdr (assq action egg-action-function-alist)))))
 
+(defun egg-file-next-action-menu-name ()
+  (let* ((state (egg-repo-state :unstaged :staged :error-if-not-git))
+	 (desc (egg-describe-state state))
+	 (action (egg-guess-next-action desc)))
+    (concat "Next Action: "
+	    (cdr (assq action egg-action-menu-name-alist)))))
+
+(defun egg-file-next-action-menu-binding (&optional ignored)
+  (let* ((state (egg-repo-state :unstaged :staged :error-if-not-git))
+	 (desc (egg-describe-state state))
+	 (action (egg-guess-next-action desc)))
+    (cdr (assq action egg-action-function-alist))))
+
 (defvar egg-minor-mode nil)
 (defvar egg-minor-mode-map (make-sparse-keymap "Egg"))
 (defvar egg-file-cmd-map (make-sparse-keymap "Egg:File"))
@@ -5408,9 +5432,6 @@ current file contains unstaged changes."
   (define-key menu [filelog] '(menu-item "View File History" egg-log))
   (define-key menu [sp2] '("--"))
   (define-key menu [cother] '(menu-item "Checkout File's Other Version" egg-file-checkout-other-version))
-  (define-key menu [undo]
-    '(menu-item "Cancel Modifications (revert to INDEX)" egg-file-cancel-modifications
-		:enable (not (egg-file-updated (buffer-file-name)))))
   (define-key menu [ediff]
     '(menu-item "EDiff File (vs INDEX)" egg-file-ediff
 		:enable (not (egg-file-updated (buffer-file-name)))))
@@ -5418,13 +5439,19 @@ current file contains unstaged changes."
     '(menu-item "Diff File (vs INDEX)" egg-file-diff
 		:enable (not (egg-file-updated (buffer-file-name)))))
   (define-key menu [sp1] '("--"))
+  (define-key menu [undo]
+    '(menu-item "Cancel Modifications (revert to INDEX)" egg-file-cancel-modifications
+		:enable (not (egg-file-updated (buffer-file-name)))))
   (define-key menu [commit]
     '(menu-item "Commit File's Staged Changes" egg-commit-log-edit
 		:enable (not (egg-file-index-empty (buffer-file-name)))))
   (define-key menu [stage]
     '(menu-item "Stage File's Modifications" egg-file-stage-current-file
 		:enable (not (egg-file-updated (buffer-file-name)))))
-  (define-key menu [next] '(menu-item "Next Action" egg-next-action)))
+  (define-key menu [sp0] '("--"))
+  (define-key menu [next]
+    '(menu-item (egg-file-next-action-menu-name) egg-next-action
+		:filter egg-file-next-action-menu-binding)))
 
 (defcustom egg-mode-key-prefix "C-x v"
   "Prefix keystrokes for egg minor-mode commands."
