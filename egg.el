@@ -2407,6 +2407,30 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (add-to-list 'egg-internal-status-buffer-names-list (buffer-name))
   (run-mode-hooks 'egg-status-buffer-mode-hook))
 
+(defconst egg-status-buffer-menu (make-sparse-keymap "Egg (Git)"))
+
+(define-key egg-status-buffer-mode-map 
+  [menu-bar egg-status-buffer-mode] (cons "Egg (Git)" egg-status-buffer-menu))
+
+(let ((menu egg-status-buffer-menu))
+  (define-key menu [quit] '(menu-item "Quit History View" quit-window))
+  (define-key menu [refresh] '(menu-item "ReDisplay View" egg-buffer-cmd-refresh))
+  (define-key menu [goto] '(menu-item "Locate Line in File"
+				      egg-log-hunk-cmd-visit-file-other-window
+				      :enable (egg-hunk-at-point)))
+  (define-key menu [sp1] '("--"))
+  (define-key menu [hs] '(menu-item "Toggle Hide/Show"
+				    egg-section-cmd-toggle-hide-show
+				    :enable (egg-navigation-at-point)))
+  (define-key menu [hs-sub] '(menu-item "Toggle Hide/Show Subsections"
+					egg-section-cmd-toggle-hide-show-children
+					:enable (egg-navigation-at-point)))
+  (define-key menu [prev] '(menu-item "Goto Previous Block" egg-log-buffer-prev-ref
+				      :enable (egg-navigation-at-point)))
+  (define-key menu [next] '(menu-item "Goto Next Block" egg-log-buffer-next-ref
+				      :enable (egg-navigation-at-point))))
+
+
 (defun egg-status (&optional no-update caller)
   (interactive "P")
   (let* ((egg-internal-current-state 
@@ -4174,22 +4198,22 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
 
-(defun egg-commit-at-pointer ()
+(defun egg-commit-at-point ()
   (get-text-property (point) :commit))
 
-(defun egg-ref-at-pointer ()
+(defun egg-ref-at-point ()
   (get-text-property (point) :ref))
 
-(defun egg-head-at-pointer ()
+(defun egg-head-at-point ()
   (eq (cdr (get-text-property (point) :ref)) :head))
 
-(defun egg-tag-at-pointer ()
+(defun egg-tag-at-point ()
   (eq (cdr (get-text-property (point) :ref)) :tag))
 
-(defun egg-remote-at-pointer ()
+(defun egg-remote-at-point ()
   (eq (cdr (get-text-property (point) :ref)) :remote))
 
-(defun egg-references-at-pointer ()
+(defun egg-references-at-point ()
   (get-text-property (point) :references))
 
 (defun egg-log-commit-line-menu-attach-head-index (pos)
@@ -4205,7 +4229,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((map (make-sparse-keymap)))
     (define-key map [load] (list 'menu-item "(Re)Load Commit Details" 
 				 'egg-log-buffer-insert-commit
-				 :visible '(egg-commit-at-pointer)))
+				 :visible '(egg-commit-at-point)))
     (define-key map [prev] (list 'menu-item "Goto Prev Commit"
 				 'egg-log-buffer-prev-ref
 				 :visible '(egg-navigation-at-point)))
@@ -4221,91 +4245,92 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map [sp9] '("--"))
     (define-key map [rpush] (list 'menu-item "Fetch Refs from Remote" 
 				  'egg-log-buffer-fetch
-				  :visible '(egg-remote-at-pointer))) 
+				  :visible '(egg-remote-at-point))) 
     (define-key map [rfetch] (list 'menu-item "Push Refs to Remote" 
 				   'egg-log-buffer-push
-				   :visible '(egg-remote-at-pointer))) 
+				   :visible '(egg-remote-at-point))) 
     (define-key map [rdown] (list 'menu-item "Fetch Remote Ref" 
 				  'egg-log-buffer-fetch-remote-ref
-				  :visible '(egg-ref-at-pointer)
-				  :enable '(egg-remote-at-pointer))) 
+				  :visible '(egg-ref-at-point)
+				  :enable '(egg-remote-at-point))) 
     (define-key map [ldown] (list 'menu-item "Push HEAD To Ref" 
 				  'egg-log-buffer-push-head-to-local
-				  :visible '(egg-ref-at-pointer)
-				  :enable '(not (egg-remote-at-pointer)))) 
+				  :visible '(egg-ref-at-point)
+				  :enable '(not (egg-remote-at-point)))) 
     (define-key map [upload] (list 'menu-item "Push Ref to Remote" 
 				   'egg-log-buffer-push-to-remote
-				   :visible '(egg-ref-at-pointer)
-				   :enable '(not (egg-remote-at-pointer)))) 
+				   :visible '(egg-ref-at-point)
+				   :enable '(not (egg-remote-at-point)))) 
     (define-key map [update] (list 'menu-item "Push to Another Local Branch" 
 				   'egg-log-buffer-push-to-local
-				   :visible '(egg-ref-at-pointer))) 
+				   :visible '(egg-ref-at-point))) 
     (define-key map [sp5] '("--"))
     (define-key map [irebase] (list 'menu-item "Rebase HEAD interratively" 
 				    'egg-log-buffer-rebase
-				    :visible '(egg-commit-at-pointer)
+				    :visible '(egg-commit-at-point)
 				    :enable '(egg-log-buffer-get-marked-alist)))
     (define-key map [unmark] (list 'menu-item "Unmark for interractive Rebase " 
 				   'egg-log-buffer-unmark
-				   :visible '(egg-commit-at-pointer))) 
+				   :visible '(egg-commit-at-point))) 
     (define-key map [edit] (list 'menu-item "Mark for Editing in upcoming interractive Rebase " 
 				 'egg-log-buffer-mark-edit
-				 :visible '(egg-commit-at-pointer))) 
+				 :visible '(egg-commit-at-point))) 
     (define-key map [squash] (list 'menu-item "Mark to be Squashed in upcoming interractive Rebase " 
 				   'egg-log-buffer-mark-squash
-				   :visible '(egg-commit-at-pointer))) 
+				   :visible '(egg-commit-at-point))) 
     (define-key map [pick] (list 'menu-item "Mark to be Picked in upcoming interractive Rebase " 
 				 'egg-log-buffer-mark-pick
-				 :visible '(egg-commit-at-pointer))) 
+				 :visible '(egg-commit-at-point))) 
     (define-key map [sp4] '("--"))
     (define-key map [rebase] (list 'menu-item "Rebase HEAD" 
 				   'egg-log-buffer-rebase
-				   :visible '(egg-commit-at-pointer)))
+				   :visible '(egg-commit-at-point)))
     (define-key map [merge] (list 'menu-item "Merge to HEAD" 
 				  'egg-log-buffer-merge
-				  :visible '(egg-commit-at-pointer)))
+				  :visible '(egg-commit-at-point)))
     (define-key map [sp3] '("--"))
     (define-key map [rh-16] (list 'menu-item "Anchor HEAD (update INDEX and Workdir)" 
 				  'egg-log-commit-line-menu-attach-head-index-wdir
-				  :visible '(egg-commit-at-pointer)))
+				  :visible '(egg-commit-at-point)))
     (define-key map [rh-4] (list 'menu-item "Anchor HEAD (update INDEX)" 
 				 'egg-log-commit-line-menu-attach-head-index
-				 :visible '(egg-commit-at-pointer)))
+				 :visible '(egg-commit-at-point)))
     (define-key map [rh-0] (list 'menu-item "Anchor HEAD" 
 				 'egg-log-buffer-attach-head
-				 :visible '(egg-commit-at-pointer)))
+				 :visible '(egg-commit-at-point)))
     (define-key map [sp2] '("--"))
     (define-key map [reflog] (list 'menu-item "Show Ref History (Reflog)" 
 				   'egg-log-buffer-reflog-ref
-				   :visible '(egg-ref-at-pointer))) 
+				   :visible '(egg-ref-at-point))) 
     (define-key map [rm-ref] (list 'menu-item "Remove Ref " 
 				   'egg-log-buffer-rm-ref
-				   :visible '(egg-ref-at-pointer))) 
+				   :visible '(egg-ref-at-point))) 
     (define-key map [cb] (list 'menu-item "Create New Branch" 
 			       'egg-log-buffer-create-new-branch
-			       :visible '(egg-commit-at-pointer)))
+			       :visible '(egg-commit-at-point)))
     (define-key map [co-dh] (list 'menu-item "Detach HEAD and Checkout" 
 				  'egg-log-buffer-checkout-commit
-				  :visible '(egg-commit-at-pointer)))
+				  :visible '(egg-commit-at-point)))
     (define-key map [sp1] '("--"))
     (define-key map [sb] (list 'menu-item "Start New Branch" 
 			       'egg-log-buffer-start-new-branch
-			       :visible '(egg-commit-at-pointer)))
+			       :visible '(egg-commit-at-point)))
     (define-key map [co] (list 'menu-item "Checkout Branch" 
 			       'egg-log-buffer-checkout-commit
-			       :visible '(egg-head-at-pointer)))
+			       :visible '(egg-head-at-point)))
     (define-key map [tag] (list 'menu-item "Tag (Lightweight)" 
 				'egg-log-buffer-tag-commit
-				:visible '(egg-commit-at-pointer)))
+				:visible '(egg-commit-at-point)))
     (define-key map [atag] (list 'menu-item "Tag (Annotated)" 
 				 'egg-log-buffer-atag-commit
-				 :visible '(egg-commit-at-pointer)))
+				 :visible '(egg-commit-at-point)))
     map))
 
 (defconst egg-log-buffer-commit-line-menu (egg-log-make-commit-line-menu))
 (defconst egg-log-buffer-local-ref-menu (egg-log-make-commit-line-menu))
 (defconst egg-log-buffer-remote-ref-menu (egg-log-make-commit-line-menu))
 (defconst egg-log-buffer-remote-site-menu (egg-log-make-commit-line-menu))
+(defconst egg-log-buffer-mode-commit-menu (egg-log-make-commit-line-menu))
 
 (defun egg-log-commit-line-menu-heading (pos)
   (let ((ref (get-text-property pos :ref))
@@ -4357,7 +4382,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defconst egg-log-buffer-menu (make-sparse-keymap "Egg (Git)"))
 
 (define-key egg-log-buffer-mode-map 
-  [menu-bar egg-lob-buffer-mode] (cons "Egg (Git)" egg-log-buffer-menu))
+  [menu-bar egg-log-buffer-mode] (cons "Egg (Git)" egg-log-buffer-menu))
 
 (let ((menu egg-log-buffer-menu))
   (define-key menu [quit] '(menu-item "Quit History View" quit-window))
@@ -4367,6 +4392,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (define-key menu [goto] '(menu-item "Locate Line in File"
 				      egg-log-hunk-cmd-visit-file-other-window
 				      :enable (egg-hunk-at-point)))
+  (define-key menu [sp3] '("--"))
+  (define-key menu [commit] (list 'menu-item
+				  "Operations on Commit under Cursor"
+				  egg-log-buffer-mode-commit-menu
+				  :enable '(egg-commit-at-point)))
   (define-key menu [sp1] '("--"))
   (define-key menu [hs] '(menu-item "Toggle Hide/Show"
 				    egg-section-cmd-toggle-hide-show
