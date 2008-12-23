@@ -302,17 +302,20 @@ Many Egg faces inherit from this one by default."
   "Initially hide sections of the selected type."
   :group 'egg
   :type '(set (cons :tag "Status Buffer" 
-		    (const egg-status-buffer-mode)
+		    (const :tag "Hide Blocks of type" 
+			   egg-status-buffer-mode)
 		    (radio (const :tag "Section" :section)
 			   (const :tag "File" :diff)
 			   (const :tag "Hunk" :hunk)))
 	      (cons :tag "Commit Log Buffer" 
-		    (const egg-commit-buffer-mode)
+		    (const :tag "Hide Blocks of type"
+			   egg-commit-buffer-mode)
 		    (radio (const :tag "Section" :section)
 			   (const :tag "File" :diff)
 			   (const :tag "Hunk" :hunk)))
 	      (cons :tag "Diff Buffer" 
-		    (const egg-diff-buffer-mode)
+		    (const :tag "Hide Blocks of type"
+			   egg-diff-buffer-mode)
 		    (radio (const :tag "File" :diff)
 			   (const :tag "Hunk" :hunk)))))
 
@@ -4408,8 +4411,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (egg-log-buffer-attach-head pos 16))
 
 
-(defun egg-log-make-commit-line-menu ()
-  (let ((map (make-sparse-keymap)))
+(defun egg-log-make-commit-line-menu (&optional heading)
+  (let ((map (make-sparse-keymap heading)))
     (define-key map [load] (list 'menu-item "(Re)Load Commit Details" 
 				 'egg-log-buffer-insert-commit
 				 :visible '(egg-commit-at-point)))
@@ -4515,33 +4518,30 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defconst egg-log-buffer-remote-site-menu (egg-log-make-commit-line-menu))
 (defconst egg-log-buffer-mode-commit-menu (egg-log-make-commit-line-menu))
 
-(defun egg-log-commit-line-menu-heading (pos)
+(defun egg-log-commit-line-menu-heading (pos &optional prefix)
   (let ((ref (get-text-property pos :ref))
 	(references (get-text-property pos :references))
-	(commit (get-text-property pos :commit)))
+	(commit (get-text-property pos :commit))
+	(prefix (or prefix "(Git/Egg)")))
     (cond ((consp ref)
-	   (format "(Git/Egg) %s: %s"
+	   (format "%s %s: %s" prefix
 		   (cond ((eq (cdr ref) :head) "Branch")
 			 ((eq (cdr ref) :remote) "Remote")
 			 ((eq (cdr ref) :tag) "Tag"))
 		   (car ref)))
 	  ((consp references)
-	   (concat "(Git/Egg) Ref: " (car (last references))))
+	   (concat "%s Ref: " prefix (car (last references))))
 	  (t 
-	   (concat "(Git/Egg) Commit: "
+	   (concat prefix " Commit: "
 		   (file-name-nondirectory 
 		    (egg-name-rev commit)))))))
 
-(defun egg-log-popup-commit-line-menu-1-old (event pos menu)
-  (let* ((menu (nconc (list 'keymap 
-			     (egg-log-commit-line-menu-heading pos))
-		      (cdr menu)))
-	 (keys (progn
-		 (force-mode-line-update)
-		 (x-popup-menu event menu)))      
-	 (cmd (and keys (lookup-key menu (apply 'vector keys)))))
-    (when (and cmd (commandp cmd))
-      (call-interactively cmd))))
+(defun egg-log-commit-mouse-menu-heading (&optional prefix)
+  (let* ((event last-command-event)
+	 (window (posn-window (event-end event)))
+	 (buffer (and window (window-buffer window)))
+	 (pos (posn-point (event-end event))))
+    (egg-log-commit-line-menu-heading pos prefix)))
 
 (defun egg-log-popup-commit-line-menu-1 (event generic-menu)
   (let* ((window (posn-window (event-end event)))
@@ -4598,7 +4598,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				      :enable (egg-hunk-at-point)))
   (define-key menu [sp3] '("--"))
   (define-key menu [commit] (list 'menu-item
-				  "Operations on Commit under Cursor"
+				  '(egg-log-commit-mouse-menu-heading "Operations on ")
 				  egg-log-buffer-mode-commit-menu
 				  :enable '(egg-commit-at-point)))
   (define-key menu [sp1] '("--"))
