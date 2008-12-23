@@ -298,6 +298,24 @@ Many Egg faces inherit from this one by default."
 	      (const :tag "Diff Buffer"     egg-diff-buffer-mode)
 	      (const :tag "Commit Buffer"   egg-commit-buffer-mode)))
 
+(defcustom egg-buffer-hide-section-type-on-start nil
+  "Initially hide sections of the selected type."
+  :group 'egg
+  :type '(set (cons :tag "Status Buffer" 
+		    (const egg-status-buffer-mode)
+		    (radio (const :tag "Section" :section)
+			   (const :tag "File" :diff)
+			   (const :tag "Hunk" :hunk)))
+	      (cons :tag "Commit Log Buffer" 
+		    (const egg-commit-buffer-mode)
+		    (radio (const :tag "Section" :section)
+			   (const :tag "File" :diff)
+			   (const :tag "Hunk" :hunk)))
+	      (cons :tag "Diff Buffer" 
+		    (const egg-diff-buffer-mode)
+		    (radio (const :tag "File" :diff)
+			   (const :tag "Hunk" :hunk)))))
+
 (defcustom egg-buffer-hide-help-on-start nil
   "Initially hide keybindings help."
   :group 'egg
@@ -2328,18 +2346,39 @@ rebase session."
   (egg-do-checkout (completing-read "checkout: " (egg-all-refs)
 				    nil nil (or default "HEAD"))))
 
+(defsubst egg-buffer-show-all ()
+  (interactive)
+  (setq buffer-invisibility-spec nil)
+  (if (interactive-p)
+      (force-window-update (current-buffer))))
+
 (defsubst egg-buffer-hide-all ()
   "Hide all sections in current special egg buffer."
+  (interactive)
   (let ((pos (point-min)) nav)
     (while (setq pos (next-single-property-change (1+ pos) :navigation))
       (setq nav (get-text-property pos :navigation))
-      (add-to-invisibility-spec (cons nav t)))))
+      (add-to-invisibility-spec (cons nav t))))
+  (if (interactive-p)
+      (force-window-update (current-buffer))))
+
+(defsubst egg-buffer-hide-section-type (sect-type)
+  "Hide sections of SECT-TYPE in current special egg buffer."
+  (let ((pos (point-min)) nav)
+    (while (setq pos (next-single-property-change (1+ pos) sect-type))
+      (when (get-text-property pos sect-type)
+	(setq nav (get-text-property pos :navigation))
+	(add-to-invisibility-spec (cons nav t))))))
 
 (defsubst egg-buffer-maybe-hide-all ()
   "If requsted, hide all sections in current special egg buffer.
 See `egg-buffer-hide-sub-blocks-on-start'."
-  (if (memq major-mode egg-buffer-hide-sub-blocks-on-start)
-      (egg-buffer-hide-all)))
+  (let ((sect-type (cdr (assq major-mode 
+			      egg-buffer-hide-section-type-on-start))))
+    (cond ((memq major-mode egg-buffer-hide-sub-blocks-on-start)
+	   (egg-buffer-hide-all))
+	  ((and sect-type (symbolp sect-type))
+	   (egg-buffer-hide-section-type sect-type)))))
 
 (defsubst egg-buffer-maybe-hide-help (help-nav &optional top-nav)
   "If requested, hide the help section in the current special buffer.
@@ -2472,10 +2511,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map [next] (list 'menu-item "Goto Next Block"
 				 'egg-buffer-cmd-navigate-next
 				 :enable '(egg-navigation-at-point)))
-    (define-key map [hs] (list 'menu-item "Toggle Hide/Show"
+    (define-key map [hs] (list 'menu-item "Hide/Show Current Block"
 			       'egg-section-cmd-toggle-hide-show
 			       :enable '(egg-navigation-at-point)))
-    (define-key map [hs-sub] (list 'menu-item "Toggle Hide/Show Subsections"
+    (define-key map [hs-sub] (list 'menu-item "Hide/Show SubBlocks"
 				   'egg-section-cmd-toggle-hide-show-children
 				   :enable '(egg-navigation-at-point)))
     (define-key map [sp8] '("--"))
@@ -2544,10 +2583,12 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (define-key menu [stage] '(menu-item "Stage All Modifications"
 					egg-stage-all-files))
   (define-key menu [sp1] '("--"))
-  (define-key menu [hs] '(menu-item "Toggle Hide/Show"
+  (define-key menu [hide-all] '(menu-item "Hide All" egg-buffer-hide-all))  
+  (define-key menu [show-all] '(menu-item "Show All" egg-buffer-show-all))  
+  (define-key menu [hs] '(menu-item "Hide/Show Block"
 				    egg-section-cmd-toggle-hide-show
 				    :enable (egg-navigation-at-point)))
-  (define-key menu [hs-sub] '(menu-item "Toggle Hide/Show Subsections"
+  (define-key menu [hs-sub] '(menu-item "Hide/Show SubBlocks"
 					egg-section-cmd-toggle-hide-show-children
 					:enable (egg-navigation-at-point)))
   (define-key menu [prev] '(menu-item "Goto Previous Block" egg-buffer-cmd-navigate-prev
@@ -4360,10 +4401,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map [next] (list 'menu-item "Goto Next Ref"
 				 'egg-log-buffer-next-ref
 				 :visible '(egg-navigation-at-point)))
-    (define-key map [hs] (list 'menu-item "Toggle Hide/Show"
+    (define-key map [hs] (list 'menu-item "Hide/Show Details"
 			       'egg-section-cmd-toggle-hide-show
 			       :visible '(egg-navigation-at-point)))
-    (define-key map [hs-sub] (list 'menu-item "Toggle Hide/Show Subsections"
+    (define-key map [hs-sub] (list 'menu-item "Hide/Show Details of Subsections"
 				   'egg-section-cmd-toggle-hide-show-children
 				   :visible '(egg-navigation-at-point)))
     (define-key map [sp9] '("--"))
@@ -4522,10 +4563,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				  egg-log-buffer-mode-commit-menu
 				  :enable '(egg-commit-at-point)))
   (define-key menu [sp1] '("--"))
-  (define-key menu [hs] '(menu-item "Toggle Hide/Show"
+  (define-key menu [hs] '(menu-item "Hide/Show Details"
 				    egg-section-cmd-toggle-hide-show
 				    :enable (egg-navigation-at-point)))
-  (define-key menu [hs-sub] '(menu-item "Toggle Hide/Show Subsections"
+  (define-key menu [hs-sub] '(menu-item "Hide/Show Details of Subsections"
 					egg-section-cmd-toggle-hide-show-children
 					:enable (egg-navigation-at-point)))
   (define-key menu [prev] '(menu-item "Goto Previous Ref" egg-log-buffer-prev-ref))
