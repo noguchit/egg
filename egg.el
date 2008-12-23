@@ -1357,10 +1357,28 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
 ;;; Diff/Hunk
 ;;;========================================================
 
+(defun egg-mouse-do-command (event cmd)
+  (let* ((window (posn-window (event-end event)))
+	 (buffer (and window (window-buffer window)))
+	 (position (posn-point (event-end event))))
+    (when (bufferp buffer)
+      (save-window-excursion
+	(save-excursion
+	  (with-temp-buffer buffer)
+	  (goto-char position)
+	  (call-interactively cmd))))))
+
+(defun egg-mouse-hide-show-cmd (event)
+  (interactive "e")
+  (egg-mouse-do-command event 'egg-section-cmd-toggle-hide-show))
+
 (defconst egg-hide-show-map 
   (let ((map (make-sparse-keymap "Egg:HideShow")))
     (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
     (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
+
+    (define-key map [mouse-2] 'egg-mouse-hide-show-cmd)
+    
     map)
   "Keymap for a section than can be hidden/shown.\\{egg-hide-show-map}")
 
@@ -4514,9 +4532,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		   (file-name-nondirectory 
 		    (egg-name-rev commit)))))))
 
-(defun egg-log-popup-commit-line-menu-1 (event menu)
+(defun egg-log-popup-commit-line-menu-1-old (event pos menu)
   (let* ((menu (nconc (list 'keymap 
-			     (egg-log-commit-line-menu-heading (point)))
+			     (egg-log-commit-line-menu-heading pos))
 		      (cdr menu)))
 	 (keys (progn
 		 (force-mode-line-update)
@@ -4524,6 +4542,27 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (cmd (and keys (lookup-key menu (apply 'vector keys)))))
     (when (and cmd (commandp cmd))
       (call-interactively cmd))))
+
+(defun egg-log-popup-commit-line-menu-1 (event generic-menu)
+  (let* ((window (posn-window (event-end event)))
+	 (buffer (and window (window-buffer window)))
+	 (pos (posn-point (event-end event)))
+	 menu keys cmd)
+    (when (bufferp buffer)
+      (save-window-excursion
+	(save-excursion
+	  (with-temp-buffer buffer)
+	  (goto-char pos)
+	  (setq menu 
+		(nconc (list 'keymap 
+			     (egg-log-commit-line-menu-heading pos))
+		       (cdr generic-menu)))
+	  (setq keys (progn
+		       (force-mode-line-update)
+		       (x-popup-menu event menu)))
+	  (setq cmd (and keys (lookup-key menu (apply 'vector keys))))
+	  (when (and cmd (commandp cmd))
+	    (call-interactively cmd)))))))
 
 (defun egg-log-popup-local-ref-menu (event)
   (interactive "e")
