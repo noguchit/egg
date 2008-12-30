@@ -4021,6 +4021,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-log-buffer-attach-head (pos &optional strict-level)
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+	 (commit (egg-commit-at-point))
 	 (branch (egg-current-branch))
 	 (update-index (> strict-level 3))
 	 (update-wdir (> strict-level 15))
@@ -4028,12 +4029,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			 (if branch 
 			     (concat "move " branch)
 			   "attach HEAD")
-			 rev
+			 (if branch (substring commit 0 8) rev)
 			 (cond (update-wdir " (and update workdir)")
 			       (update-index " (and update index)")
 			       (t "")))))
     (if (y-or-n-p prompt)
-	(egg-do-move-head rev update-wdir update-index))))
+	(egg-do-move-head (if branch commit rev)
+			  update-wdir update-index))))
 
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
