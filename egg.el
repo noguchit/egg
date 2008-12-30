@@ -4972,6 +4972,145 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (egg-reflog (car (get-text-property pos :ref))))
 
 ;;;========================================================
+;;; stash
+;;;========================================================
+(defsubst egg-list-stash (&optional ignored)
+  (egg-git-ok t "stash" "list" "--pretty=oneline"))
+
+(define-egg-buffer stash "*%s-stash@%s*"
+  (egg-file-log-buffer-mode)
+  (use-local-map egg-stash-buffer-mode-map)
+  (setq major-mode 'egg-stash-buffer-mode
+	mode-name  "Egg-Stash")
+  (run-mode-hooks 'egg-stash-buffer-mode-hook))
+
+(defun egg-stash-buffer-do-insert-stash (pos)
+  (save-excursion
+    (let ((stash (get-text-property pos :stash))
+	  (nav (get-text-property pos :navigation))
+	  (inhibit-read-only t)
+	  beg end)
+      (goto-char pos)
+      (goto-char (1+ (line-end-position)))
+      (setq beg (point))
+      (unless (egg-git-ok t "stash" "show" "-p" stash)
+	(error "error calling git stash show %s!" stash))
+      (setq end (point))
+      (egg-delimit-section :stash stash beg end (1- beg) nil nav)
+      (put-text-property beg end 'keymap egg-section-map)
+      (egg-decorate-diff-section :begin beg
+				 :end end
+				 :diff-map egg-log-diff-map
+				 :hunk-map egg-log-hunk-map)
+      (goto-char beg)
+      (setq end (next-single-property-change beg :diff))
+;;;       (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
+;;;       (put-text-property (+  indent-column beg) (line-end-position)
+;;; 			 'face 'egg-text-2)
+      (forward-line 1)
+      (set-buffer-modified-p nil))))
+
+(defun egg-stash-buffer-show (pos)
+  (interactive "d")
+  (let* ((next (next-single-property-change pos :diff))
+	 (stash (and next (get-text-property next :stash))))
+    (unless (equal (get-text-property pos :stash) stash)
+      (egg-stash-buffer-do-insert-stash pos))))
+
+(defconst egg-stash-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:StashBuffer")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map "n" 'egg-stash-buffer-next-stash)
+    (define-key map "s" 'egg-status)
+    (define-key map "p" 'egg-stash-buffer-prev-stash)
+    (define-key map "l" 'egg-log)
+
+    map))
+
+(defconst egg-stash-map
+  (let ((map (make-sparse-keymap "Egg:Stash")))
+    (set-keymap-parent map egg-hide-show-map)
+    (define-key map (kbd "SPC") 'egg-stash-buffer-show)
+    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
+    (define-key map "a" 'egg-stash-buffer-apply)
+    (define-key map (kbd "DEL") 'egg-stash-buffer-drop)
+    (define-key map "x" 'egg-stash-buffer-drop)
+    (define-key map "X" 'egg-stash-buffer-clear)
+    map))
+
+(defconst egg-stash-help-text
+  (concat
+   (egg-text "Common Key Bindings:" 'egg-help-header-2) "\n"
+   (egg-pretty-help-text
+    "\\<egg-stash-buffer-mode-map>"
+    "\\[egg-stash-buffer-next-stash]:next stash  "
+    "\\[egg-stash-buffer-prev-stash]:previous stash  " 
+    "\\[egg-status]:show repo's status  "
+    "\\[egg-buffer-cmd-refresh]:redisplay  " 
+    "\\[quit-window]:quit\n" )
+   (egg-text "Extra Key Bindings for a Stash line:" 'egg-help-header-2) "\n"
+   (egg-pretty-help-text
+    "\\<egg-stash-map>"
+    "\\[egg-stash-buffer-apply]:apply\n" 
+    "\\[egg-stash-buffer-show]:load details\n" 
+    "\\[egg-stash-buffer-drop]:delete stash\n"
+    "\\[egg-stash-buffer-pop]:pop and apply stash\n"
+    "\\[egg-stash-buffer-clear]:delete all\n"
+    )
+   "\n"
+   ))
+
+(defun egg-decorate-stash-list (&optional line-map)
+  (let ((start (point)) stash-beg stash-end beg end msg-beg msg-end
+	name msg)
+    (save-excursion
+      (while (re-search-forward "^\\(stash@{[0-9]+}\\): +\\(.+\\)$" nil t)
+	(setq beg (match-beginning 0)
+	      stash-end (match-end 1)
+	      msg-beg (match-beginning 2)
+	      end (match-end 0))
+
+	(setq name (buffer-substring-no-properties beg stash-end)
+	      msg (buffer-substring-no-properties msg-beg end))
+
+	;; entire line
+	(add-text-properties beg (1+ end)
+			     (list :navigation name
+				   :stash name
+				   'keymap line-map))
+
+	;; comment
+	(put-text-property beg stash-end 'face 'egg-tag-mono)
+	(put-text-property msg-beg end 'face 'egg-text-2)))))
+
+(defsubst egg-stash-buffer-decorate-stash-list ()
+  (let ((beg (point)))
+    (egg-list-stash)
+    (unless (= (char-before (point-max)) ?\n)
+      (goto-char (point-max))
+      (insert ?\n))
+    (goto-char beg)
+    (egg-decorate-stash-list egg-stash-map)))
+
+(defun egg-stash ()
+  (interactive)
+  (let ((egg-internal-current-state (egg-repo-state :error-if-not-git))
+	(buffer (egg-get-stash-buffer 'create))
+	title help)
+    (setq title (concat (egg-text "Stash(es)" 'egg-branch)))
+    (with-current-buffer buffer
+      (set 
+       (make-local-variable 'egg-internal-log-buffer-closure)
+       (list :title title
+	     :closure #'egg-stash-buffer-decorate-stash-list))
+      (when (memq :stash egg-show-key-help-in-buffers)
+	(setq help egg-stash-help-text))
+      (if help (plist-put egg-internal-log-buffer-closure :help help)))
+    (egg-log-buffer-simple-redisplay buffer 'init)
+    (pop-to-buffer buffer t)))
+
+
+;;;========================================================
 ;;; annotated tag
 ;;;========================================================
 (defvar egg-internal-annotated-tag-name nil)
