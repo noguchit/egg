@@ -2888,6 +2888,17 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	  (egg-sync-0 "checkout" "-b" "-f" name rev)
 	(egg-sync-0 "checkout" "-b" name rev)))))
 
+(defun egg-do-apply-stash (stash)
+  (let ((state (egg-repo-state))
+	output)
+
+    (setq output (egg-sync-0 "stash" "apply" stash))
+    (if output
+	(egg-revert-all-visited-files)
+      (message "GIT-APPLY> failed to apply %s" stash)
+      (egg-status nil :sentinel))
+    output))
+
 (defun egg-do-move-head (rev &optional update-wdir update-index)
   (when (egg-show-git-output
 	 (cond (update-wdir (egg-sync-0 "reset" "--hard" rev))
@@ -5037,6 +5048,17 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (stash (and next (get-text-property next :stash))))
     (unless (equal (get-text-property pos :stash) stash)
       (egg-stash-buffer-do-insert-stash pos))))
+
+(defun egg-stash-buffer-apply (pos)
+  (interactive "d")
+  (unless (egg-wdir-clean)
+    (egg-status)
+    (error "Cannot aplly stash on dirty work-dir"))
+  (let ((stash (get-text-property pos :stash)))
+    (when (and stash (stringp stash)
+	       (egg-do-apply-stash stash))
+      (message "GIT-STASH> successfully applied %s" stash)
+      (egg-status))))
 
 (defconst egg-stash-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StashBuffer")))
