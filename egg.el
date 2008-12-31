@@ -2930,7 +2930,17 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (setq output (egg-sync-0 "stash" "apply" stash))
     (if output
 	(egg-revert-all-visited-files)
-      (message "GIT-APPLY> failed to apply %s" stash)
+      (message "GIT-STASH> failed to apply %s" stash)
+      (egg-status nil :sentinel))
+    output))
+
+(defun egg-do-pop-stash ()
+  (let ((state (egg-repo-state))
+	output)
+    (setq output (egg-sync-0 "stash" "pop"))
+    (if output
+	(egg-revert-all-visited-files)
+      (message "GIT-STASH> failed to pop WIP")
       (egg-status nil :sentinel))
     output))
 
@@ -5084,21 +5094,34 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (unless (equal (get-text-property pos :stash) stash)
       (egg-stash-buffer-do-insert-stash pos))))
 
-(defun egg-stash-buffer-apply (pos)
-  (interactive "d")
+(defun egg-stash-buffer-pop (&optional no-confirm)
+  (interactive "P")
+  (unless (egg-wdir-clean)
+    (egg-status)
+    (error "Cannot aplly stash on dirty work-dir"))
+  (when (or no-confirm
+	    (y-or-n-p "pop and apply last WIP to repo? "))
+      (when (egg-do-pop-stash)
+	(message "GIT-STASH> successfully popped and applied last WIP")
+	(egg-status))))
+
+(defun egg-stash-buffer-apply (pos &optional no-confirm)
+  (interactive "dP")
   (unless (egg-wdir-clean)
     (egg-status)
     (error "Cannot aplly stash on dirty work-dir"))
   (let ((stash (get-text-property pos :stash)))
-    (when (and stash (stringp stash)
-	       (egg-do-apply-stash stash))
-      (message "GIT-STASH> successfully applied %s" stash)
-      (egg-status))))
+    (when (and stash (stringp stash) 
+	       (or no-confirm
+		   (y-or-n-p (format "apply WIP %s to repo? " stash))))
+      (when (egg-do-apply-stash stash)
+	(message "GIT-STASH> successfully applied %s" stash)
+	(egg-status)))))
 
 (defun egg-buffer-stash-wip (msg)
   (interactive "sshort description of this work-in-progress: ")
   (egg-do-stash-wip msg)
-  (egg-status))
+  (egg-stash))
 
 (defconst egg-stash-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StashBuffer")))
@@ -5106,6 +5129,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map "n" 'egg-stash-buffer-next-stash)
     (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-stash-buffer-prev-stash)
+    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
+    (define-key map (kbd "o") 'egg-stash-buffer-pop)
     (define-key map "l" 'egg-log)
 
     map))
@@ -5114,7 +5139,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((map (make-sparse-keymap "Egg:Stash")))
     (set-keymap-parent map egg-hide-show-map)
     (define-key map (kbd "SPC") 'egg-stash-buffer-show)
-    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
+    (define-key map (kbd "RET") 'egg-stash-buffer-apply)
     (define-key map "a" 'egg-stash-buffer-apply)
     (define-key map (kbd "DEL") 'egg-stash-buffer-drop)
     (define-key map "x" 'egg-stash-buffer-drop)
