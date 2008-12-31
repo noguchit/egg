@@ -1449,6 +1449,7 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
+    (define-key map (kbd "w") 'egg-buffer-stash-wip)
 
     (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-unstaged-diff-menu)
@@ -2123,6 +2124,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     (define-key map (kbd "c") 'egg-commit-log-edit)
     (define-key map (kbd "o") 'egg-checkout-ref)
     (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "w") 'egg-buffer-stash-wip)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
     map)
@@ -2879,6 +2881,17 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (egg-sync-do egg-git-command nil nil (list "add" "-u"))
 	(message "staged all tracked files's modifications"))))
 
+(defun egg-do-stash-wip (msg)
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir)))
+    (if (egg-repo-clean)
+	(error "No WIP to stash")
+      (when (egg-show-git-output
+	     (if (and msg (stringp msg))
+		 (egg-sync-0 "stash" "save" msg)
+	       (egg-sync-0 "stash" "save"))
+	     1 "GIT-STASH")
+	(egg-revert-all-visited-files)))))
 
 (defun egg-do-checkout (rev)
   (let* ((git-dir (egg-git-dir))
@@ -5081,6 +5094,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       (egg-do-apply-stash stash))
       (message "GIT-STASH> successfully applied %s" stash)
       (egg-status))))
+
+(defun egg-buffer-stash-wip (msg)
+  (interactive "sshort description of this work-in-progress: ")
+  (egg-do-stash-wip msg)
+  (egg-status))
 
 (defconst egg-stash-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StashBuffer")))
