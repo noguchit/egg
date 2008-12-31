@@ -158,6 +158,15 @@ Many Egg faces inherit from this one by default."
   "Face for an annotated branch."
   :group 'egg-faces)
 
+(defface egg-stash-mono
+  '((((class color) (background light))
+     :foreground "DarkGoldenRod" :inherit bold)
+    (((class color) (background dark))
+     :foreground "LightGreen" :inherit bold)
+    (t :weight bold))
+  "Face for a stash identifier."
+  :group 'egg-faces)
+
 (defface egg-remote-mono
   '((((class color) (background light))
      :foreground "Orchid" :inherit bold)
@@ -2014,17 +2023,25 @@ exit code ACCEPTED-CODE is considered a success."
     (funcall egg-buffer-refresh-func (current-buffer))
     (recenter)))
 
+(defun egg-buffer-cmd-next-block (nav-prop)
+  "Move to the next block indentified by text property NAV-PROP."
+  (goto-char (or (next-single-property-change (point) nav-prop)
+		 (point))))
+
+(defun egg-buffer-cmd-prev-block (nav-prop)
+  "Move to the previous block indentified by text property NAV-PROP."
+  (goto-char (previous-single-property-change (point) nav-prop 
+					      nil (point-min))))
+
 (defun egg-buffer-cmd-navigate-next ()
   "Move to the next section."
   (interactive)
-  (goto-char (or (next-single-property-change (point) :navigation)
-		 (point))))
+  (egg-buffer-cmd-next-block :navigation))
 
 (defun egg-buffer-cmd-navigate-prev ()
   "Move to the previous section."
   (interactive)
-  (goto-char (previous-single-property-change (point) :navigation
-					      nil (point-min))))
+  (egg-buffer-cmd-prev-block :navigation))
 
 (defconst egg-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:Buffer")))
@@ -4993,13 +5010,17 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "stash" "show" "-p" stash)
+      (unless (egg-git-ok t "stash" "show" "-p" 
+			  "--src-prefix=BASE:/" "--dst-prefix=WIP:/"
+			  stash)
 	(error "error calling git stash show %s!" stash))
       (setq end (point))
       (egg-delimit-section :stash stash beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
       (egg-decorate-diff-section :begin beg
 				 :end end
+				 :src-prefix "BASE:/"
+				 :dst-prefix "WIP:/"
 				 :diff-map egg-log-diff-map
 				 :hunk-map egg-log-hunk-map)
       (goto-char beg)
@@ -5037,6 +5058,17 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map "x" 'egg-stash-buffer-drop)
     (define-key map "X" 'egg-stash-buffer-clear)
     map))
+
+(defun egg-stash-buffer-next-stash ()
+  "Move to the next stash."
+  (interactive)
+  (egg-buffer-cmd-next-block :stash))
+
+(defun egg-stash-buffer-prev-stash ()
+  "Move to the previous stash."
+  (interactive)
+  (egg-buffer-cmd-prev-block :stash))
+
 
 (defconst egg-stash-help-text
   (concat
@@ -5080,7 +5112,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				   'keymap line-map))
 
 	;; comment
-	(put-text-property beg stash-end 'face 'egg-tag-mono)
+	(put-text-property beg stash-end 'face 'egg-stash-mono)
 	(put-text-property msg-beg end 'face 'egg-text-2)))))
 
 (defsubst egg-stash-buffer-decorate-stash-list ()
