@@ -388,7 +388,8 @@ Different versions of git have different names for this subdir."
 		 (const "rebase-merge")
 		 string))
 
-(defcustom egg-show-key-help-in-buffers '(:log :status :diff :file-log :reflog)
+(defcustom egg-show-key-help-in-buffers 
+  '(:log :status :diff :file-log :reflog)
   "Display keybinding help in egg special buffers."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   :status)
@@ -397,6 +398,13 @@ Different versions of git have different names for this subdir."
 	      (const :tag "RefLog Buffer"   :reflog)
 	      (const :tag "Diff Buffer"     :diff)
 	      (const :tag "Commit Buffer"   :commit)))
+
+(defcustom egg-git-command "git"
+  "Name or full-path to the git command.
+Set this to the appropriate string in the case where `git' is not the
+desirable way to invoke GIT."
+  :group 'egg
+  :type 'string)
 
 
 (defcustom egg-dummy-option nil
@@ -439,13 +447,13 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
 (defsubst egg-commit-contents (rev)
   "Retrieve the raw-contents of the commit REV."
   (with-temp-buffer
-    (call-process "git" nil t nil "cat-file" "commit" rev)
+    (call-process egg-git-command nil t nil "cat-file" "commit" rev)
     (buffer-string)))
 
 (defsubst egg-commit-message (rev)
   "Retrieve the commit message of REV."
   (with-temp-buffer
-    (call-process "git" nil t nil "cat-file" "commit" rev)
+    (call-process egg-git-command nil t nil "cat-file" "commit" rev)
     (goto-char (point-min))
     (re-search-forward "^\n")
     (buffer-substring-no-properties (match-end 0) (point-max))))
@@ -468,7 +476,7 @@ ARGS is a list of arguments to pass to PROGRAM."
 
 (defsubst egg-git-to-string (&rest args)
   "run GIT wih ARGS and return the output as a string."
-  (egg-cmd-to-string-1 "git" args))
+  (egg-cmd-to-string-1 egg-git-command args))
 
 (defsubst egg-cmd-ok (program buffer &rest args)
   "run PROGRAM with ARGS and insert output into BUFFER at point.
@@ -480,13 +488,13 @@ current-buffer would be used."
   "run GIT with ARGS and insert output into BUFFER at point.
 return the t if the exit-code was 0. if BUFFER was t then
 current-buffer would be used."
-  (= (apply 'call-process "git" nil buffer nil args) 0))
+  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
 
 (defsubst egg-git-region-ok (start end &rest args)
   "run GIT with ARGS and insert output into current buffer at point.
 return the t if the exit-code was 0. The text between START and END
 is used as input to GIT."
-  (= (apply 'call-process-region start end "git" t t nil args) 0))
+  (= (apply 'call-process-region start end egg-git-command t t nil args) 0))
 
 (defsubst egg-wdir-clean () (egg-git-ok nil "diff" "--quiet"))
 (defsubst egg-file-updated (file) 
@@ -502,13 +510,14 @@ is used as input to GIT."
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (save-match-data
-    (split-string (or (egg-cmd-to-string-1 "git" args) "") "[\n]+" t)))
+    (split-string (or (egg-cmd-to-string-1 egg-git-command args) "")
+		  "[\n]+" t)))
 
 (defun egg-git-lines-matching (re idx &rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (with-temp-buffer
-    (when (= (apply 'call-process "git" nil t nil args) 0)
+    (when (= (apply 'call-process egg-git-command nil t nil args) 0)
       (let (lines)
 	(save-match-data
 	  (goto-char (point-min))
@@ -520,7 +529,7 @@ Return the output lines as a list of strings."
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (with-temp-buffer
-    (when (= (apply 'call-process "git" nil t nil args) 0)
+    (when (= (apply 'call-process egg-git-command nil t nil args) 0)
       (let (lines matches)
 	(save-match-data
 	  (goto-char (point-min))
@@ -652,7 +661,7 @@ END-RE is the regexp to match the end of a record."
 
 (defsubst egg-is-in-git ()
   "is the default-directory in a git repo."
-  (= (call-process "git" nil nil nil "rev-parse" "--git-dir") 0))
+  (= (call-process egg-git-command nil nil nil "rev-parse" "--git-dir") 0))
 
 (defsubst egg-is-dir-in-git (dir)
   "is DIR in a git repo."
@@ -1116,7 +1125,8 @@ as repo state instead of re-read from disc."
 (defsubst egg-config-section-raw (type &optional name)
   (egg-pick-file-contents (concat (egg-git-dir) "/config")
 			  (concat "^"
-				  (if name (format "\\[%s \"%s\"\\]" type name)
+				  (if name 
+				      (format "\\[%s \"%s\"\\]" type name)
 				    (format "\\[%s\\]" type))
 				  "\n"
 				  "\\(\\(?:\t.+\n\\)+\\)")
@@ -1215,7 +1225,7 @@ success."
       (insert "EGG-GIT-CMD:\n")
       (insert (format "%S\n" args))
       (insert "EGG-GIT-OUTPUT:\n")
-      (setq proc (apply 'start-process "egg-git" buf "git" args))
+      (setq proc (apply 'start-process "egg-git" buf egg-git-command args))
       (setq mode-line-process " git")
       (when (and (consp func-args) (functionp (car func-args)))
 	(process-put proc :callback-func (car func-args))
@@ -1223,7 +1233,7 @@ success."
       (when (stringp accepted-msg)
 	(process-put proc :accepted-msg accepted-msg)
 	(process-put proc :accepted-code exit-code))
-      (process-put proc :cmds (cons "git" args))
+      (process-put proc :cmds (cons egg-git-command args))
       (set-process-sentinel proc #'egg-process-sentinel))
     proc))
 
@@ -1684,9 +1694,9 @@ positions of the sequence as well as the decorations.
 		  "--- " a "\\(.+\\)\\|"		;5 src
 		  "\\+\\+\\+ " b "\\(.+\\)\\|"		;6 dst
 		  "index \\(.+\\)\\|"			;7 index
-		  "\\+\\+<<<<<<< \\(.+\\):.+\\|"		;8 conflict start
-		  "\\(\\+\\+=======\\)\\|"			;9 conflict div
-		  "\\+\\+>>>>>>> \\(.+\\):.+\\|"		;10 conflict end
+		  "\\+\\+<<<<<<< \\(.+\\):.+\\|"	;8 conflict start
+		  "\\(\\+\\+=======\\)\\|"		;9 conflict div
+		  "\\+\\+>>>>>>> \\(.+\\):.+\\|"	;10 conflict end
 		  "\\(-.*\\)\\|"			;11 del
 		  "\\(\\+.*\\)\\|"			;12 add
 		  "\\( .*\\)"				;13 none
@@ -2326,7 +2336,7 @@ rebase session."
 			 'face 'egg-section-title)
 	    "\n")
     (setq inv-beg (1- (point)))
-    (call-process "git" nil t nil "ls-files" "--others"  
+    (call-process egg-git-command nil t nil "ls-files" "--others"  
 		  "--exclude-standard")
     (setq end (point))
     (egg-delimit-section :section 'untracked beg end 
@@ -2340,8 +2350,8 @@ rebase session."
 	    "\n")
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
-    (apply 'call-process "git" nil t nil "diff" "--no-color"  "-p"
-	   "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
+    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
+	   "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
@@ -2365,8 +2375,8 @@ rebase session."
 	    "\n")
     (setq diff-beg (point)
 	  inv-beg (1- diff-beg))
-    (apply 'call-process "git" nil t nil "diff" "--no-color" "--cached" "-p"
-	   "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
+    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
+	   "--cached" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
@@ -2463,7 +2473,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(setq proc (start-process (format "refresh index in %s"
 					  default-directory)
 				  nil
-				  "git" "update-index"
+				  egg-git-command "update-index"
 				  "-q" "--really-refresh" "--unmerged"))
 	  (set-process-sentinel proc #'egg-internal-background)))))
 
@@ -2723,7 +2733,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-sync-do (program stdin accepted-codes args)
   (let (logger ret)
-    (setq logger (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
+    (setq logger (egg-cmd-log "RUN:" program " " 
+			      (mapconcat 'identity args " ")
 			      (if stdin " <REGION\n" "\n")))
     (setq ret 
 	  (cond ((stringp stdin)
@@ -2742,13 +2753,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (egg-sync-do program (cons beg end) nil args))
 
 (defsubst egg-sync-0 (&rest args)
-  (egg-sync-do "git" nil nil args))
+  (egg-sync-do egg-git-command nil nil args))
 
 (defsubst egg-sync-do-region (program beg end &rest args)
   (egg-sync-do program (cons beg end) nil args))
 
 (defsubst egg-sync-git-region (beg end &rest args)
-  (egg-sync-do "git" (cons beg end) nil args))
+  (egg-sync-do egg-git-command (cons beg end) nil args))
 
 (defun egg-sync-do-file (file program stdin accepted-codes args)
   (let ((default-directory (file-name-directory (egg-git-dir)))
@@ -2787,13 +2798,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
   (egg-show-git-output 
-   (egg-hunk-section-patch-cmd pos "git" "apply" "--cached")
+   (egg-hunk-section-patch-cmd pos egg-git-command "apply" "--cached")
    -1 "GIT-APPLY"))
 
 (defun egg-hunk-section-cmd-unstage (pos)
   (interactive (list (point)))
   (egg-show-git-output 
-   (egg-hunk-section-patch-cmd pos "git" "apply" "--cached" "--reverse")
+   (egg-hunk-section-patch-cmd pos egg-git-command "apply"
+			       "--cached" "--reverse")
    -1 "GIT-APPLY"))
 
 (defun egg-hunk-section-cmd-undo (pos)
@@ -2808,7 +2820,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let ((file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (egg-sync-do-file file "git" nil accepted-codes
+    (egg-sync-do-file file egg-git-command nil accepted-codes
 		      (append args (list file)))))
 
 (defun egg-diff-section-cmd-stage (pos)
@@ -2838,7 +2850,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	  (if (stringp src-rev)
 	      (list "checkout" src-rev "--" file)
 	    (list "checkout" "--" file)))
-    (when (setq file (egg-sync-do-file file "git" nil nil args))
+    (when (setq file (egg-sync-do-file file egg-git-command nil nil args))
       (if (consp file) (setq file (car file)))
       (when (stringp file)
 	(egg-revert-visited-files file)))))
@@ -2847,21 +2859,22 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (interactive)
   (let ((git-dir (egg-git-dir))
 	(file (buffer-file-name)))
-    (when (egg-sync-do-file file "git" nil nil (list "add" "--" file))
+    (when (egg-sync-do-file file egg-git-command nil nil
+			    (list "add" "--" file))
 	(message "staged %s modifications" file))))
 
 (defun egg-stage-all-files ()
   (interactive)
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir)))
-    (when (egg-sync-do "git" nil nil (list "add" "-u"))
+    (when (egg-sync-do egg-git-command nil nil (list "add" "-u"))
 	(message "staged all tracked files's modifications"))))
 
 
 (defun egg-do-checkout (rev)
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir)))
-    (if (egg-sync-do "git" nil nil (list "checkout" rev))
+    (if (egg-sync-do egg-git-command nil nil (list "checkout" rev))
 	(egg-revert-all-visited-files))))
 
 (defun egg-do-tag (&optional rev prompt force)
@@ -3214,7 +3227,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(setq help-end (point)))
       (setq pos (point))
       (setq beg (point))
-      (apply 'call-process "git" nil t nil "diff" args)
+      (apply 'call-process egg-git-command nil t nil "diff" args)
       (unless (> (point) beg)
 	(insert (egg-text "No difference!\n" 'egg-text-4)))
       (egg-delimit-section :section 'file (point-min) (point) inv-beg
@@ -5275,7 +5288,8 @@ current file contains unstaged changes."
       (unless (y-or-n-p (format "ignored uncommitted changes in %s? " file))
 	(error "File %s contains uncommitted changes!" file)))
     (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
-    (when (egg-sync-do-file file "git" nil nil (list "checkout" rev "--" file))
+    (when (egg-sync-do-file file egg-git-command nil nil
+			    (list "checkout" rev "--" file))
       (revert-buffer t t t))))
 
 (defun egg-file-cancel-modifications (&optional no-confirm)
@@ -5291,7 +5305,8 @@ current file contains unstaged changes."
     (when (and file-modified (not no-confirm))
       (unless (y-or-n-p (format "ignored unstaged changes in %s? " file))
 	(error "File %s contains unstaged changes!" file)))
-    (when (egg-sync-do-file file "git" nil nil (list "checkout" "--" file))
+    (when (egg-sync-do-file file egg-git-command nil nil
+			    (list "checkout" "--" file))
       (revert-buffer t t t))))
 
 (defun egg-start-new-branch ()
@@ -5312,7 +5327,8 @@ current file contains unstaged changes."
     (with-current-buffer buf
       (let ((inhibit-read-only t))
 	(erase-buffer)
-	(unless (= (call-process "git" nil buf nil "show" git-name)
+	(unless (= (call-process egg-git-command nil buf nil "show"
+				 git-name)
 		   0)
 	  (error "Failed to get %s's version: %s" file rev))
 	(when (and (functionp mode) same-mode)
