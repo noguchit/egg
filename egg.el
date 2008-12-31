@@ -2323,10 +2323,19 @@ rebase session."
 	(kill-buffer (current-buffer))))
     (egg-buffer-cmd-refresh)))
 
+(defun egg-status-buffer-stage-untracked-file ()
+  (interactive)
+  (let ((file (ffap-file-at-point)))
+    (when (egg-sync-do-file file egg-git-command nil nil
+			    (list "add" "--" file))
+      (message "new file %s added" file))))
+
 (defconst egg-untracked-file-map
   (let ((map (make-sparse-keymap "Egg:UntrackedFile")))
     (define-key map (kbd "RET") 'egg-find-file-at-point)
     (define-key map (kbd "DEL") 'egg-ignore-pattern-from-string-at-point)
+    (define-key map "s" 'egg-status-buffer-stage-untracked-file)
+    (define-key map "i" 'egg-status-buffer-stage-untracked-file)
     map))
 
 (defun egg-sb-insert-untracked-section ()
