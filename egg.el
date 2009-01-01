@@ -1456,7 +1456,6 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
-    (define-key map (kbd "w") 'egg-buffer-stash-wip)
 
     (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-unstaged-diff-menu)
