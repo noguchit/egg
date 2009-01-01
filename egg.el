@@ -406,6 +406,13 @@ desirable way to invoke GIT."
   :group 'egg
   :type 'string)
 
+(defcustom egg-patch-command "patch"
+  "Name or full-path to the patch command.
+Set this to the appropriate string in the case where `patch' is not the
+desirable way to invoke gnu patch command."
+  :group 'egg
+  :type 'string)
+
 
 (defcustom egg-dummy-option nil
   "Foo bar"
@@ -2821,7 +2828,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-hunk-section-cmd-undo (pos)
   (interactive (list (point)))
-  (let ((file (egg-hunk-section-patch-cmd pos "patch"
+  (let ((file (egg-hunk-section-patch-cmd pos egg-patch-command 
 					  "-p1" "--quiet" "--reverse")))
     (if (consp file) (setq file (car file)))
     (when (stringp file)
@@ -2878,8 +2885,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (interactive)
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir)))
-    (when (egg-sync-do egg-git-command nil nil (list "add" "-u"))
-	(message "staged all tracked files's modifications"))))
+    (when (egg-sync-0 "add" "-u")
+      (message "staged all tracked files's modifications"))))
 
 (defun egg-do-stash-wip (msg)
   (let* ((git-dir (egg-git-dir))
@@ -2896,7 +2903,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-do-checkout (rev)
   (let* ((git-dir (egg-git-dir))
 	 (default-directory (file-name-directory git-dir)))
-    (if (egg-sync-do egg-git-command nil nil (list "checkout" rev))
+    (if (egg-sync-0 "checkout" rev)
 	(egg-revert-all-visited-files))))
 
 (defun egg-do-tag (&optional rev prompt force)
@@ -3413,15 +3420,23 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defvar egg-log-buffer-comment-column nil)
 (defvar egg-internal-log-buffer-closure nil)
 
-(defun egg-run-git-log-HEAD ()
-  (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
-	      "--graph" "--topo-order"
-		"--pretty=oneline" "--decorate"))
+(defun egg-run-git-log-HEAD (&optional refs-only)
+  (if refs-only
+      (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
+		  "--graph" "--topo-order" "--simplify-by-decoration"
+		  "--pretty=oneline" "--decorate")
+    (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
+		"--graph" "--topo-order"
+		"--pretty=oneline" "--decorate")))
 
-(defun egg-run-git-log-all ()
-  (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
-	      "--graph" "--topo-order"
-		"--pretty=oneline" "--decorate" "--all"))
+(defun egg-run-git-log-all (&optional refs-only)
+  (if refs-only
+      (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
+		  "--graph" "--topo-order" "--simplify-by-decoration"
+		  "--pretty=oneline" "--decorate" "--all")
+    (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
+		"--graph" "--topo-order"
+		"--pretty=oneline" "--decorate" "--all")))
 
 (defun egg-run-git-log-pickaxe (string)
   (egg-git-ok t "log" "--pretty=oneline" "--decorate"
