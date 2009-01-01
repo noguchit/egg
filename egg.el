@@ -4046,28 +4046,28 @@ If INIT was not nil, then perform 1st-time initializations as well."
 				  state todo-alist)
     (egg-status)))
 
-(defun egg-log-buffer-rewrite ()
-  (interactive)
-  (let* ((state (egg-repo-state :staged :unstaged))
-	 (rebase-dir (concat (plist-get state :gitdir) "/"
-			     egg-git-rebase-subdir "/"))
-	 (todo-alist (egg-log-buffer-get-marked-alist))
-	 (commits (mapcar 'car todo-alist))
-	 (oldest (car commits))
-	 (upstream (egg-sha1 (concat oldest "^")))
-	 (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
-				(concat upstream "..HEAD"))))
-    (unless (egg-repo-clean state)
-      (error "repo %s is not clean" (plist-get state :gitdir)))
-    (mapc (lambda (commit)
-	    (unless (member commit all)
-	      (error "commit %s is not between HEAD and upstream %s"
-		     commit upstream)))
-	  commits)
+;; (defun egg-log-buffer-rewrite ()
+;;   (interactive)
+;;   (let* ((state (egg-repo-state :staged :unstaged))
+;; 	 (rebase-dir (concat (plist-get state :gitdir) "/"
+;; 			     egg-git-rebase-subdir "/"))
+;; 	 (todo-alist (egg-log-buffer-get-marked-alist))
+;; 	 (commits (mapcar 'car todo-alist))
+;; 	 (oldest (car commits))
+;; 	 (upstream (egg-sha1 (concat oldest "^")))
+;; 	 (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
+;; 				(concat upstream "..HEAD"))))
+;;     (unless (egg-repo-clean state)
+;;       (error "repo %s is not clean" (plist-get state :gitdir)))
+;;     (mapc (lambda (commit)
+;; 	    (unless (member commit all)
+;; 	      (error "commit %s is not between HEAD and upstream %s"
+;; 		     commit upstream)))
+;; 	  commits)
     
-    (egg-setup-rebase-interactive rebase-dir upstream nil
-				  state todo-alist)
-    (egg-status)))
+;;     (egg-setup-rebase-interactive rebase-dir upstream nil
+;; 				  state todo-alist)
+;;     (egg-status)))
 
 (defun egg-log-buffer-checkout-commit (pos)
   (interactive "d")

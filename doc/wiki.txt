@@ -1,0 +1,168 @@
+This will eventually become the main ([[Home]]) page for Egg.
+
+h1. Egg: Emacs Got Git
+
+Egg is **not** a "git":http://git.or.cz/ _porcelain_. It shares the
+same goals with _git aliases_: make common git operations more
+convenient to perform.
+
+Egg will not provide binding for many git commands because:
+
+* In the author's humble opinion, some commands (such as
+  @git init@) are better invoked in a regular shell.
+* The author is a git _newbie_, and don't know how to use some
+  advanced git commands (such as @git repack@.)
+* The author is not familiar with some git commands because they
+  were never used by the author.
+
+To use egg, simply compile the @egg.el@ file then load the
+@egg.elc@ file. You can put the @egg.elc@ file
+somewhere in your emacs @load-path@ and add @(require
+'egg)@ in your @.emacs@ file.
+
+Once activated, egg will turn on @egg-minor-mode@ when a
+file was opened in a git repository. However, the first thing should
+be done after loading the first time is to to _customize_ egg.
+
+h2. Customizations
+
+<pre>
+M-x customize-group egg
+</pre>
+
+Some (possibly) important customizations before using egg:
+
+* @egg-git-command@ : this variable's default value is
+  @"git"@. It must be set to the appropriate incantation if
+  @git@ is not in @exec-path@.
+* @egg-patch-command@ : same issue as with @egg-git-command@.
+* @egg-git-rebase-subdir@ : git's DOTEST directory keep changing from
+  one version of git to another. one must set this to the appropriate value for
+  the version of git currently used.
+* @egg-mode-key-prefix@ : key prefix for the
+  @egg-minor-mode@'s commands. By default this was set to
+  the VC's prefix @C-x v@, and thus, @C-x v =@
+  would invoke the command @egg-file-diff@.
+* @egg-refresh-index-in-background@: if enabled, egg will try
+  to refresh the index of the visited repositories when emacs has been
+  idle for @egg-background-idle-period@ seconds in order to
+  improve git commands's responsiveness.
+* @egg-background-idle-period@ : the Emacs's idle threshold
+  before egg start invoking background jobs.
+* @egg-confirm-next-action@ : if disabled, egg will not prompt
+  for confirmation in @egg-next-action@.
+* @egg-buffer-hide-section-type-on-start@ : this option let the
+  user customize the initial display of the deltas in many egg special
+  buffers. E.g. one can use this option to initially only show the
+  file-names and hide the details of the files in a delta.
+
+h2. Minor mode key-bindings
+
+When @egg-minor-mode@ is enabled in a file buffer, egg
+provides many bindings for common git commands as well as egg specific
+commands. The key-prefix shown in the below section assume that
+@egg-mode-key-prefix@ is @C-x v@.
+
+{background:#ddd}. |\2. *perform the next logical (DWIM style) action*|
+| key  | @C-x v v@ |
+| lisp | @egg-next-action@  |
+| see  | @egg-confirm-next-action@ customization option |
+| note | with prefix (i.e. @C-u C-x v v@), _ask_ for confirmation|
+{background:#ddd}. |\2. *edit the message and commit the staged changes*|
+| key  | @C-x v c@ or @C-x v w@|
+| git  | similar to @git commit -e @ or  @git commit -e --amend@ |
+| note | with prefix (i.e. @C-u C-x v c@), this the upcoming commit will amend the tip commit.|
+{background:#ddd}. |\2. *launch the egg's status-buffer for the current repo*|
+| key  | @C-x v d@ or @C-x v s@ |
+| lisp | @egg-status@  |
+| git  | similar to @git status@ |
+{background:#ddd}. |\2. *show the branch's history*|
+| key  | @C-x v l@ |
+| lisp | @egg-log@  |
+| git  | similar to @git log@ |
+| note | with prefix (i.e. @C-u C-x v l@), show history of all refs|
+{background:#ddd}. |\2. *show the reflog*|
+| key  | @C-x v L@ |
+| lisp | @egg-reflog@  |
+| git  | similar to @git reflog@ |
+| note | by default, show the reflog of HEAD. with prefix (i.e. @C-u C-x v L@), prompt for a ref|
+{background:#ddd}. |\2. *show the file's history*|
+| key  | @C-x v h@ |
+| lisp | @egg-file-log@  |
+| git  | similar to @git log -- $file @ |
+| note | by default, show the file history in the current branch. with prefix (i.e. @C-u C-x v h@), show the repo-wide file's history|
+{background:#ddd}. |\2. *search file's history for a string*|
+| key  | @C-x v /@ |
+| lisp | @egg-file-log-pickaxe@  |
+| git  | similar to @git log -S$string -- $file @ |
+{background:#ddd}. |\2. *add the contents of the file into the index*|
+| key  | @C-x v i@ |
+| lisp | @egg-file-stage-current-file@  |
+| git  | @git add $file@ |
+{background:#ddd}. |\2. *checkout other version of the file*|
+| key  | @C-x v o@ |
+| lisp | @egg-file-checkout-other-version@  |
+| git  | similar to @git checkout $sha1 -- $file @ |
+| note | with prefix (i.e. @C-u C-x v o@), do _not_ prompt for confirmation|
+{background:#ddd}. |\2. *cancel file's modifications*|
+| key  | @C-x v u@ |
+| lisp | @egg-file-cancel-modifications@  |
+| git  | similar to @git checkout -- $file @ |
+| note | with prefix (i.e. @C-u C-x v u@), do _not_ prompt for confirmation|
+| note | @egg-file-diff@ or @egg-status@ provide a finer-grain (hunk by hunk) way to achieve the the same goal. However this command is quicker when no hunk-by-hunk editing was needed.|
+{background:#ddd}. |\2. *compare the file with the index or other versions*|
+| key  | @C-x v =@ |
+| lisp | @egg-file-diff@  |
+| git  | similar to @git diff -- $file @ |
+| see  | @egg-file-ediff@ |
+| note | with prefix (i.e. @C-u C-x v =@), _prompt_ for base version|
+| note | @egg-status@ gives a repo-wide view of the workdir vs the index|
+{background:#ddd}. |\2. *compare the file with the index or other versions using _ediff_*|
+| key  | @C-x v e@ |
+| lisp | @egg-file-ediff@  |
+| note | with prefix (i.e. @C-u C-x v e@), _prompt_ for _newer_ version|
+| note | unlike @egg-file-diff@ the current implementation of this command _cannot_ edit the index|
+{background:#ddd}. |\2. *open file's other version (read-only mode)*|
+| key  | @C-x v ~@ |
+| lisp | @egg-file-version-other-window@  |
+| git  | @git show@ |
+| note | by default, show the file's contents in the index. with prefix (i.e. @C-u C-x v =@), _prompt_ for a specific version|
+{background:#ddd}. |\2. *start a new branch from HEAD*|
+| key  | @C-x v b@ |
+| lisp | @egg-start-new-branch@  |
+| git  | @git checkout -b@ |
+{background:#ddd}. |\2. *show/hide history annotations*|
+| key  | @C-x v a@ |
+| lisp | @egg-file-toggle-blame-mode@  |
+| git  | @git blame@ |
+| note | the current implementation of this command force the file into read-only mode when showing annotations.|
+{background:#ddd}. |\2. *grep current or older contents of tracked files*|
+| key  | @C-x v g@ |
+| lisp | @egg-grep@  |
+| git  | @git grep@ |
+| note | need to load @egg-grep.elc@.|
+| note | with single prefix (i.e. @C-u C-x v g@), use the symbol at point as the default grep term|
+| note | with double prefix (i.e. @C-u C-u C-x v g@), prompt for a version|
+ 
+Egg also provides a file-mode menu in the menubar which provides
+access to the above commands.
+
+!http://i41.tinypic.com/waoj75.jpg!
+
+h2. The status buffer.
+
+The status buffer is launched via @C-x v s@ keys from a
+file-buffer when @egg-minor-mode@ is enabled or via the
+@s@ key from most egg special buffers.
+
+!http://img701.mytextgraphics.com/photolava/2008/09/08/eggstatus-4bshkw5ak.png!
+
+The status-buffer can be used to perform many actions:
+
+* abort/continue rebase session
+* resolve merge/rebase/stash conflicts
+* preparing the next commit (manipulating the work-dir and the index)
+  hunk-by-hunk
+* add a new (untracked) file into the index
+* add a new ignored pattern into the repository
+
