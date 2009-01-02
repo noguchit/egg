@@ -1,4 +1,4 @@
-Egg is an experimental clone of Magit
+Egg is an clone of Magit
 
 MAGIT:
 ======
@@ -12,10 +12,10 @@ Please find his code at: http://zagadka.vm.bytemark.co.uk/magit
 EGG:
 =====
 
-The design and most ideas in Egg was borrowed/stolen from Magit.
+The design and most ideas in Egg was borrowed/stolen from
+Magit. However, egg has grown with many functionalities not present in
+magit and should be considered based its own merits.
 
-Egg is Magit pushed to the side of funky UI while Magit was more about
-functionalites.
 
 
 The END.

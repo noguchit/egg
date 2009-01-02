@@ -380,7 +380,7 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
-(defcustom egg-git-rebase-subdir ".dotest-merge"
+(defcustom egg-git-rebase-subdir "rebase-merge"
   "Name of the rebase's workdir.
 Different versions of git have different names for this subdir."
   :group 'egg
