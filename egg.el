@@ -552,7 +552,7 @@ Return the output lines as a list of strings."
 
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
-  (egg-git-to-string "ls-files" "--full-name" "--" file))
+  (car (egg-git-to-lines "ls-files" "--full-name" "--" file)))
 
 (defsubst egg-buf-git-name (&optional buf)
   "return the repo-relative name of the file visited by BUF.
@@ -567,13 +567,14 @@ if BUF was nil then use current-buffer"
 
 (defsubst egg-unmerged-files ()
   "return a list of repo-relative names for each unmerged files."
-  (delete-duplicates 
-   (mapcar 'car 
-	   (mapcar 'last
-		   (mapcar
-		    'split-string
-		    (egg-git-to-lines "ls-files" "--full-name" "-u"))))
-   :test 'string-equal))
+  (save-match-data
+    (delete-duplicates 
+     (mapcar 'car 
+	     (mapcar 'last
+		     (mapcar
+		      'split-string
+		      (egg-git-to-lines "ls-files" "--full-name" "-u"))))
+     :test 'string-equal)))
 
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
@@ -1045,13 +1046,15 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
 			     :branch branch 
 			     :sha1 sha1 
 			     :merge-heads merge-heads)
-		       rebase-state)))
+		       rebase-state))
+	 files)
     (dolist (req extras)
       (cond ((eq req :unstaged)
-	     (setq state 
-		   (nconc (list :unstaged 
-				(egg-git-to-lines "diff" "--name-only"))
-			  state)))
+	     (setq files (egg-git-to-lines "diff" "--name-only"))
+	     (setq state (nconc (list :unstaged files) state))
+	     (when (and files (stringp (car files))) 
+	       (setq state (nconc (list :unmerged (egg-unmerged-files))
+				  state))))
 	    ((eq req :staged)
 	     (setq state 
 		   (nconc (list :staged 
@@ -2140,7 +2143,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
   (let ((map (make-sparse-keymap "Egg:StatusBufferRebase")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "x") 'egg-buffer-rebase-abort)
-    (define-key map (kbd "u") 'egg-buffer-rebase-skip)
+    (define-key map (kbd "u") 'egg-buffer-selective-rebase-skip)
     (define-key map (kbd "RET") 'egg-buffer-selective-rebase-continue)
     map)
   "Context keymap for the repo section of the status buffer when
@@ -2186,17 +2189,36 @@ See `egg-do-rebase-head'."
     (process-put proc :orig-buffer buffer)
     proc))
 
+(defun egg-buffer-selective-rebase-action (action)
+  "Perform ACTION to continue the current rebase session.
+The mode, sync or async, will depend on the nature of the current
+rebase session."
+  (if (not (egg-interactive-rebase-in-progress))
+      (unless (egg-buffer-do-rebase action)
+	(egg-status))
+    (setq action (cdr (assq action '((:skip . "--skip") 
+				     (:continue . "--continue")
+				     (:abort . "--abort")))))
+    (egg-do-async-rebase-continue
+     #'egg-handle-rebase-interactive-exit
+     (egg-pick-file-contents (concat (egg-git-rebase-dir) "head") "^.+$")
+     action)))
+
 (defun egg-buffer-selective-rebase-continue ()
   "Continue the current rebase session.
 The mode, sync or async, will depend on the nature of the current
 rebase session."
   (interactive)
-  (if (not (egg-interactive-rebase-in-progress))
-      (egg-buffer-rebase-continue)
-    (message "continue with interactive rebase")
-    (egg-do-async-rebase-continue
-     #'egg-handle-rebase-interactive-exit
-     (egg-pick-file-contents (concat (egg-git-rebase-dir) "head") "^.+$"))))
+  (message "continue with current rebase")
+  (egg-buffer-selective-rebase-action :continue))
+
+(defun egg-buffer-selective-rebase-skip ()
+  "Skip the current commit and continue the current rebase session.
+The mode, sync or async, will depend on the nature of the current
+rebase session."
+  (interactive)
+  (message "skip rebase's current commit")
+  (egg-buffer-selective-rebase-action :skip))
 
 (defun egg-buffer-rebase-skip ()
   (interactive)
@@ -3038,7 +3060,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (error "Cannot find reference %s!" name))
     (egg-show-git-output
      (cond ((eq :tag type)
-	    (egg-sync-0 "tag" "-vd" name))
+	    (egg-sync-0 "tag" "-d" name))
 	   ((eq :head type)
 	    (egg-sync-0 "branch" (if force "-vD" "-vd") name))
 	   ((eq :remote type)
@@ -3920,18 +3942,20 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (save-match-data
       (re-search-forward 
        (eval-when-compile 
-	 (concat "^\\(?:"
+	 (concat "\\<\\(?:"
 		 "\\(please commit in egg.+$\\)"             "\\|"
 		 "\\(Successfully rebased and updated.+$\\)" "\\|"
 		 "\\(You can amend the commit now\\)" 	     "\\|"
 		 "\\(Automatic cherry-pick failed\\)"	     "\\|"
+		 "\\(nothing added to commit\\)"	     "\\|"
 		 "\\(\\(?:Cannot\\|Could not\\).+\\)" "\\)")) nil t)
       (setq msg (match-string-no-properties 0))
       (setq res (cond ((match-beginning 1) :rebase-commit)
 		      ((match-beginning 2) :rebase-done)
 		      ((match-beginning 3) :rebase-edit)
 		      ((match-beginning 4) :rebase-conflict)
-		      ((match-beginning 5) :rebase-fail))))
+		      ((match-beginning 5) :rebase-empty)
+		      ((match-beginning 6) :rebase-fail))))
     (setq buffer (process-get proc :orig-buffer))
     (with-current-buffer buffer
       (egg-run-buffers-update-hook)
@@ -3988,6 +4012,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	     (egg-status nil :sentinel)
 	     (ding)
 	     (message "automatic rebase stopped! please resolve conflict(s)"))
+	    ((eq res :rebase-empty)
+	     (egg-status nil :sentinel)
+	     (ding)
+	     (message "automatic rebase stopped! this commit should be skipped!"))
 	    ((eq res :rebase-fail)
 	     (egg-status nil :sentinel)
 	     (ding)
@@ -5594,7 +5622,9 @@ current file contains unstaged changes."
 (defsubst egg-guess-next-action (desc)
   (cond ((memq :file-has-merged-conflict desc) :merge-file)
 	((memq :file-is-modified desc) 	       :stage-file)
+	((memq :file-is-unmerged desc) 	       :stage-file)
 	((memq :wdir-has-merged-conflict desc) :status)
+	((memq :wdir-has-unmerged-files  desc) :stage-all)
 	((memq :wdir-is-modified desc)	       :stage-all)
 	((memq :rebase-in-progress desc)       :rebase-continue)
 	((memq :has-staged-changes desc)       :commit)
@@ -5634,6 +5664,7 @@ current file contains unstaged changes."
 	 (file-git-name (and current-file (egg-file-git-name current-file)))
 	 (unstaged-files (plist-get state :unstaged))
 	 (staged-files (plist-get state :staged))
+	 (unmerged-files (plist-get state :unmerged))
 	 desc dummy)
     (when unstaged-files 
       (setq desc (cons :wdir-is-modified desc)))
@@ -5641,9 +5672,12 @@ current file contains unstaged changes."
     (when staged-files
       (setq desc (cons :has-staged-changes desc)))
 
+    (when unmerged-files
+      (setq desc (cons :wdir-has-unmerged-files desc)))
+
     (when (plist-get state :rebase-step)
       (setq desc (cons :rebase-in-progress desc)))
-    
+
     (when unstaged-files
       (with-temp-buffer
 	(egg-git-ok t "diff")
@@ -5661,7 +5695,9 @@ current file contains unstaged changes."
 	  (save-match-data 
 	  (goto-char (point-min))
 	    (if (search-forward "\n++<<<<<<<" nil t)
-		(setq desc (cons :file-has-merged-conflict desc)))))))
+		(setq desc (cons :file-has-merged-conflict desc)))))
+	(when (member file-git-name unmerged-files)
+	  (setq desc (cons :file-is-unmerged desc)))))
     desc))
 
 (defsubst egg-build-key-prompt (prefix default alternatives)
