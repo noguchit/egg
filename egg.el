@@ -736,14 +736,6 @@ END-RE is the regexp to match the end of a record."
 		       head))
 		 '("HEAD" "ORIG_HEAD" "MERGE_HEAD" "FETCH_HEAD")))))
 
-;; (defun egg-sha1-ref-alist ()
-;;   (mapcar (lambda (line)
-;; 	    (when (string-match "\\`\\(\\S-+\\) refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'" line)
-;; 	      (list (match-string-no-properties 1 line)
-;; 		    (match-string-no-properties 3 line)
-;; 		    (match-string-no-properties 2 line))))
-;; 	  (egg-git-to-lines "show-ref")))
-
 (defun egg-ref-type-alist ()
   "Build an alist of (REF-NAME . :type) cells."
   (mapcar (lambda (ref-desc)
@@ -832,91 +824,6 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	    refs-desc-list)))
 
 
-;; (defun egg-full-ref-decorated-alist (head-face head-keymap
-;; 					       tag-face an-tag-face tag-keymap
-;; 					       remote-site-face
-;; 					       remote-rname-face 
-;; 					       remote-keymap &optional
-;; 					       remote-site-keymap)
-;;   "Build an alist of (REF . :type) cells.
-;; A REF string of a head will be formatted with HEAD-FACE and
-;; HEAD-KEYMAP.  A REF string of a tag will be formatted with
-;; TAG-FACE (or AN-TAG-FACE if it was an annotated tag) and
-;; TAG-KEYMAP.  A REF string of a remote will be formatted with
-;; REMOTE-SITE-FACE/REMOTE-RNAME-FACE and
-;; RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
-;;   (let ((refs-desc-list
-;; 	 (egg-git-lines-matching-multi 
-;; 	  "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
-;; 	  ;; 1: full-name
-;; 	  ;; 2: head
-;; 	  ;; 3: tag
-;; 	  ;; 4: remote
-;; 	  ;; 5: name
-;; 	  ;; 6: remote-host
-;; 	  ;; 7: is annotated tag 
-;; 	  '(1 2 3 4 5 6 7) "show-ref" "-d"))
-;; 	;; if null remote-site-map then use remote-keymap for the site
-;; 	(remote-site-keymap (or remote-site-keymap remote-keymap))
-;; 	annotated-tags)
-;;     ;; remove the annotated tags from the list
-;;     (setq refs-desc-list
-;; 	  (delq nil 
-;; 		(mapcar (lambda (desc)
-;; 			  (if (not (assq 7 desc))
-;; 			      desc ;; not an annotated tag
-;; 			    (setq annotated-tags 
-;; 				  (cons (cdr (assq 1 desc)) 
-;; 					annotated-tags))
-;; 			    nil))
-;; 			refs-desc-list)))
-;;     ;; decorate the ref alist
-;;     (mapcar (lambda (desc)
-;; 	      (let ((full-name (cdr (assq 1 desc)))
-;; 		    (name (cdr (assq 5 desc)))
-;; 		    (remote (cdr (assq 6 desc))))
-;; 		(cond ((assq 2 desc) 
-;; 		       ;; head
-;; 		       (cons full-name
-;; 			     (propertize name 
-;; 					 'face head-face 
-;; 					 'keymap head-keymap
-;; 					 :ref (cons name :head)
-;; 					 'help-echo (egg-tooltip-func))))
-;; 		      ((assq 3 desc) 
-;; 		       ;; tag
-;; 		       (cons full-name
-;; 			     (propertize name 
-;; 					 'face 
-;; 					 (if (member full-name
-;; 						     annotated-tags)
-;; 					     an-tag-face
-;; 					   tag-face)
-;; 					 'keymap tag-keymap
-;; 					 :ref (cons name :tag)
-;; 					 'help-echo (egg-tooltip-func))))
-;; 		      ((assq 4 desc)
-;; 		       ;; remote
-;; 		       (cons full-name
-;; 			     (concat
-;; 			      (propertize remote
-;; 					  'face remote-site-face
-;; 					  'keymap remote-site-keymap
-;; 					  :ref (cons name :remote))
-;; 			      (propertize (substring name (length remote)) 
-;; 					  'face remote-rname-face
-;; 					  'keymap remote-keymap
-;; 					  :ref (cons name :remote)
-;; 					  'help-echo (egg-tooltip-func))))))))
-;; 	    refs-desc-list)))
-
-;; (defsubst egg-full-ref-alist ()
-;;   (mapcar (lambda (desc)
-;; 	    (cons (cdr (assq 1 desc))
-;; 		  (cdr (assq 2 desc))))
-;; 	  (egg-git-lines-matching-multi 
-;; 	   "^.+ \\(refs/\\(?:heads\\|tags\\|remotes\\)/\\(.+\\)\\)$"
-;; 	   '(1 2) "show-ref")))
 
 (defun egg-complete-rev (string &optional ignored all)
   "Do revision completion"
@@ -963,29 +870,6 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 		     ((stringp prefix) prefix)
 		     ((null prefix) nil)
 		     (t string)))))))
-
-;; (defun egg-decorate-ref (full-name)
-;;   (save-match-data
-;;     (let (name type)
-;;       (if (not (string-match
-;; 	      "\\`refs/\\(heads\\|tags\\|remotes\\)/\\(.+\\)\\'"
-;; 	      full-name))
-;; 	full-name
-;; 	(setq name (match-string-no-properties 2 full-name)
-;; 	      type (match-string-no-properties 1 full-name))
-;; 	(cond ((string= type "heads")
-;; 	       (propertize name 'face 'egg-branch-mono
-;; 			   :ref (cons name :head)))
-;; 	      ((string= type "tags")
-;; 	       (propertize name 'face 'egg-tag-mono
-;; 			   :ref (cons name :tag)))
-;; 	      ((string= type "remotes")
-;; 	       (propertize
-;; 		(concat (egg-text (egg-rbranch-name name)
-;; 				  'egg-remote-mono)
-;; 			(egg-text (egg-rbranch-name name)
-;; 				  'egg-branch-mono))
-;; 		:ref (cons name :remote))))))))
 
 (defsubst egg-get-symbolic-HEAD (&optional file)
   ;; get the symbolic name of HEAD
@@ -3620,12 +3504,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map "/" 'egg-search-changes)
     map))
 
-;; (define-key egg-log-buffer-mode-map [menu-bar egg-log-buffer-mode]
-;;   (cons "Git/Egg" egg-log-commit-menu))
-;; (define-key egg-log-local-ref-map [menu-bar egg]
-;;   (cons "Egg" egg-log-local-ref-menu))
-
-
 (defconst egg-log-cmd-help-text-fmt-alist
   '((egg-log-buffer-push-to-local ref "update another branch with %s")
     (egg-log-buffer-push remote "push branches to remote %s")
@@ -4138,29 +4016,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (egg-setup-rebase-interactive rebase-dir upstream nil
 				  state todo-alist)
     (egg-status)))
-
-;; (defun egg-log-buffer-rewrite ()
-;;   (interactive)
-;;   (let* ((state (egg-repo-state :staged :unstaged))
-;; 	 (rebase-dir (concat (plist-get state :gitdir) "/"
-;; 			     egg-git-rebase-subdir "/"))
-;; 	 (todo-alist (egg-log-buffer-get-marked-alist))
-;; 	 (commits (mapcar 'car todo-alist))
-;; 	 (oldest (car commits))
-;; 	 (upstream (egg-sha1 (concat oldest "^")))
-;; 	 (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
-;; 				(concat upstream "..HEAD"))))
-;;     (unless (egg-repo-clean state)
-;;       (error "repo %s is not clean" (plist-get state :gitdir)))
-;;     (mapc (lambda (commit)
-;; 	    (unless (member commit all)
-;; 	      (error "commit %s is not between HEAD and upstream %s"
-;; 		     commit upstream)))
-;; 	  commits)
-    
-;;     (egg-setup-rebase-interactive rebase-dir upstream nil
-;; 				  state todo-alist)
-;;     (egg-status)))
 
 (defun egg-log-buffer-checkout-commit (pos)
   (interactive "d")
