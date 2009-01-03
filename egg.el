@@ -767,19 +767,16 @@ END-RE is the regexp to match the end of a record."
 	 'egg-log-buffer-help-echo)
 	(t nil)))
 
-(defun egg-full-ref-decorated-alist (head-face head-keymap
-					       tag-face an-tag-face tag-keymap
-					       remote-site-face
-					       remote-rname-face 
-					       remote-keymap &optional
-					       remote-site-keymap)
-  "Build an alist of (REF . :type) cells.
-A REF string of a head will be formatted with HEAD-FACE and
-HEAD-KEYMAP.  A REF string of a tag will be formatted with
-TAG-FACE (or AN-TAG-FACE if it was an annotated tag) and
-TAG-KEYMAP.  A REF string of a remote will be formatted with
-REMOTE-SITE-FACE/REMOTE-RNAME-FACE and
-RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
+(defun egg-full-ref-decorated-alist (head-properties
+				     tag-properties
+				     atag-properties
+				     remote-ref-properties
+				     remote-site-properties)
+  "Build an alist of (ref . :type) cells.
+A ref string of a head will be decorated with head-PROPERTIES.  A
+ref string of a tag will be decorated with TAG-PROPERTIES or
+ATAG-PROPERTIES.  A ref string of a remote will be formatted with
+REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
   (let ((refs-desc-list
 	 (egg-git-lines-matching-multi 
 	  "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
@@ -791,8 +788,6 @@ RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
 	  ;; 6: remote-host
 	  ;; 7: is annotated tag 
 	  '(1 2 3 4 5 6 7) "show-ref" "-d"))
-	;; if null remote-site-map then use remote-keymap for the site
-	(remote-site-keymap (or remote-site-keymap remote-keymap))
 	annotated-tags)
     ;; remove the annotated tags from the list
     (setq refs-desc-list
@@ -813,38 +808,107 @@ RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
 		(cond ((assq 2 desc) 
 		       ;; head
 		       (cons full-name
-			     (propertize name 
-					 'face head-face 
-					 'keymap head-keymap
-					 :ref (cons name :head)
-					 'help-echo (egg-tooltip-func))))
+			     (apply 'propertize name 
+				    :ref (cons name :head)
+				    head-properties)))
 		      ((assq 3 desc) 
 		       ;; tag
 		       (cons full-name
-			     (propertize name 
-					 'face 
-					 (if (member full-name
-						     annotated-tags)
-					     an-tag-face
-					   tag-face)
-					 'keymap tag-keymap
-					 :ref (cons name :tag)
-					 'help-echo (egg-tooltip-func))))
+			     (apply 'propertize name 
+				    :ref (cons name :tag)
+				    (if (member full-name annotated-tags)
+					atag-properties
+				      tag-properties))))
 		      ((assq 4 desc)
 		       ;; remote
 		       (cons full-name
 			     (concat
-			      (propertize remote
-					  'face remote-site-face
-					  'keymap remote-site-keymap
-					  :ref (cons name :remote))
-			      (propertize (substring name (length remote)) 
-					  'face remote-rname-face
-					  'keymap remote-keymap
-					  :ref (cons name :remote)
-					  'help-echo (egg-tooltip-func))))))))
+			      (apply 'propertize remote
+				     :ref (cons name :remote)
+				     remote-site-properties)
+			      (apply 'propertize (substring name (length remote)) 
+				     :ref (cons name :remote)
+				     remote-ref-properties)))))))
 	    refs-desc-list)))
 
+
+;; (defun egg-full-ref-decorated-alist (head-face head-keymap
+;; 					       tag-face an-tag-face tag-keymap
+;; 					       remote-site-face
+;; 					       remote-rname-face 
+;; 					       remote-keymap &optional
+;; 					       remote-site-keymap)
+;;   "Build an alist of (REF . :type) cells.
+;; A REF string of a head will be formatted with HEAD-FACE and
+;; HEAD-KEYMAP.  A REF string of a tag will be formatted with
+;; TAG-FACE (or AN-TAG-FACE if it was an annotated tag) and
+;; TAG-KEYMAP.  A REF string of a remote will be formatted with
+;; REMOTE-SITE-FACE/REMOTE-RNAME-FACE and
+;; RETMOTE-KEYMAP/REMOTE-SITE-KEYMAP."
+;;   (let ((refs-desc-list
+;; 	 (egg-git-lines-matching-multi 
+;; 	  "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
+;; 	  ;; 1: full-name
+;; 	  ;; 2: head
+;; 	  ;; 3: tag
+;; 	  ;; 4: remote
+;; 	  ;; 5: name
+;; 	  ;; 6: remote-host
+;; 	  ;; 7: is annotated tag 
+;; 	  '(1 2 3 4 5 6 7) "show-ref" "-d"))
+;; 	;; if null remote-site-map then use remote-keymap for the site
+;; 	(remote-site-keymap (or remote-site-keymap remote-keymap))
+;; 	annotated-tags)
+;;     ;; remove the annotated tags from the list
+;;     (setq refs-desc-list
+;; 	  (delq nil 
+;; 		(mapcar (lambda (desc)
+;; 			  (if (not (assq 7 desc))
+;; 			      desc ;; not an annotated tag
+;; 			    (setq annotated-tags 
+;; 				  (cons (cdr (assq 1 desc)) 
+;; 					annotated-tags))
+;; 			    nil))
+;; 			refs-desc-list)))
+;;     ;; decorate the ref alist
+;;     (mapcar (lambda (desc)
+;; 	      (let ((full-name (cdr (assq 1 desc)))
+;; 		    (name (cdr (assq 5 desc)))
+;; 		    (remote (cdr (assq 6 desc))))
+;; 		(cond ((assq 2 desc) 
+;; 		       ;; head
+;; 		       (cons full-name
+;; 			     (propertize name 
+;; 					 'face head-face 
+;; 					 'keymap head-keymap
+;; 					 :ref (cons name :head)
+;; 					 'help-echo (egg-tooltip-func))))
+;; 		      ((assq 3 desc) 
+;; 		       ;; tag
+;; 		       (cons full-name
+;; 			     (propertize name 
+;; 					 'face 
+;; 					 (if (member full-name
+;; 						     annotated-tags)
+;; 					     an-tag-face
+;; 					   tag-face)
+;; 					 'keymap tag-keymap
+;; 					 :ref (cons name :tag)
+;; 					 'help-echo (egg-tooltip-func))))
+;; 		      ((assq 4 desc)
+;; 		       ;; remote
+;; 		       (cons full-name
+;; 			     (concat
+;; 			      (propertize remote
+;; 					  'face remote-site-face
+;; 					  'keymap remote-site-keymap
+;; 					  :ref (cons name :remote))
+;; 			      (propertize (substring name (length remote)) 
+;; 					  'face remote-rname-face
+;; 					  'keymap remote-keymap
+;; 					  :ref (cons name :remote)
+;; 					  'help-echo (egg-tooltip-func))))))))
+;; 	    refs-desc-list)))
 
 ;; (defsubst egg-full-ref-alist ()
 ;;   (mapcar (lambda (desc)
@@ -3625,11 +3689,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let ((start (point))
 	(head-sha1 (egg-get-current-sha1)) 
 	(ov (make-overlay (point-min) (point-min) nil t))
-	(dec-ref-alist (egg-full-ref-decorated-alist
-			'egg-branch-mono head-map 
-			'egg-tag-mono 'egg-an-tag-mono tag-map
-			'egg-remote-mono 'egg-branch-mono remote-map
-			remote-site-map))
+	(dec-ref-alist 
+	 (egg-full-ref-decorated-alist
+	  (list 'face 'egg-branch-mono 'keymap head-map) 
+	  (list 'face 'egg-tag-mono 'keymap tag-map)
+	  (list 'face 'egg-an-tag-mono 'keymap tag-map)
+	  (list 'face 'egg-branch-mono 'keymap remote-map)
+	  (list 'face 'egg-remote-mono 'keymap remote-site-map)))
 	(ref-string-len 0) 
 	(dashes-len 0)
 	(min-dashes-len 300)

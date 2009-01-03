@@ -159,6 +159,153 @@ blame-mode will restore the original read-only mode of the buffer.
 
 !http://img110.mytextgraphics.com/photolava/2008/09/11/eggblame-4bto5s5de.png!
 
+h2. Special Buffers
+
+Egg creates various special-buffers for each repositories. Each buffer,
+using different UI, provides different functionalities to the users.
+
+* The delta manipulation buffers
+** the status buffer
+** the diff buffer
+* The log editing buffers
+** the commit buffer
+** the tag buffer
+* The commit browsing buffers
+** the log buffer
+** the file log buffer
+** the reflog buffer
+** the query or pickax buffer
+** The stash buffer
+
+h3. The delta editor
+
+Many special buffers embeds one or multiple diffs, i.e. one more
+multiple sequence of file deltas. The local keymap of those text
+blocks provide a delta-editor that let user maniuplate those diffs
+hunk-by-hunk or file-by-file. E.g.
+
+* If a delta sequence was a diff between the work-dir and the index
+  then the delta-editor would let the user moving hunk or file's
+  contents from the work-dir to the index or remove the hunk or the
+  entire file delta from the work-dir.
+* If a delta sequence was a diff between the index and HEAD, then the
+  delta edtor would let the user moving hunk or file contents from the
+  index to the work-dir.
+* If a delta sequence was a diff between commits then the delta-editor
+  is in read-only mode. While it cannot move text in read-only mode,
+  the local keymap (implementing the delta editor) provide:
+** a convenient way to nagivate the delta sequence.
+** the ability to hide or show a block of text to help the user
+   visualizing the global difference
+
+The delta sequence (diff output) is treated as a hierarchical layout
+by the local-keymap:
+
+# A top-level section (unstaged, unmerged, staged, etc.) contains a
+  sequence of file deltas or diffs
+# A file delta (difference between a file in the work-dir and in the
+  index) contains a sequence of hunks
+# A hunks is the smallest unit that can be moved or removed by the
+  delta editor.
+
+The key-bindings in the delta-editor are context-dependent base on the
+position of the cursor in the delta sequence. By example:
+
+| *the cursor was in* | *the @s@ key will* |
+| a diff header in the unstaged (or unmerged) section | stage the contents of the _file_  |
+| a diff header in the staged section | unstage the contents of the _file_ in the index |
+| a hunk header in the unstaged section | apply the hunk to the index |
+| a hunk header in the staged section | reverse-apply the hunk to the index |
+
+h4(#hide-show-keymap). The common key bindings in a sequence of deltas
+
+These bindings are available anywhere in a sequence of delta.
+
+{background:#ddd}. |\2. *move to the next _block_*|
+| key  | @n@ |
+| lisp | @egg-buffer-cmd-navigate-next@  |
+{background:#ddd}. |\2. *move to the previous _block_*|
+| key  | @p@ |
+| lisp | @egg-buffer-cmd-navigate-prev@  |
+{background:#ddd}. |\2. *hide/show current block's details*|
+| key  | @h@ or @[mouse-2]@|
+| lisp | @egg-section-cmd-toggle-hide-show@ |
+{background:#ddd}. |\2. *hide/show details of the current block's sub-blocks*|
+| key  | @H@ |
+| lisp | @egg-section-cmd-toggle-hide-show-children@ |
+
+!>http://img902.mytextgraphics.com/photolava/2008/09/08/diffheader-4bss2gy89.png!
+
+h4(#diff-keymap). The common key bindings in a diff section (staged, unstaged or unmerged)
+
+In addition to the previous bindings, the following bindings are
+available anywhere in a diff header.
+
+{background:#ddd}. |\2. *open the file of this delta in Emacs's _other window_*|
+| key  | @RET@ |
+| lisp | @egg-diff-section-cmd-visit-file-other-window@ |
+{background:#ddd}. |\2. *open the file of this delta*|
+| key  | @f@ |
+| lisp | @egg-diff-section-cmd-visit-file@ |
+{background:#ddd}. |\2. *show this delta in ediff*|
+| key  | @=@ |
+| lisp | @egg-diff-section-cmd-ediff@ |
+{background:#ddd}. |\2. *popup menu for the delta*|
+| key  | @[C-mouse-2]@ |
+| note | the menu is context dependent |
+
+h4(#staged-diff-keymap). The key bindings in a staged diff section
+
+In addition to the _two_ previous bindings, the following bindings are
+available anywhere in a diff header of a _staged changes_ section.
+
+{background:#ddd}. |\2. *show a 3-way diff of wdir,index and HEAD for the file in ediff3*|
+| key  | @=@ |
+| lisp | @egg-staged-section-cmd-ediff3@ |
+{background:#ddd}. |\2. *unstage the file delta*|
+| key  | @s@ |
+| lisp | @egg-diff-section-cmd-unstage@ |
+| git  | @git reset -- $file@ |
+
+h4(#unstaged-diff-keymap). The key bindings in an unstaged diff section
+
+In addition to the "common delta's bindings":#hide-show-keymap and the
+"diff's bindings":#diff-keymap, the following bindings are available anywhere in a
+diff header of a _unstaged changes_ section.
+
+{background:#ddd}. |\2. *show the file delta in ediff*|
+| key  | @=@ |
+| lisp | @egg-unstaged-section-cmd-ediff@ |
+{background:#ddd}. |\2. *stage the file delta*|
+| key  | @s@ |
+| lisp | @egg-diff-section-cmd-stage@ |
+| git  | @git add $file@ |
+{background:#ddd}. |\2. *remove the file delta*|
+| key  | @s@ |
+| lisp | @egg-diff-section-cmd-undo@ |
+| git  | @git checkout -- $file@ |
+
+!>http://img109.mytextgraphics.com/photolava/2008/09/09/unmergeddiffheader-4bsuia2i7.png!
+
+h4(#unmerged-diff-key-map). The key bindings in an unmerged diff section
+
+In addition to the "common delta's bindings":#hide-show-keymap and the
+"diff's bindings":#diff-keymap, the following bindings are available anywhere in a
+diff header of a _unmerged changes_ section.
+
+{background:#ddd}. |\2. *show a 3-way diff (ours, theirs and work-dir) of the file delta in ediff3*|
+| key  | @=@ |
+| lisp | @egg-unmerged-section-cmd-ediff3@ |
+{background:#ddd}. |\2. *stage the file delta*|
+| key  | @s@ |
+| lisp | @egg-diff-section-cmd-stage@ |
+| git  | @git add $file@ |
+{background:#ddd}. |\2. *remove the file delta*|
+| key  | @s@ |
+| lisp | @egg-diff-section-cmd-undo@ |
+| git  | @git checkout -- $file@ |
+
+
 h2. The Status Buffer.
 
 The status buffer is launched via @C-x v s@ keys from a
@@ -213,16 +360,6 @@ The status-buffer is organized in a hierarchical layout:
 
 h3. Status Buffer's key-bindings
 
-The key-bindings are context-dependent base on the position of the
-cursor in the hierarchical layout. By example:
-
-
-| *the cursor was in* | *the @s@ key will* |
-| a diff header in the unstaged (or unmerged) section | stage the contents of the _file_  |
-| a diff header in the staged section | unstage the contents of the _file_ in the index |
-| a hunk header in the unstaged section | apply the hunk to the index |
-| a hunk header in the staged section | reverse-apply the hunk to the index |
-
 
 h4. The common key bindings in the _egg status-buffer_
 
@@ -263,75 +400,4 @@ h4. The common key bindings in the _egg status-buffer_
 | lisp | @egg-buffer-cmd-refresh@ |
 | note | this key-binding is common for many egg special buffers |
 
-h4. The common key bindings in a section of the hierarchical layout
-
-{background:#ddd}. |\2. *move to the next _block_*|
-| key  | @n@ |
-| lisp | @egg-buffer-cmd-navigate-next@  |
-{background:#ddd}. |\2. *move to the previous _block_*|
-| key  | @p@ |
-| lisp | @egg-buffer-cmd-navigate-prev@  |
-{background:#ddd}. |\2. *hide/show current block's details*|
-| key  | @h@ or @[mouse-2]@|
-| lisp | @egg-section-cmd-toggle-hide-show@ |
-{background:#ddd}. |\2. *hide/show details of the current block's sub-blocks*|
-| key  | @H@ |
-| lisp | @egg-section-cmd-toggle-hide-show-children@ |
-
-!>http://img902.mytextgraphics.com/photolava/2008/09/08/diffheader-4bss2gy89.png!
-
-h4. The common key bindings in a diff section (staged, unstaged or unmerged) of the hierarchical layout
-
-{background:#ddd}. |\2. *open the file of this delta in Emacs's _other window_*|
-| key  | @RET@ |
-| lisp | @egg-diff-section-cmd-visit-file-other-window@ |
-{background:#ddd}. |\2. *open the file of this delta*|
-| key  | @f@ |
-| lisp | @egg-diff-section-cmd-visit-file@ |
-{background:#ddd}. |\2. *show this delta in ediff*|
-| key  | @=@ |
-| lisp | @egg-diff-section-cmd-ediff@ |
-{background:#ddd}. |\2. *popup menu for the delta*|
-| key  | @[C-mouse-2]@ |
-| note | the menu is context dependent |
-
-h4. The key bindings in a staged diff section of the hierarchical layout
-
-{background:#ddd}. |\2. *show a 3-way diff of wdir,index and HEAD for the file in ediff3*|
-| key  | @=@ |
-| lisp | @egg-staged-section-cmd-ediff3@ |
-{background:#ddd}. |\2. *unstage the file delta*|
-| key  | @s@ |
-| lisp | @egg-diff-section-cmd-unstage@ |
-| git  | @git reset -- $file@ |
-
-h4. The key bindings in an unstaged diff section of the hierarchical layout
-
-{background:#ddd}. |\2. *show the file delta in ediff*|
-| key  | @=@ |
-| lisp | @egg-unstaged-section-cmd-ediff@ |
-{background:#ddd}. |\2. *stage the file delta*|
-| key  | @s@ |
-| lisp | @egg-diff-section-cmd-stage@ |
-| git  | @git add $file@ |
-{background:#ddd}. |\2. *remove the file delta*|
-| key  | @s@ |
-| lisp | @egg-diff-section-cmd-undo@ |
-| git  | @git checkout -- $file@ |
-
-!>http://img109.mytextgraphics.com/photolava/2008/09/09/unmergeddiffheader-4bsuia2i7.png!
-
-h4. The key bindings in an unmerged diff section of the hierarchical layout
-
-{background:#ddd}. |\2. *show a 3-way diff (ours, theirs and work-dir) of the file delta in ediff3*|
-| key  | @=@ |
-| lisp | @egg-unmerged-section-cmd-ediff3@ |
-{background:#ddd}. |\2. *stage the file delta*|
-| key  | @s@ |
-| lisp | @egg-diff-section-cmd-stage@ |
-| git  | @git add $file@ |
-{background:#ddd}. |\2. *remove the file delta*|
-| key  | @s@ |
-| lisp | @egg-diff-section-cmd-undo@ |
-| git  | @git checkout -- $file@ |
 
