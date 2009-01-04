@@ -960,7 +960,7 @@ cherry in REBASE-DIR."
   "Retrieve current repo's state as a plist.
 The properties:
 :gitdir :head :branch :sha1 :merge-heads :rebase-dir :rebase-head
-:rebase-upstream :rebase-steop :rebase-num :rebase-cherry
+:rebase-upstream :rebase-step :rebase-num :rebase-cherry
 
 EXTRAS contains the extra properties to retrieve: :staged :unstaged
 
@@ -2186,6 +2186,8 @@ rebase session."
   (egg-buffer-do-rebase :abort)
   (egg-status))
 
+(defun egg-rebase-in-progress ()
+  (plist-get (egg-repo-state) :rebase-step))
 
 (defsubst egg-pretty-help-text (&rest strings)
   "Perform key bindings substitutions and highlighting in STRINGS."
@@ -2232,7 +2234,7 @@ rebase session."
    (egg-pretty-help-text
     "\\<egg-status-buffer-rebase-map>\n"
     "\\[egg-buffer-selective-rebase-continue]:resume rebase  "
-    "\\[egg-buffer-rebase-skip]:skip this rebase step  "
+    "\\[egg-buffer-selective-rebase-skip]:skip this rebase step  "
     "\\[egg-buffer-rebase-abort]:abort current rebase session\n")))
 
 (defconst egg-status-buffer-diff-help-text
@@ -2281,7 +2283,9 @@ rebase session."
     (when help-beg
       ;; Mark the help sub-section so it can be hidden
       (egg-delimit-section :help 'help help-beg (point) help-inv-beg map 
-			 'egg-compute-navigation))))
+			 'egg-compute-navigation))
+    (put-text-property beg (or help-beg (point)) 
+		       'help-echo (egg-tooltip-func))))
 
 (defun egg-ignore-pattern-from-string-at-point ()
   (interactive)
@@ -2620,6 +2624,16 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (define-key menu [quit] '(menu-item "Close Status View" quit-window))
   (define-key menu [refresh] '(menu-item "Refresh Status View" egg-buffer-cmd-refresh))
   (define-key menu [log] '(menu-item "Show Branch History" egg-log))
+  (define-key menu [sp3] '("--"))
+  (define-key menu [rb-skip] '(menu-item "Skip Rebase Session's Current Commit"
+					 egg-buffer-selective-rebase-skip
+					 :enable (egg-rebase-in-progress)))
+  (define-key menu [rb-abort] '(menu-item "Abort Rebase Session"
+					  egg-buffer-rebase-abort
+					  :enable (egg-rebase-in-progress)))
+  (define-key menu [rb-cont] '(menu-item "Resume Rebase Session"
+					 egg-buffer-selective-rebase-continue
+					 :enable (egg-rebase-in-progress)))
   (define-key menu [sp2] '("--"))
   (define-key menu [delta] (list 'menu-item "Delta"
 				 egg-status-buffer-mode-delta-menu
@@ -5858,6 +5872,9 @@ egg in current buffer.\\<egg-minor-mode-map>
     (egg-mouse-hide-show-cmd egg-section-at "hide/show %s's details")
     (egg-status-popup-staged-diff-menu egg-section-at "popup menu for %s")
     (egg-status-popup-unstaged-diff-menu egg-section-at "popup menu for %s")
+    (egg-buffer-rebase-abort nil "abort rebase session")
+    (egg-buffer-selective-rebase-skip nil "skip rebase session's current commit")
+    (egg-buffer-selective-rebase-continue nil "continue rebase session")
     ))
 
 (defun egg-buffer-help-echo (window buffer pos)
