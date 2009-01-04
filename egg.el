@@ -2348,7 +2348,7 @@ rebase session."
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
     (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
-	   "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
+	   "-M" "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
 	   extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
 			  inv-beg egg-section-map 'unstaged)
@@ -2374,7 +2374,7 @@ rebase session."
     (setq diff-beg (point)
 	  inv-beg (1- diff-beg))
     (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
-	   "--cached" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
+	   "--cached" "-M" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
 	   extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
 			  inv-beg egg-section-map 'staged)
@@ -4210,7 +4210,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "log" "--max-count=1" "-p"
+      (unless (egg-git-ok t "log" "--max-count=1" "-p" "-M"
 			  (concat
 			     "--pretty=format:"
 			     indent-spaces "%ai%n"
