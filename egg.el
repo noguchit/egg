@@ -4546,10 +4546,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		   (car ref)))
 	  ((consp references)
 	   (concat "Ref: " prefix (car (last references))))
-	  (t 
+	  ((stringp commit)
 	   (concat prefix " Commit: "
 		   (file-name-nondirectory 
-		    (egg-name-rev commit)))))))
+		    (egg-name-rev commit))))
+	  (t "No Commit Here"))))
 
 (defun egg-log-commit-mouse-menu-heading (&optional prefix)
   (let* ((event last-command-event)
@@ -4614,7 +4615,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (define-key menu [commit] (list 'menu-item
 				  '(egg-log-commit-mouse-menu-heading "Operations on ")
 				  egg-log-buffer-mode-commit-menu
-				  :enable '(egg-commit-at-point)))
+				  :visible '(egg-commit-at-point)))
   (define-key menu [sp1] '("--"))
   (define-key menu [hs] '(menu-item "Hide/Show Details"
 				    egg-section-cmd-toggle-hide-show
