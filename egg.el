@@ -1341,9 +1341,10 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (when (bufferp buffer)
       (save-window-excursion
 	(save-excursion
-	  (with-temp-buffer buffer)
-	  (goto-char position)
-	  (call-interactively cmd))))))
+	  (select-window window)
+	  (with-current-buffer buffer
+	    (goto-char position)
+	    (call-interactively cmd)))))))
 
 (defun egg-mouse-hide-show-cmd (event)
   (interactive "e")
@@ -1519,7 +1520,8 @@ the index. \\{egg-wdir-diff-section-map}")
 			      (buffer-substring-no-properties beg
 							      (1+ beg)))
 		      'egg-diff-file-header))
-  (put-text-property (1+ beg) end 'face 'egg-diff-file-header))
+  (put-text-property (1+ beg) end 'face 'egg-diff-file-header)
+  (put-text-property (1+ beg) end 'help-echo (egg-tooltip-func)))
 
 (defsubst egg-decorate-cc-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
@@ -1529,7 +1531,8 @@ the index. \\{egg-wdir-diff-section-map}")
 			      (buffer-substring-no-properties beg
 							      (1+ beg)))
 		      'egg-unmerged-diff-file-header))
-  (put-text-property (1+ beg) end 'face 'egg-unmerged-diff-file-header))
+  (put-text-property (1+ beg) end 'face 'egg-unmerged-diff-file-header)
+  (put-text-property (1+ beg) end 'help-echo (egg-tooltip-func)))
 
 (defsubst egg-decorate-diff-index-line (beg end line-beg line-end)
   (put-text-property (1- line-beg) beg 'display "    -- ")
@@ -1537,7 +1540,8 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defsubst egg-decorate-hunk-header (beg end line-beg line-end)
   (put-text-property beg end 'face 'egg-diff-hunk-header)
-  (put-text-property end line-end 'face 'egg-diff-none))
+  (put-text-property end line-end 'face 'egg-diff-none)
+  (put-text-property beg end 'help-echo (egg-tooltip-func)))
 
 (defvar egg-internal-buffer-obarray nil)
 
@@ -1907,6 +1911,11 @@ physical offsets."
 (defun egg-section-cmd-toggle-hide-show (nav)
   "Toggle the hidden state of the current navigation section of type NAV."
   (interactive (list (get-text-property (point) :navigation)))
+  
+  ;; emacs's bug? caused by tooltip
+  (if (eq buffer-invisibility-spec t)
+      (setq buffer-invisibility-spec nil))
+
   (if (assoc nav buffer-invisibility-spec)
       (remove-from-invisibility-spec (cons nav t))
     (add-to-invisibility-spec (cons nav t)))
@@ -2261,6 +2270,7 @@ rebase session."
       (insert "\n")
       (setq help-beg (point))
       (insert (egg-text "Help" 'egg-help-header-1) "\n")
+      (put-text-property help-beg (point) 'help-echo (egg-tooltip-func))
       (setq help-inv-beg (1- (point)))
       (insert egg-status-buffer-common-help-text)
       (when (eq egg-status-buffer-rebase-map map)
@@ -2317,7 +2327,8 @@ rebase session."
   "Insert the untracked files section into the status buffer."
   (let ((beg (point)) inv-beg end)
     (insert (egg-prepend "Untracked Files:" "\n\n" 
-			 'face 'egg-section-title)
+			 'face 'egg-section-title
+			 'help-echo (egg-tooltip-func))
 	    "\n")
     (setq inv-beg (1- (point)))
     (call-process egg-git-command nil t nil "ls-files" "--others"  
@@ -2325,12 +2336,14 @@ rebase session."
     (setq end (point))
     (egg-delimit-section :section 'untracked beg end 
 			  inv-beg egg-section-map 'untracked)
-    (put-text-property beg end 'keymap egg-untracked-file-map)))
+    (put-text-property inv-beg end 'keymap egg-untracked-file-map)
+    (put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
   (let ((beg (point)) inv-beg diff-beg)
-    (insert (egg-prepend title "\n\n" 'face 'egg-section-title)
+    (insert (egg-prepend title "\n\n" 'face 'egg-section-title
+			 'help-echo (egg-tooltip-func))
 	    "\n")
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
@@ -2355,7 +2368,8 @@ rebase session."
   "Insert the staged changes section into the status buffer."
   (let ((beg (point)) inv-beg diff-beg)
     (insert (egg-prepend title "\n\n"
-			  'face 'egg-section-title)
+			  'face 'egg-section-title
+			  'help-echo (egg-tooltip-func))
 	    "\n")
     (setq diff-beg (point)
 	  inv-beg (1- diff-beg))
@@ -3501,87 +3515,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map "/" 'egg-search-changes)
     map))
 
-(defun egg-ref-at (pos &optional object)
-  (car (get-text-property pos :ref object)))
 
-(defun egg-ref-or-commit-at (pos &optional object)
-  (or (car (get-text-property pos :ref object))
-      (get-text-property pos :commit object)))
-
-(defun egg-commit-at (pos &optional object)
-  (get-text-property pos :commit object))
-
-(defun egg-rsite-at (pos &optional object)
-  (egg-rbranch-to-remote (car (get-text-property pos :ref object))))
-
-(defun egg-delta-file-at (pos &optional object)
-  (car (get-text-property pos :diff object)))
-
-(defun egg-delta-hunk-at (pos &optional object)
-  (car (get-text-property pos :hunk object)))
-
-(defun egg-section-at (pos &optional object)
-  (let* ((sect-prop (get-text-property pos :sect-type object))
-	 (sect (and sect-prop (get-text-property pos sect-prop object))))
-    (if (consp sect)
-	(car sect)
-      sect)))
-
-(defconst egg-cmd-help-text-fmt-alist
-  '((egg-log-buffer-push-to-local egg-ref-or-commit-at "update another branch with %s")
-    (egg-log-buffer-push egg-rsite-at "push branches to remote %s")
-    (egg-log-buffer-fetch egg-ref-at "(re)-fetch %s")
-    (egg-log-buffer-rm-ref egg-ref-at "remove %s")
-    (egg-log-buffer-reflog-ref egg-ref-at "show history (reflog) of %s")
-    (egg-log-buffer-unmark egg-commit-at "unmark %s for upcoming rebase")
-    (egg-log-buffer-mark-edit egg-commit-at "mark %s to be edited in upcoming rebase")
-    (egg-log-buffer-mark-squash egg-ommit-at "mark %s to be squashed in upcoming rebase")
-    (egg-log-buffer-mark-pick egg-commit-at "mark %s to be picked in upcoming rebase")
-    (egg-log-buffer-rebase egg-commit-at "rebase HEAD to %s")
-    (egg-log-buffer-attach-head egg-ref-or-commit-at "anchor HEAD at %s")
-    (egg-log-buffer-atag-commit egg-commit-at "create new annotated-tag at %s")
-    (egg-log-buffer-tag-commit egg-commit-at "create new tag at %s")
-    (egg-log-buffer-checkout-commit egg-ref-or-commit-at "checkout %s")
-    (egg-log-buffer-start-new-branch egg-commit-at "start a new branch at %s")
-    (egg-log-buffer-create-new-branch egg-commit-at "create a new branch at %s")
-    (egg-log-buffer-insert-commit egg-commit-at "load %s's details")
-    (egg-section-cmd-toggle-hide-show-children egg-section-at "toggle hide/show children's details")
-    (egg-section-cmd-toggle-hide-show egg-section-at "toggle hide/show details")
-    (egg-log-buffer-merge egg-ref-or-commit-at "merge %s to HEAD")
-    ))
-
-(defun egg-thing-name-at-pos (pos &optional object)
-  (let (item)
-    (cond ((setq item (car (get-text-property pos :ref object))) item)
-	  ((setq item (get-text-property pos :commit object)) item)
-	  ((setq item (get-text-property pos :sect-type object))
-	   (when (setq item (get-text-property pos item object))
-	     (if (consp item)
-		 (car item)
-	       item)))
-	  (t "Internal Bug"))))
-
-(defun egg-buffer-help-echo (window buffer pos)
-  (if (and (bufferp buffer) (number-or-marker-p pos))
-      (let ((keymap (get-text-property pos 'keymap buffer)))
-	(when (keymapp keymap)
-	  (mapconcat 
-	   (lambda (mapping)
-	     (if (consp mapping)
-		 (let* ((key (car mapping))
-			(cmd (cdr mapping))
-			(howto (assq cmd egg-cmd-help-text-fmt-alist))
-			(func (nth 1 howto))
-			(fmt (nth 2 howto))
-			(key-str (format-kbd-macro (vector key)))
-			(name (if (functionp func)
-				  (funcall func pos buffer))))
-		   (when (stringp fmt)
-		     (if (and (stringp name) (= (length name) 40))
-			 (setq name (substring name 0 8)))
-		     (format "%s - %s\n" key-str (format fmt name))))
-	       ""))
-	   keymap "")))))
 
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map)
   (let ((start (point))
@@ -5847,5 +5781,111 @@ egg in current buffer.\\<egg-minor-mode-map>
 
 (add-hook 'find-file-hook 'egg-git-dir)
 (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
+
+;;;========================================================
+;;; tool-tip
+;;;========================================================
+(defun egg-ref-at (pos &optional object)
+  (car (get-text-property pos :ref object)))
+
+(defun egg-ref-or-commit-at (pos &optional object)
+  (or (car (get-text-property pos :ref object))
+      (get-text-property pos :commit object)))
+
+(defun egg-commit-at (pos &optional object)
+  (get-text-property pos :commit object))
+
+(defun egg-rsite-at (pos &optional object)
+  (egg-rbranch-to-remote (car (get-text-property pos :ref object))))
+
+(defun egg-delta-file-at (pos &optional object)
+  (car (get-text-property pos :diff object)))
+
+(defun egg-delta-hunk-at (pos &optional object)
+  (car (get-text-property pos :hunk object)))
+
+(defun egg-section-at (pos &optional object)
+  (let* ((sect-prop (get-text-property pos :sect-type object))
+	 (sect (and sect-prop (get-text-property pos sect-prop object))))
+    (unless sect
+      (setq sect (egg-commit-at pos object)))
+    (if (consp sect)
+	    (car sect)
+	  sect)))
+
+(defun egg-file-name-at (pos &optional buffer)
+  (when (bufferp buffer)
+    (save-excursion
+      (with-current-buffer buffer
+	(goto-char pos)
+	(ffap-file-at-point)))))
+
+(defconst egg-cmd-help-text-fmt-alist
+  '((egg-log-buffer-push-to-local egg-ref-or-commit-at "update another branch with %s")
+    (egg-log-buffer-push egg-rsite-at "push branches to remote %s")
+    (egg-log-buffer-fetch egg-ref-at "(re)-fetch %s")
+    (egg-log-buffer-rm-ref egg-ref-at "remove %s")
+    (egg-log-buffer-reflog-ref egg-ref-at "show history (reflog) of %s")
+    (egg-log-buffer-unmark egg-commit-at "unmark %s for upcoming rebase")
+    (egg-log-buffer-mark-edit egg-commit-at "mark %s to be edited in upcoming rebase")
+    (egg-log-buffer-mark-squash egg-commit-at "mark %s to be squashed in upcoming rebase")
+    (egg-log-buffer-mark-pick egg-commit-at "mark %s to be picked in upcoming rebase")
+    (egg-log-buffer-rebase egg-commit-at "rebase HEAD to %s")
+    (egg-log-buffer-attach-head egg-ref-or-commit-at "anchor HEAD at %s")
+    (egg-log-buffer-atag-commit egg-commit-at "create new annotated-tag at %s")
+    (egg-log-buffer-tag-commit egg-commit-at "create new tag at %s")
+    (egg-log-buffer-checkout-commit egg-ref-or-commit-at "checkout %s")
+    (egg-log-buffer-start-new-branch egg-commit-at "start a new branch at %s")
+    (egg-log-buffer-create-new-branch egg-commit-at "create a new branch at %s")
+    (egg-log-buffer-insert-commit egg-commit-at "load %s's details")
+    (egg-section-cmd-toggle-hide-show-children egg-section-at "hide/show %s's children's details")
+    (egg-section-cmd-toggle-hide-show egg-section-at "hide/show %s's details")
+    (egg-log-buffer-merge egg-ref-or-commit-at "merge %s to HEAD")
+    (egg-buffer-cmd-navigate-next nil "next block")
+    (egg-buffer-cmd-navigate-prev nil "prev block")
+    (egg-diff-section-cmd-visit-file-other-window egg-section-at "open %s in other window")
+    (egg-diff-section-cmd-visit-file egg-section-at "open %s")
+    (egg-diff-section-cmd-ediff nil "view this delta in ediff")
+    (egg-staged-section-cmd-ediff3 egg-section-at "view %s changes in ediff3")
+    (egg-diff-section-cmd-unstage egg-section-at "unstage %s")
+    (egg-diff-section-cmd-undo egg-section-at "delete theses changes from %s")
+    (egg-unstaged-section-cmd-ediff egg-section-at "view this delta in ediff")
+    (egg-diff-section-cmd-stage egg-section-at "stage %s")
+    (egg-unmerged-section-cmd-ediff3 nil "view this conflict in ediff3")
+    (egg-find-file-at-point egg-file-name-at "open %s")
+    (egg-ignore-pattern-from-string-at-point egg-file-name-at "add a pattern matching %s to .gitignore file")
+    (egg-status-buffer-stage-untracked-file egg-file-name-at "add %s to this repo")
+    (egg-mouse-hide-show-cmd egg-section-at "hide/show %s's details")
+    (egg-status-popup-staged-diff-menu egg-section-at "popup menu for %s")
+    (egg-status-popup-unstaged-diff-menu egg-section-at "popup menu for %s")
+    ))
+
+(defun egg-buffer-help-echo (window buffer pos)
+  (if (and (bufferp buffer) (number-or-marker-p pos))
+      (let ((keymap (get-text-property pos 'keymap buffer))
+	    seen-list func-name-alist)
+	(when (keymapp keymap)
+	  (mapconcat 
+	   (lambda (mapping)
+	     (if (consp mapping)
+		 (let* ((key (car mapping))
+			(cmd (cdr mapping))
+			(howto (assq cmd egg-cmd-help-text-fmt-alist))
+			(func (nth 1 howto))
+			(fmt (nth 2 howto))
+			(key-str (format-kbd-macro (vector key)))
+			(name (or (cdr (assq func func-name-alist))
+				  (when (functionp func)
+				    (cdar (setq func-name-alist
+						(cons (cons func
+							    (funcall func pos buffer))
+						      func-name-alist)))))))
+		   (when (and (not (memq key seen-list)) (stringp fmt))
+		     (if (and (stringp name) (= (length name) 40))
+			 (setq name (substring name 0 8)))
+		     (add-to-list 'seen-list key)
+		     (format "%s - %s\n" key-str (format fmt name))))
+	       ""))
+	   keymap "")))))
 
 (provide 'egg)
