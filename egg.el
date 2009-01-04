@@ -2200,7 +2200,7 @@ rebase session."
 		 (mapconcat 'identity strings "")))
 	(goto-char (point-min))
 	;; key highlighting
-	(while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~-]\\):" nil t)
+	(while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~*=-]\\):" nil t)
 	  (put-text-property (match-beginning 1) (match-end 1)'face 'egg-help-key)
 	  (if last-found
 	      (put-text-property last-found (1- (match-beginning 0))
@@ -3392,8 +3392,11 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		       :hunk-map egg-wdir-hunk-section-map))))
     (if (memq :diff egg-show-key-help-in-buffers)
 	(egg-diff-info-add-help info))
-    (when (stringp file)
-      (setq file (list file)))
+    (if (stringp file)
+	(setq file (list file))
+      (setq tmp (plist-get info :args))
+      (setq tmp (cons "-M" tmp))
+      (plist-put info :args tmp))
     (when (consp file) 
       (setq tmp (plist-get info :prologue))
       (setq tmp (concat (egg-text (mapconcat 'identity file "\n")
@@ -3457,6 +3460,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
+
+    (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
@@ -4423,6 +4428,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map [load] (list 'menu-item "(Re)Load Commit Details" 
 				 'egg-log-buffer-insert-commit
 				 :visible '(egg-commit-at-point)))
+    (define-key map [diff] (list 'menu-item "Compare against HEAD" 
+				 'egg-log-buffer-diff-revs
+				 :visible '(egg-commit-at-point)))
     (define-key map [prev] (list 'menu-item "Goto Prev Ref"
 				 'egg-log-buffer-prev-ref
 				 :visible '(egg-navigation-at-point)))
@@ -4537,7 +4545,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 			 ((eq (cdr ref) :tag) "Tag"))
 		   (car ref)))
 	  ((consp references)
-	   (concat "%s Ref: " prefix (car (last references))))
+	   (concat "Ref: " prefix (car (last references))))
 	  (t 
 	   (concat prefix " Commit: "
 		   (file-name-nondirectory 
@@ -4556,8 +4564,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	 (pos (posn-point (event-end event)))
 	 menu keys cmd)
     (when (bufferp buffer)
-      (save-window-excursion
-	(save-excursion
+      (save-excursion
 	  (with-temp-buffer buffer)
 	  (goto-char pos)
 	  (setq menu 
@@ -4569,7 +4576,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		       (x-popup-menu event menu)))
 	  (setq cmd (and keys (lookup-key menu (apply 'vector keys))))
 	  (when (and cmd (commandp cmd))
-	    (call-interactively cmd)))))))
+	    (call-interactively cmd))))))
 
 (defun egg-log-popup-local-ref-menu (event)
   (interactive "e")
@@ -4643,8 +4650,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-tag-commit]:new tag  " 
     "\\[egg-log-buffer-atag-commit]:new annotated tag  " 
     "\\[egg-log-buffer-merge]:merge to HEAD  " 
-    "\\[egg-log-buffer-rebase]:rebase HEAD  " 
-    "\\[egg-log-buffer-create-new-branch]:create branch\n")
+    "\\[egg-log-buffer-rebase]:rebase HEAD\n" 
+    "\\[egg-log-buffer-create-new-branch]:create branch  "
+    "\\[egg-log-buffer-diff-revs]:diff vs HEAD "
+    "\n"
+    )
    (egg-text "Extra Key Bindings to prepare a (interactive) rebase:" 'egg-help-header-2)
    "\n"
    (egg-pretty-help-text
@@ -4671,8 +4681,21 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    (egg-text "lightweight-tag" 'egg-tag-mono) " "
    (egg-text "annotated-tag" 'egg-an-tag-mono) " "
    (egg-text "remote/" 'egg-remote-mono)
-   (egg-text "branch" 'egg-branch-mono)
+   (egg-text "branch" 'egg-branch-mono) " "
+   (egg-text "  HEAD  " 'egg-log-HEAD) " "
    "\n"))
+
+(defun egg-log-buffer-diff-revs (pos)
+  "Compare HEAD against the rev at POS."
+  (interactive "d")
+  (let ((rev (egg-log-buffer-get-rev-at pos))
+	buf)
+    (unless (and rev (stringp rev))
+      (error "No commit here to compare against HEAD!"))
+    (when (string-equal rev "HEAD")
+      (error "It's pointless to compare HEAD vs HEAD!"))
+    (setq buf (egg-do-diff (egg-build-diff-info rev "HEAD"))) 
+    (pop-to-buffer buf t)))
 
 (defun egg-log (&optional all)
   (interactive "P")
@@ -5875,6 +5898,7 @@ egg in current buffer.\\<egg-minor-mode-map>
     (egg-buffer-rebase-abort nil "abort rebase session")
     (egg-buffer-selective-rebase-skip nil "skip rebase session's current commit")
     (egg-buffer-selective-rebase-continue nil "continue rebase session")
+    (egg-log-buffer-diff-revs egg-ref-or-commit-at "diff %s vs HEAD")
     ))
 
 (defun egg-buffer-help-echo (window buffer pos)
