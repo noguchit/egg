@@ -890,7 +890,8 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 			  1))
 
 (defsubst egg-get-current-sha1 ()
-  (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD"))
+  (or (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD")
+      "0000000000000000000000000000000000000000"))
 
 (defsubst egg-set-mode-info (state)
   "Set the mode-line string for buffers visiting files in the current repo.
