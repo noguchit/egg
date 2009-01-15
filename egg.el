@@ -2263,6 +2263,11 @@ rebase session."
 	 (rebase-step (plist-get state :rebase-step))
 	 (rebase-num (plist-get state :rebase-num))
 	 inv-beg help-beg help-inv-beg rebase-beg)
+
+    (unless (and sha1 state)
+      (error "Invalid repo state: sha1 = %s, state = %S"
+	     sha1 state))
+
     ;; head, sha1 and git-dir
     (insert (egg-text (egg-pretty-head-string state) 'egg-branch) "\n"
 	    (egg-text sha1 'font-lock-string-face) "\n"
