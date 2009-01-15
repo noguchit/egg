@@ -816,9 +816,12 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 		       ;; remote
 		       (cons full-name
 			     (concat
-			      (apply 'propertize remote
-				     :ref (cons name :remote)
-				     remote-site-properties)
+			       (if (stringp remote)
+				   (apply 'propertize remote
+					  :ref (cons name :remote)
+					  remote-site-properties)
+				 ;; svn has no remote name
+				 "")
 			      (apply 'propertize (substring name (length remote)) 
 				     :ref (cons name :remote)
 				     remote-ref-properties)))))))
