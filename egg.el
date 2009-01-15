@@ -424,10 +424,14 @@ desirable way to invoke gnu patch command."
 ;;;========================================================
 (defmacro egg-text (text face)
   "Format TEXT with face FACE at compile-time or run-time."
-  (if (stringp text)
-      (propertize text 'face (if (symbolp face) face
-			       (nth 1 face))) 
-    `(propertize ,text 'face ,face)))
+  (cond ((stringp text)
+	 (propertize text 'face (if (symbolp face) face
+				  (nth 1 face))))
+	((null text)
+	 `(propertize "<internal-bug>" 'face ,face))
+	(t `(propertize ,text 'face ,face))))
+
+;;(cl-macroexpand '(egg-text blah 'egg-text-3))
 
 (defmacro egg-prop (text &rest prop)
   "Propertize TEXT with properties list PROP at compile-time or run-time."
