@@ -3474,6 +3474,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
 
+    (define-key map (kbd "*") 'egg-log-buffer-mark)
     (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
@@ -3751,12 +3752,28 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	      (egg-describe-rev commit)
 	    commit)))))
 
-(defun egg-log-buffer-do-mark (pos char &optional unmark)
+(defun egg-log-buffer-do-remove-mark (mark-char)
+  (let ((pos (point-min))
+	(inhibit-read-only t))
+      (while (setq pos (next-single-property-change (1+ pos) :mark))
+	(when (= (get-text-property pos :mark) mark-char)
+	  (remove-text-properties pos (1+ pos)
+				  (list :mark nil 'display nil))))))
+
+(defun egg-log-buffer-find-first-mark (mark-char)
+  (let ((pos (point-min)))
+    (while (and (setq pos (next-single-property-change (1+ pos) :mark))
+		(/= (get-text-property pos :mark) mark-char)))
+    pos))
+
+(defun egg-log-buffer-do-mark (pos char &optional unmark remove-first)
   (let ((commit (get-text-property pos :commit))
 	(inhibit-read-only t)
 	(col (- egg-log-buffer-comment-column 10))
-	(step (if unmark -1 1)))
+	(step (if unmark -1 (if remove-first 0 1))))
     (when commit 
+      (when remove-first
+	(egg-log-buffer-do-remove-mark char))
       (move-to-column col)
       (funcall (if unmark
 		       #'remove-text-properties
@@ -3772,6 +3789,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		      (eobp) (bobp)))
 	(forward-line step))
       (move-to-column col))))
+
+(defun egg-log-buffer-mark (pos)
+  (interactive "d")
+  (egg-log-buffer-do-mark pos ?* nil t))
 
 (defun egg-log-buffer-mark-pick (pos)
   (interactive "d")
@@ -4702,13 +4723,15 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defun egg-log-buffer-diff-revs (pos)
   "Compare HEAD against the rev at POS."
   (interactive "d")
-  (let ((rev (egg-log-buffer-get-rev-at pos))
-	buf)
+  (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
+	 (mark (egg-log-buffer-find-first-mark ?*))
+	 (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) "HEAD"))
+	 buf)
     (unless (and rev (stringp rev))
-      (error "No commit here to compare against HEAD!"))
-    (when (string-equal rev "HEAD")
-      (error "It's pointless to compare HEAD vs HEAD!"))
-    (setq buf (egg-do-diff (egg-build-diff-info rev "HEAD"))) 
+      (error "No commit here to compare against %s!" base))
+    (when (string-equal rev base)
+      (error "It's pointless to compare %s vs %s!" rev base))
+    (setq buf (egg-do-diff (egg-build-diff-info rev base))) 
     (pop-to-buffer buf t)))
 
 (defun egg-log (&optional all)
