@@ -4462,7 +4462,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map [load] (list 'menu-item "(Re)Load Commit Details" 
 				 'egg-log-buffer-insert-commit
 				 :visible '(egg-commit-at-point)))
-    (define-key map [diff] (list 'menu-item "Compare against HEAD" 
+    (define-key map [diff] (list 'menu-item "Compare against HEAD (or BASE)" 
 				 'egg-log-buffer-diff-revs
 				 :visible '(egg-commit-at-point)))
     (define-key map [prev] (list 'menu-item "Goto Prev Ref"
@@ -4515,6 +4515,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				   :visible '(egg-commit-at-point))) 
     (define-key map [pick] (list 'menu-item "Mark to be Picked in upcoming interractive Rebase " 
 				 'egg-log-buffer-mark-pick
+				 :visible '(egg-commit-at-point))) 
+    (define-key map [base] (list 'menu-item "Mark as Base Commit " 
+				 'egg-log-buffer-mark
 				 :visible '(egg-commit-at-point))) 
     (define-key map [sp4] '("--"))
     (define-key map [rebase] (list 'menu-item "Rebase HEAD" 
@@ -4687,13 +4690,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-merge]:merge to HEAD  " 
     "\\[egg-log-buffer-rebase]:rebase HEAD\n" 
     "\\[egg-log-buffer-create-new-branch]:create branch  "
-    "\\[egg-log-buffer-diff-revs]:diff vs HEAD "
+    "\\[egg-log-buffer-diff-revs]:diff vs HEAD (or BASE)"
     "\n"
     )
    (egg-text "Extra Key Bindings to prepare a (interactive) rebase:" 'egg-help-header-2)
    "\n"
    (egg-pretty-help-text
     "\\<egg-log-commit-map>"
+    "\\[egg-log-buffer-mark]:mark as BASE " 
     "\\[egg-log-buffer-mark-pick]:mark as picked  " 
     "\\[egg-log-buffer-mark-squash]:mark as squashed  " 
     "\\[egg-log-buffer-mark-edit]:mark as edited  " 
@@ -5904,6 +5908,7 @@ egg in current buffer.\\<egg-minor-mode-map>
     (egg-log-buffer-mark-edit egg-commit-at "mark %s to be edited in upcoming rebase")
     (egg-log-buffer-mark-squash egg-commit-at "mark %s to be squashed in upcoming rebase")
     (egg-log-buffer-mark-pick egg-commit-at "mark %s to be picked in upcoming rebase")
+    (egg-log-buffer-mark egg-commit-at "mark %s as BASE")
     (egg-log-buffer-rebase egg-commit-at "rebase HEAD to %s")
     (egg-log-buffer-attach-head egg-ref-or-commit-at "anchor HEAD at %s")
     (egg-log-buffer-atag-commit egg-commit-at "create new annotated-tag at %s")
