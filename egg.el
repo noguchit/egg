@@ -787,7 +787,8 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	  (delq nil 
 		(mapcar (lambda (desc)
 			  (if (not (assq 7 desc))
-			      desc ;; not an annotated tag
+			      ;; not an annotated tag
+			      desc
 			    (setq annotated-tags 
 				  (cons (cdr (assq 1 desc)) 
 					annotated-tags))
@@ -3589,16 +3590,24 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			    (skip-chars-forward "^)")
 			    (setq refs-end (point))
 			    (+ (point) 2)))
-	(setq full-refs (when refs-start
-			  (save-match-data
-			    (mapcar (lambda (lref)
-				      (if (string-equal (substring lref 0 5) "tag: ")
-					  (substring lref 5)
-					lref))
-				    (split-string 
-				     (buffer-substring-no-properties (+ sha-end 2)
-								     refs-end) 
-				     ", +" t)))))
+	(setq full-refs 
+	      (when refs-start
+		(save-match-data
+		  (delq nil
+			(mapcar (lambda (lref)
+				  (cond ((and (> (length lref) 5)
+					      (string-equal (substring lref 0 5)
+							    "tag: "))
+					 (substring lref 5))
+					((and (> (length lref) 6)
+					      (string-equal (substring lref -5)
+							    "/HEAD"))
+					 nil)
+					(t lref)))
+				(split-string 
+				 (buffer-substring-no-properties (+ sha-end 2)
+								 refs-end)
+				 ", +" t))))))
 	(setq refs (mapcar (lambda (full-ref-name) 
 			     (cdr (assoc full-ref-name ref-alist)))
 			   full-refs))
@@ -4055,10 +4064,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-log-buffer-start-new-branch (pos &optional force)
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos)))
+  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
     (when (egg-do-create-branch
 	   rev 'checkout
-	   (format "start new branch at %s with name: " rev)
+	   (format "start new branch from %s with name: " rev)
 	   force))))
 
 (defun egg-log-buffer-attach-head (pos &optional strict-level)
