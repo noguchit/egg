@@ -4018,7 +4018,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			     egg-git-rebase-subdir "/"))
 	 (todo-alist (egg-log-buffer-get-marked-alist))
 	 (commits (mapcar 'car todo-alist))
-	 (upstream (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+	 (upstream (egg-commit-at pos))
 	 (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
 				(concat upstream "..HEAD"))))
     (unless (egg-repo-clean state)
