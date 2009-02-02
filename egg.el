@@ -3465,6 +3465,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
+    (define-key map (kbd "R") 'egg-log-buffer-rebase-interactive)
     map))
 
 (defconst egg-log-commit-map 
@@ -4696,10 +4697,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-attach-head]:anchor HEAD  " 
     "\\[egg-log-buffer-tag-commit]:new tag  " 
     "\\[egg-log-buffer-atag-commit]:new annotated tag  " 
-    "\\[egg-log-buffer-merge]:merge to HEAD  " 
-    "\\[egg-log-buffer-rebase]:rebase HEAD\n" 
     "\\[egg-log-buffer-create-new-branch]:create branch  "
-    "\\[egg-log-buffer-diff-revs]:diff vs HEAD (or BASE)"
+    "\\[egg-log-buffer-diff-revs]:diff vs HEAD (or BASE)\n"
+    "\\[egg-log-buffer-merge]:merge to HEAD  " 
+    "\\[egg-log-buffer-rebase]:rebase HEAD  " 
+    "\\[egg-log-buffer-rebase-interactive]:rebase HEAD interactively" 
     "\n"
     )
    (egg-text "Extra Key Bindings to prepare a (interactive) rebase:" 'egg-help-header-2)
@@ -4848,9 +4850,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-start-new-branch]:start new branch  " 
     "\\[egg-log-buffer-create-new-branch]:create branch\n" 
     "\\[egg-log-buffer-tag-commit]:new tag  " 
-    "\\[egg-log-buffer-atag-commit]:new annotated tag  " 
-    "\\[egg-log-buffer-merge]:merge to HEAD  " 
-    "\\[egg-log-buffer-rebase]:rebase HEAD\n" 
+    "\\[egg-log-buffer-atag-commit]:new annotated tag\n" 
     )
    (egg-text "Extra Key Bindings for a Diff Block:" 'egg-help-header-2) "\n"
    (egg-pretty-help-text
@@ -5008,12 +5008,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks\n"
     "\\[egg-log-buffer-attach-head]:anchor HEAD  " 
     "\\[egg-log-buffer-checkout-commit]:checkout  " 
-    "\\[egg-log-buffer-start-new-branch]:start new branch  " 
-    "\\[egg-log-buffer-create-new-branch]:create branch\n" 
     "\\[egg-log-buffer-tag-commit]:new tag  " 
-    "\\[egg-log-buffer-atag-commit]:new annotated tag  " 
-    "\\[egg-log-buffer-merge]:merge to HEAD  " 
-    "\\[egg-log-buffer-rebase]:rebase HEAD\n" 
+    "\\[egg-log-buffer-atag-commit]:new annotated tag\n" 
     )
    (egg-text "Extra Key Bindings for a Diff Block:" egg-help-header-2) "\n"
    (egg-pretty-help-text
@@ -5980,4 +5976,5 @@ egg in current buffer.\\<egg-minor-mode-map>
 	       ""))
 	   keymap "")))))
 
+(run-hooks 'egg-load-hook)
 (provide 'egg)
