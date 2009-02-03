@@ -2671,16 +2671,16 @@ If INIT was not nil, then perform 1st-time initializations as well."
 				      :enable (egg-navigation-at-point))))
 
 
-(defun egg-status (&optional no-update caller)
+(defun egg-status (&optional select caller)
   (interactive "P")
   (let* ((egg-internal-current-state 
 	  (egg-repo-state (if (interactive-p) :error-if-not-git)))
 	 (buf (egg-get-status-buffer 'create)))
-    (unless no-update
-      (with-current-buffer buf
-	(egg-status-buffer-redisplay buf 'init)))
-    (cond ((interactive-p) (display-buffer buf t))
-	  ((eq caller :sentinel) (pop-to-buffer buf))
+    (with-current-buffer buf
+      (egg-status-buffer-redisplay buf 'init))
+    (cond ((eq caller :sentinel) (pop-to-buffer buf))
+	  (select (pop-to-buffer buf t))
+	  ((interactive-p) (display-buffer buf t))
 	  (t (pop-to-buffer buf t)))))
 
 ;;;========================================================
