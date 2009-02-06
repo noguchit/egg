@@ -3,6 +3,7 @@
 
 ;; Copyright (C) 2008  Linh Dang
 ;; Copyright (C) 2008  Marius Vollmer
+;; Copyright (C) 2009  Tim Moore
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -1242,6 +1243,16 @@ success."
 ;;;========================================================
 ;;; Blame utils
 ;;;========================================================
+
+(defconst egg-blame-map
+  (let ((map (make-sparse-keymap "Egg:Blame")))
+    (define-key map (kbd "l") 'egg-blame-locate-commit)
+    (define-key map (kbd "RET") 'egg-blame-locate-commit)
+    (define-key map (kbd "q") 'egg-file-toggle-blame-mode)
+    map)
+  "Keymap for an annotated section.\\{egg-blame-map}")
+
+
 (defun egg-parse-git-blame (target-buf blame-buf &optional ov-attributes)
   "Parse blame-info in buffer BLAME-BUF and decorate TARGET-BUF buffer.
 OV-ATTRIBUTES are the extra decorations for each blame chunk."
@@ -1315,7 +1326,8 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
 		       blank
 		       (egg-text subject 'egg-blame-subject)
 		       blank nl))
-	  (overlay-put ov 'before-string blame))))))
+	  (overlay-put ov 'before-string blame)
+          (overlay-put ov 'local-map egg-blame-map))))))
 
 (defsubst egg-file-buffer-blame-off (buffer)
   (save-excursion
@@ -1338,6 +1350,28 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
 			     (buffer-file-name buffer)))
 	    (egg-parse-git-blame buffer (current-buffer)
 				 ov-attributes)))))))
+
+(defun egg-blame-locate-commit (pos &optional all)
+  (interactive "d\nP")
+  "Jump to a commit in the branch history from an annotated blame section.
+
+   With prefix argument, the history of all refs is used."
+  (let ((overlays (overlays-at pos))
+        sha1)
+    (dolist (ov overlays)
+      (if (overlay-get ov :blame)
+          (setq sha1 (plist-get (nth 3 (overlay-get ov :blame)) :sha1))))
+    (if sha1
+        (let (commit-pos)
+          (egg-log all)
+          (setq commit-pos (point-min))
+          (while (and commit-pos
+                      (not (equal (get-text-property commit-pos :commit) sha1)))
+            (setq commit-pos (next-single-property-change commit-pos :commit)))
+          (if commit-pos
+              (progn
+                (egg-log-buffer-goto-pos commit-pos)
+                (recenter)))))))
 
 ;;;========================================================
 ;;; Diff/Hunk
