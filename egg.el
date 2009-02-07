@@ -354,6 +354,11 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
+(defcustom egg-confirm-undo t
+  "Always prompt for confirmation before removing delta from workdir."
+  :group 'egg
+  :type 'boolean)
+
 (defcustom egg-status-buffer-sections '(repo unstaged staged untracked)
   "Sections to be listed in the status buffer and their order."
   :group 'egg
@@ -2870,6 +2875,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-hunk-section-cmd-undo (pos)
   (interactive (list (point)))
+  (unless (or (not egg-confirm-undo)
+	      (y-or-n-p "irreversibly remove the hunk under cursor? "))
+    (error "Too chicken to proceed with undo operation!"))
   (let ((file (egg-hunk-section-patch-cmd pos egg-patch-command 
 					  "-p1" "--quiet" "--reverse")))
     (if (consp file) (setq file (car file)))
@@ -2902,6 +2910,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-diff-section-cmd-undo (pos)
   (interactive (list (point)))
+  (unless (or (not egg-confirm-undo)
+	      (y-or-n-p "irreversibly remove the delta under cursor? "))
+    (error "Too chicken to proceed with undo operation!"))
+
   (let ((file (car (or (get-text-property pos :diff)
 		       (error "No diff with file-name here!"))))
 	(src-rev (get-text-property pos :src-revision))
