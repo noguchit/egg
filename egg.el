@@ -2893,7 +2893,11 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-diff-section-cmd-stage (pos)
   (interactive (list (point)))
-  (egg-diff-section-patch-cmd pos nil "add"))
+  (let ((file (car (get-text-property pos :diff))))
+    (egg-diff-section-patch-cmd pos nil
+      (if (file-exists-p file)
+          "add"
+        "rm"))))
 
 (defun egg-diff-section-cmd-unstage (pos)
   (interactive (list (point)))
