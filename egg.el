@@ -443,6 +443,14 @@ desirable way to invoke gnu patch command."
   :group 'egg
   :type 'string)
 
+(defcustom egg-compute-git-dir-func (if (eq window-system 'w32)
+				     'egg-win32-clean-cygwin-path
+				     'identity)
+  "Function to transform the string returned by `rev-parse --git-dir'
+to something useful for emacs. Needed on win32?"
+  :group 'egg
+  :type 'function)
+
 
 (defcustom egg-dummy-option nil
   "Foo bar"
@@ -721,11 +729,19 @@ END-RE is the regexp to match the end of a record."
   "get the SHA1 of REV."
   (egg-git-to-string "rev-parse" (concat rev "~0")))
 
+(defun egg-win32-clean-cygwin-path (dir)
+  ;; from csebold
+  ;; replace cygwin data if being returned to a non-cygwin Emacs
+  (save-match-data
+    (if (string-match ":\\(/cygdrive/[a-z]+\\)" dir)
+	(replace-match "" t t dir 1)
+      dir)))
+
 (defun egg-read-git-dir ()
   "call GIT to read the git directory of default-directory."
   (let ((dir (egg-git-to-string "rev-parse" "--git-dir")))
     (if (stringp dir) 
-	(expand-file-name dir))))
+	(funcall egg-compute-git-dir-func (expand-file-name dir)))))
 
 (defsubst egg-read-dir-git-dir (dir)
   "call GIT to read the git directory of DIR."
