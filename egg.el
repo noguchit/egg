@@ -2735,6 +2735,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
 					egg-commit-log-edit))
   (define-key menu [stage] '(menu-item "Stage All Modifications"
 					egg-stage-all-files))
+  (define-key menu [stage-untracked] '(menu-item "Stage All Untracked Files"
+					egg-stage-untracked-files))
   (define-key menu [sp1] '("--"))
   (define-key menu [hide-all] '(menu-item "Hide All" egg-buffer-hide-all))  
   (define-key menu [show-all] '(menu-item "Show All" egg-buffer-show-all))  
@@ -2985,6 +2987,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	 (default-directory (file-name-directory git-dir)))
     (when (egg-sync-0 "add" "-u")
       (message "staged all tracked files's modifications"))))
+
+(defun egg-stage-untracked-files ()
+  (interactive)
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir)))
+    (when (egg-sync-0 "add" ".")
+      (message "staged all untracked files"))))
 
 (defun egg-do-stash-wip (msg)
   (let* ((git-dir (egg-git-dir))
