@@ -3525,22 +3525,22 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (if refs-only
       (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
 		  "--graph" "--topo-order" "--simplify-by-decoration"
-		  "--pretty=oneline" "--decorate")
+      "--pretty=oneline" "--decorate" "--no-color")
     (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
 		"--graph" "--topo-order"
-		"--pretty=oneline" "--decorate")))
+    "--pretty=oneline" "--decorate" "--no-color")))
 
 (defun egg-run-git-log-all (&optional refs-only)
   (if refs-only
       (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
 		  "--graph" "--topo-order" "--simplify-by-decoration"
-		  "--pretty=oneline" "--decorate" "--all")
+      "--pretty=oneline" "--decorate" "--all" "--no-color")
     (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
 		"--graph" "--topo-order"
-		"--pretty=oneline" "--decorate" "--all")))
+    "--pretty=oneline" "--decorate" "--all" "--no-color")))
 
 (defun egg-run-git-log-pickaxe (string)
-  (egg-git-ok t "log" "--pretty=oneline" "--decorate"
+  (egg-git-ok t "log" "--pretty=oneline" "--decorate" "--no-color"
 	      (concat "-S" string)))
 
 (defconst egg-log-commit-base-map
