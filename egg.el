@@ -382,7 +382,7 @@ Many Egg faces inherit from this one by default."
   :type 'boolean)
 
 (defcustom egg-enable-tooltip nil
-  "Whether to refresh the index in the background when emacs is idle."
+  "Whether to activate useful tooltips, showing the local keymap at the point."
   :group 'egg
   :type 'boolean)
 
