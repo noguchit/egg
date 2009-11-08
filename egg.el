@@ -1308,10 +1308,10 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
 	  (unless commit-info
 	    (re-search-forward "^author \\(.+\\)$")
 	    (setq author (match-string-no-properties 1))
-	    (re-search-forward "^filename \\(.+\\)$")
-	    (setq old-file (match-string-no-properties 1))
 	    (re-search-forward "^summary \\(.+\\)$")
 	    (setq subject (match-string-no-properties 1))
+	    (re-search-forward "^filename \\(.+\\)$")
+	    (setq old-file (match-string-no-properties 1))
 	    (setq commit-info (nconc
 			       (list :sha1 commit :author author 
 				     :subject subject :file old-file)
