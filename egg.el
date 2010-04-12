@@ -382,7 +382,7 @@ Many Egg faces inherit from this one by default."
   :type 'boolean)
 
 (defcustom egg-enable-tooltip nil
-  "Whether to refresh the index in the background when emacs is idle."
+  "Whether to activate useful tooltips, showing the local keymap at the point."
   :group 'egg
   :type 'boolean)
 
@@ -2735,6 +2735,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
 					egg-commit-log-edit))
   (define-key menu [stage] '(menu-item "Stage All Modifications"
 					egg-stage-all-files))
+  (define-key menu [stage-untracked] '(menu-item "Stage All Untracked Files"
+					egg-stage-untracked-files))
   (define-key menu [sp1] '("--"))
   (define-key menu [hide-all] '(menu-item "Hide All" egg-buffer-hide-all))  
   (define-key menu [show-all] '(menu-item "Show All" egg-buffer-show-all))  
@@ -2985,6 +2987,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	 (default-directory (file-name-directory git-dir)))
     (when (egg-sync-0 "add" "-u")
       (message "staged all tracked files's modifications"))))
+
+(defun egg-stage-untracked-files ()
+  (interactive)
+  (let* ((git-dir (egg-git-dir))
+	 (default-directory (file-name-directory git-dir)))
+    (when (egg-sync-0 "add" ".")
+      (message "staged all untracked files"))))
 
 (defun egg-do-stash-wip (msg)
   (let* ((git-dir (egg-git-dir))
@@ -3661,8 +3670,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	refs-start refs-end ref-alist
 	head-line)
     (setq ref-alist (mapcar (lambda (pair)
-			      (cons (car pair)
-				    (substring-no-properties (cdr pair))))
+			      (cons 
+			       (substring-no-properties (cdr pair))
+			       (car pair)))
 			    dec-ref-alist))
     (save-excursion
       (while (re-search-forward "\\([0-9a-f]\\{40\\}\\) .+$" nil t)
@@ -3681,27 +3691,25 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			    (skip-chars-forward "^)")
 			    (setq refs-end (point))
 			    (+ (point) 2)))
-	(setq full-refs 
-	      (when refs-start
-		(save-match-data
-		  (delq nil
-			(mapcar (lambda (lref)
-				  (cond ((and (> (length lref) 5)
-					      (string-equal (substring lref 0 5)
-							    "tag: "))
-					 (substring lref 5))
-					((and (> (length lref) 6)
-					      (string-equal (substring lref -5)
-							    "/HEAD"))
-					 nil)
-					(t lref)))
-				(split-string 
-				 (buffer-substring-no-properties (+ sha-end 2)
-								 refs-end)
-				 ", +" t))))))
-	(setq refs (mapcar (lambda (full-ref-name) 
+	(setq refs (when refs-start
+			  (save-match-data
+			    (mapcar (lambda (lref)
+				      (if (string-equal (substring lref 0 4) "tag:")
+					  (substring lref 5)
+					lref))
+				    (split-string 
+				     (buffer-substring-no-properties (+ sha-end 2)
+								     refs-end) 
+				     ", +" t)))))
+
+	(setq full-refs (mapcar (lambda (full-ref-name) 
 			     (cdr (assoc full-ref-name ref-alist)))
-			   full-refs))
+			   refs))
+
+	(mapcar (lambda (full-ref-name) 
+		  (print full-ref-name))
+		full-refs)
+
 
 	;; common line decorations
 	(setq line-props (list :navigation sha1 :commit sha1))
