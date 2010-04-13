@@ -1308,10 +1308,10 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
 	  (unless commit-info
 	    (re-search-forward "^author \\(.+\\)$")
 	    (setq author (match-string-no-properties 1))
-	    (re-search-forward "^filename \\(.+\\)$")
-	    (setq old-file (match-string-no-properties 1))
 	    (re-search-forward "^summary \\(.+\\)$")
 	    (setq subject (match-string-no-properties 1))
+	    (re-search-forward "^filename \\(.+\\)$")
+	    (setq old-file (match-string-no-properties 1))
 	    (setq commit-info (nconc
 			       (list :sha1 commit :author author 
 				     :subject subject :file old-file)
@@ -3727,8 +3727,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	      (if full-refs
 		  (propertize
 		   (mapconcat (lambda (full-ref-name)
-				(cdr (assoc full-ref-name 
-					    dec-ref-alist)))
+				; (cdr (assoc full-ref-name 
+				;         dec-ref-alist)))
+                        full-ref-name)
 			      full-refs separator)
 		   :navigation sha1 :commit sha1
 		   :references refs)))
