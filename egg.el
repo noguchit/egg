@@ -6082,5 +6082,38 @@ egg in current buffer.\\<egg-minor-mode-map>
 	       ""))
 	   keymap "")))))
 
+;;;========================================================
+;;; auto-update
+;;;========================================================
+
+(defvar egg-auto-update t)
+
+(defun egg-maybe-update-status ()
+  "Pull up the status buffer for the current buffer if there is one."
+  (let ((bufname (egg-buf-git-name)))
+    (when (and egg-auto-update bufname)
+      (egg-status t)
+      (egg-goto-block-filename bufname))))
+
+(add-hook 'after-save-hook 'egg-maybe-update-status)
+
+(defun egg-goto-block-filename (filename)
+  (interactive "sFilename: ")
+  (egg-goto-block-regexp (rx (or "staged" "unstaged") "-" (eval filename))))
+
+(defun egg-goto-block-regexp (nav-regexp)
+  "Takes `nav-regexp' as regexp and moves cursor there."
+  (let (nav-point)
+    (goto-char (point-min))
+    (let (prev-point)
+      (while (not (eql prev-point (point)))
+        (setq prev-point (point))
+        (egg-buffer-cmd-navigate-next)
+        (let ((prop-name (symbol-name (egg-navigation-at-point))))
+          (if (string-match nav-regexp prop-name)
+              (setq nav-point (point)
+                    prev-point (point))))))
+    nav-point))
+
 (run-hooks 'egg-load-hook)
 (provide 'egg)
