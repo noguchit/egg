@@ -1949,8 +1949,9 @@ HUNK-BEG is the starting position of the current hunk."
       (goto-char hunk-beg)
       (forward-line 1)
       (end-of-line)
-      (while (re-search-forward "^\\(?:\\+\\| \\).*" limit t)
-	(setq adjust (1+ adjust))))
+      (if (< (point) limit)
+          (while (re-search-forward "^\\(?:\\+\\| \\).*" limit t)
+            (setq adjust (1+ adjust)))))
     (+ line adjust)))
 
 (defsubst egg-hunk-info-at (pos)
