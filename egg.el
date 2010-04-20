@@ -25,6 +25,10 @@
 ;;;    http://zagadka.vm.bytemark.co.uk/magit
 ;;;
 
+;;; If you want to stop auto-update egg-status on file save,
+;;;   you set follow value on your .emacs.
+;;; (setq egg-auto-update nil)
+
 (require 'cl)
 (require 'electric)
 (require 'ediff)
