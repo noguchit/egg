@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## v 0.92 unser construction
+- fixed details of egg log buffer show escape charactors
+
 ## v 0.91
 
 - support git 1.7.x from strav/master
