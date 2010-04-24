@@ -4377,7 +4377,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "log" "--max-count=1" "-p" "-M"
+      (unless (egg-git-ok t "log" "--max-count=1" "-p" "-M" "--no-color"
 			  (concat
 			     "--pretty=format:"
 			     indent-spaces "%ai%n"
