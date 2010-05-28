@@ -5057,7 +5057,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-insert-n-decorate-pickaxed-logs (string)
   (let ((beg (point)))
-    (egg-git-ok t "log" "--pretty=oneline" "--decorate" 
+    (egg-git-ok t "log" "--pretty=oneline" "--decorate" "--no-color"
 		(concat "-S" string))
     (goto-char beg)
     (egg-decorate-log egg-query:commit-commit-map
