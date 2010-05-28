@@ -5083,8 +5083,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;;; reflog
 ;;;========================================================
 (defsubst egg-run-reflog-branch (branch)
-  (egg-git-ok t "log" "-g" "--pretty=oneline" "--decorate"
-	      (format "--max-count=%d" egg-log-HEAD-max-len) 
+  (egg-git-ok t "log" "-g" "--pretty=oneline" "--decorate" "--no-color"
+	      (format "--max-count=%d" egg-log-HEAD-max-len)
 	      branch))
 
 (define-egg-buffer reflog "*%s-reflog@%s*"
