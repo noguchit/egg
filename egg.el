@@ -25,9 +25,9 @@
 ;;;    http://zagadka.vm.bytemark.co.uk/magit
 ;;;
 
-;;; If you want to stop auto-update egg-status on file save,
+;;; If you want to auto-update egg-status on file save,
 ;;;   you set follow value on your .emacs.
-;;; (setq egg-auto-update nil)
+;;; (setq egg-auto-update t)
 
 (require 'cl)
 (require 'electric)
@@ -6091,7 +6091,7 @@ egg in current buffer.\\<egg-minor-mode-map>
 ;;; auto-update
 ;;;========================================================
 
-(defvar egg-auto-update t)
+(defvar egg-auto-update nil)
 
 (defun egg-maybe-update-status ()
   "Pull up the status buffer for the current buffer if there is one."
