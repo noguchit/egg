@@ -5021,7 +5021,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		   (egg-log-buffer-insert-n-decorate-logs
 		    `(lambda ()
 		       (egg-git-ok t "log" "--max-count=10000" "--graph"
-				   "--topo-order" "--pretty=oneline"
+				   "--topo-order" "--pretty=oneline" "--no-color"
 				   "--decorate" "HEAD" sha1)))))) 
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
