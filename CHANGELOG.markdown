@@ -2,6 +2,10 @@
 
 ## v 0.92 unser construction
 - fixed details of egg log buffer show escape charactors
+- fixed log search error
+- fixed egg-log-buffer-reflog-ref message no escap
+- fixed history search to log-buffer unescaped
+- change egg-auto-update default off
 
 ## v 0.91
 
