@@ -1982,7 +1982,7 @@ physical offsets."
   "Visit FILE in other-window and goto the current line of the hunk."
   (interactive (egg-hunk-info-at (point)))
   (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
-    (find-file file)
+    (find-file-other-window file)
     (goto-line line)))
 
 (defun egg-section-cmd-toggle-hide-show (nav)
