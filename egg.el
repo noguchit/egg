@@ -2338,7 +2338,7 @@ rebase session."
     "\\<egg-unstaged-diff-section-map>\n"
     "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
     "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
-    "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n")))
+    "\\[egg-diff-section-cmd-undo]:undo file/hunk's modifications\n")))
   
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
