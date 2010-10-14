@@ -4901,12 +4901,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defsubst egg-run-git-file-log-HEAD (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len) 
-	      "--graph" "--topo-order"
+	      "--graph" "--topo-order" "--no-color"
 		"--pretty=oneline" "--decorate" "--" file))
 
 (defsubst egg-run-git-file-log-all (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
-	      "--graph" "--topo-order"
+	      "--graph" "--topo-order" "--no-color"
 		"--pretty=oneline" "--decorate" "--all" "--" file))
 
 (defconst egg-log-commit-simple-map 
