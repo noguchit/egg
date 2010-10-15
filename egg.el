@@ -3711,11 +3711,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			     (cdr (assoc full-ref-name ref-alist)))
 			   refs))
 
-	(mapcar (lambda (full-ref-name) 
-		  (print full-ref-name))
-		full-refs)
-
-
 	;; common line decorations
 	(setq line-props (list :navigation sha1 :commit sha1))
 
