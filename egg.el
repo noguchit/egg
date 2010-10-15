@@ -234,7 +234,7 @@ Many Egg faces inherit from this one by default."
   '((((class color) (background light))
      :foreground "blue1")
     (((class color) (background dark))
-     :foreground "white"))
+     :foreground "ForestGreen"))
   "Face for lines in a diff that have been added."
   :group 'egg-faces)
 
