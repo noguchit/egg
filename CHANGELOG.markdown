@@ -1,6 +1,6 @@
 # Egg (Emacs Got Git).
 
-## v 0.92 unser construction
+## v 0.92
 - fixed details of egg log buffer show escape charactors
 - fixed log search error
 - fixed egg-log-buffer-reflog-ref message no escap
