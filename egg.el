@@ -2338,7 +2338,7 @@ rebase session."
     "\\<egg-unstaged-diff-section-map>\n"
     "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
     "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk  "
-    "\\[egg-diff-section-cmd-undo]:undo file/hunk's modificatons\n")))
+    "\\[egg-diff-section-cmd-undo]:undo file/hunk's modifications\n")))
   
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
@@ -2756,6 +2756,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (define-key menu [next] '(menu-item "Goto Next Block" egg-buffer-cmd-navigate-next
 				      :enable (egg-navigation-at-point))))
 
+(defvar egg-switch-to-buffer nil "Set to nonnil for egg-status to switch to the status buffer in the same window.")
 
 (defun egg-status (&optional select caller)
   (interactive "P")
@@ -2766,6 +2767,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (egg-status-buffer-redisplay buf 'init))
     (cond ((eq caller :sentinel) (pop-to-buffer buf))
 	  (select (pop-to-buffer buf t))
+	  (egg-switch-to-buffer (switch-to-buffer buf))
 	  ((interactive-p) (display-buffer buf t))
 	  (t (pop-to-buffer buf t)))))
 
@@ -4875,7 +4877,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 			   'egg-run-git-log-HEAD)))))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
       (egg-log-buffer-redisplay buf 'init))
-    (pop-to-buffer buf t)))
+    (cond
+     (egg-switch-to-buffer (switch-to-buffer buf))
+     (t (pop-to-buffer buf t)))))
 ;;;========================================================
 ;;; file history
 ;;;========================================================
