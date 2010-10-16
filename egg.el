@@ -25,6 +25,9 @@
 ;;;    This is my fork of Marius's excellent magit. his work is at:
 ;;;    http://zagadka.vm.bytemark.co.uk/magit
 ;;;
+;;;    This is my fork of bogolisk egg . his work is at
+;;     http://github.com/bogolisk/egg
+;;;
 
 ;;; Options
 ;;; If you want to auto-update egg-status on file save,
