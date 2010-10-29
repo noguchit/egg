@@ -2152,7 +2152,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	 ,@body
 	 (set (make-local-variable 'egg-orig-window-config) 
 	      (current-window-configuration))
-	 (message "buffer %s win-cfg %s" (buffer-name) egg-orig-window-config)
+	 ;; (message "buffer %s win-cfg %s" (buffer-name) egg-orig-window-config)
 	 (set (make-local-variable 'egg-internal-buffer-obarray)
 	      (make-vector 67 0)))
 
