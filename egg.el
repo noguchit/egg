@@ -3709,12 +3709,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(setq refs (when refs-start
 			  (save-match-data
 			    (mapcar (lambda (lref)
-				      (if (and (>= (length lref) 4) (string-equal (substring lref 0 4) "tag:"))
-					  (substring lref 5)
-					lref))
-				    (split-string 
+				      (if (and (>= (length lref) 5) (string-equal (substring lref 0 5) "tag: "))
+                          (substring lref 5)
+                      (if (and (>= (length lref) 6) (string-equal (substring lref -5) "/HEAD"))
+                          nil
+                        lref)))
+				    (split-string
 				     (buffer-substring-no-properties (+ sha-end 2)
-								     refs-end) 
+								     refs-end)
 				     ", +" t)))))
 
 	(setq full-refs (mapcar (lambda (full-ref-name) 
