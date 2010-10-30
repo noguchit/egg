@@ -5975,12 +5975,6 @@ egg in current buffer.\\<egg-minor-mode-map>
 			       minor-mode-map-alist))))
 	  egg-minor-mode-map)
 
-  (if (and (boundp 'vc-handled-backends)
-	   (listp (symbol-value 'vc-handled-backends)))
-      (set 'vc-handled-backends
-	   (delq 'Git (symbol-value 'vc-handled-backends))))
-
-
   (add-hook 'find-file-hook 'egg-git-dir)
   (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook))
 
