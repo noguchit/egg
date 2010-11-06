@@ -5,6 +5,7 @@
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2009  Tim Moore
 ;; Copyright (C) 2009  byplayer
+;; Copyright (C) 2010  Alexander Prusov
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -2152,7 +2153,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
 	 ,@body
 	 (set (make-local-variable 'egg-orig-window-config) 
 	      (current-window-configuration))
-	 (message "buffer %s win-cfg %s" (buffer-name) egg-orig-window-config)
+	 ;; (message "buffer %s win-cfg %s" (buffer-name) egg-orig-window-config)
 	 (set (make-local-variable 'egg-internal-buffer-obarray)
 	      (make-vector 67 0)))
 
@@ -3192,6 +3193,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (set (make-local-variable 'egg-log-msg-diff-beg) nil))
 
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
+(define-key egg-log-msg-mode-map (kbd "C-c C-k") 'egg-log-msg-cancel)
 (define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
@@ -3231,6 +3233,12 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	  (if (windowp win) (egg-quit-buffer win))))
     (message "Please enter a log message!")
     (ding)))
+
+(defun egg-log-msg-cancel ()
+  (interactive)
+  (if (> (length (window-list)) 1)
+      (delete-window)
+    (kill-buffer)))
 
 (defun egg-log-msg-hist-cycle (&optional forward)
   "Cycle through message log history."
@@ -3333,7 +3341,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		    (t "Shit happens!"))
 	      "\n"
 	      "Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
-	      (egg-text "--------------- Commit Message (type C-c C-c when done) ---------------"
+	      (egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` when cancel) -"
 			'font-lock-comment-face))
       (put-text-property (point-min) (point) 'read-only t)
       (put-text-property (point-min) (point) 'rear-sticky nil)
@@ -3709,12 +3717,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(setq refs (when refs-start
 			  (save-match-data
 			    (mapcar (lambda (lref)
-				      (if (string-equal (substring lref 0 4) "tag:")
-					  (substring lref 5)
-					lref))
-				    (split-string 
+				      (if (and (>= (length lref) 5) (string-equal (substring lref 0 5) "tag: "))
+                          (substring lref 5)
+                      (if (and (>= (length lref) 6) (string-equal (substring lref -5) "/HEAD"))
+                          nil
+                        lref)))
+				    (split-string
 				     (buffer-substring-no-properties (+ sha-end 2)
-								     refs-end) 
+								     refs-end)
 				     ", +" t)))))
 
 	(setq full-refs (mapcar (lambda (full-ref-name) 
@@ -5972,12 +5982,6 @@ egg in current buffer.\\<egg-minor-mode-map>
 			 (cons (list 'egg-minor-mode)
 			       minor-mode-map-alist))))
 	  egg-minor-mode-map)
-
-  (if (and (boundp 'vc-handled-backends)
-	   (listp (symbol-value 'vc-handled-backends)))
-      (set 'vc-handled-backends
-	   (delq 'Git (symbol-value 'vc-handled-backends))))
-
 
   (add-hook 'find-file-hook 'egg-git-dir)
   (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook))
