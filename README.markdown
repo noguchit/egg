@@ -50,4 +50,4 @@ magit and should be considered based its own merits.
 ## MAGIT
 
 Magit is an interface to the version control system Git, implemented
-by Marius Voller. His code at: http://zagadka.vm.bytemark.co.uk/magit
+by Marius Voller. His code at: http://philjackson.github.com/magit/
