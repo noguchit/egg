@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## v 0.93
+- fixed magit path . Thanks for SebastianRose .
+
 ## v 0.92
 - fixed details of egg log buffer show escape charactors
 - fixed log search error
