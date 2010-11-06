@@ -2,6 +2,12 @@
 
 ## v 0.93
 - fixed magit path . Thanks for SebastianRose .
+- added egg-log-msg-cancel for quit from buffer commit message . Thanks for Alexander Prusov .
+- use vc-git for showing vs-mode-line . Thanks for Alexander Prusov .
+- hide HEAD for log . Thanks for Alexander Prusov .
+- remove long long message in define-egg-buffer . Thanks for Alexander Prusov .
+- fix bug in egg-decorate-log (substring args out of range) . Thanks for Alexander Prusov .
+- add changelog to fix magit path. Thanks for Alexander Prusov .
 
 ## v 0.92
 - fixed details of egg log buffer show escape charactors
