@@ -43,6 +43,8 @@
 (require 'ediff)
 (require 'ffap)
 
+(defconst egg-version "0.94")
+
 (defgroup egg nil
   "Controlling Git from Emacs."
   :prefix "egg-"

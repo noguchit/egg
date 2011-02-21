@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## v 0.94
+- add const of egg-version .
+
 ## v 0.93
 - fixed magit path . Thanks for SebastianRose .
 - added egg-log-msg-cancel for quit from buffer commit message . Thanks for Alexander Prusov .
