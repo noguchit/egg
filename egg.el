@@ -6116,7 +6116,8 @@ egg in current buffer.\\<egg-minor-mode-map>
 
 (defun egg-goto-block-filename (filename)
   (interactive "sFilename: ")
-  (egg-goto-block-regexp (rx (or "staged" "unstaged") "-" (eval filename))))
+  (egg-goto-block-regexp (concat "\\(un\\)?staged-" filename)))
+
 
 (defun egg-goto-block-regexp (nav-regexp)
   "Takes `nav-regexp' as regexp and moves cursor there."
