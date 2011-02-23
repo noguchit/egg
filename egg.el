@@ -4,8 +4,11 @@
 ;; Copyright (C) 2008  Linh Dang
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2009  Tim Moore
-;; Copyright (C) 2009  byplayer
+;; Copyright (C) 2011  byplayer
 ;; Copyright (C) 2010  Alexander Prusov
+;;
+;; Special Thanks to
+;;   Antoine Levitt
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -43,7 +46,7 @@
 (require 'ediff)
 (require 'ffap)
 
-(defconst egg-version "0.94")
+(defconst egg-version "0.95")
 
 (defgroup egg nil
   "Controlling Git from Emacs."
