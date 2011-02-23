@@ -1,5 +1,9 @@
 # Egg (Emacs Got Git).
 
+## v 0.95
+- change egg-goto-block-filename function to bypte-compile some environments .
+  Thanks for Antoine Levitt .
+
 ## v 0.94
 - add const of egg-version .
 
