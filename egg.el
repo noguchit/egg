@@ -5904,7 +5904,7 @@ current file contains unstaged changes."
   (define-key menu [grep] '(menu-item "Search Project's Other Versions (grep)" egg-grep))
   (define-key menu [pickaxe] '(menu-item "Search File History" egg-file-log-pickaxe))
   (define-key menu [vother] '(menu-item "View File Other Version" egg-file-version-other-window))
-  (define-key menu [filelog] '(menu-item "View File History" egg-log))
+  (define-key menu [filelog] '(menu-item "View File History" egg-file-log))
   (define-key menu [sp2] '("--"))
   (define-key menu [cother] '(menu-item "Checkout File's Other Version" egg-file-checkout-other-version))
   (define-key menu [ediff]
