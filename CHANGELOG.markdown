@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## v0.96
+- fix bug of View File History .
+
 ## v 0.95
 - change egg-goto-block-filename function to bypte-compile some environments .
   Thanks for Antoine Levitt .
