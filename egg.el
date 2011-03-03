@@ -33,13 +33,18 @@
 ;;     http://github.com/bogolisk/egg
 ;;;
 
-;;; Options
-;;; If you want to auto-update egg-status on file save,
-;;;   you set follow value on your .emacs.
-;;; (setq egg-auto-update t)
-;;;
-;;;Set to nonnil for egg-status to switch to the status buffer in the same window.
-;;; (setq egg-switch-to-buffer t)
+;; Options
+;; If you want to auto-update egg-status on file save,
+;;   you set follow value on your .emacs.
+;; (setq egg-auto-update t)
+;;
+;; Set to nonnil for egg-status to switch to the status buffer in the same window.
+;; (setq egg-switch-to-buffer t)
+;;
+;; If you want to change prefix of lunch egg,
+;;  you set follow value on your .emacs.
+;; (custom-set-variables
+;;   '(egg-mode-key-prefix "C-c v"))
 
 (require 'cl)
 (require 'electric)
