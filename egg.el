@@ -51,7 +51,7 @@
 (require 'ediff)
 (require 'ffap)
 
-(defconst egg-version "0.96")
+(defconst egg-version "0.97.pre")
 
 (defgroup egg nil
   "Controlling Git from Emacs."
