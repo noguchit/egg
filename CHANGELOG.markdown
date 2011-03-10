@@ -2,6 +2,7 @@
 
 ## v0.97 not released
 - add option comment for egg-mode-key-prefix
+- update indent .
 
 ## v0.96
 - fix bug of View File History .
