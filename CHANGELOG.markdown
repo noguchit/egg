@@ -1,8 +1,9 @@
 # Egg (Emacs Got Git).
 
-## v0.97 not released
+## v1.0.0
 - add option comment for egg-mode-key-prefix
 - update indent .
+- add feature for diff other repository .
 
 ## v0.96
 - fix bug of View File History .
