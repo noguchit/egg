@@ -3555,6 +3555,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (plist-put info :args tmp))
     info))
 
+(defun egg-diff-ref (&optional default)
+  "Prompt a revision to diff other ref."
+  (interactive (list (car (get-text-property (point) :ref))))
+  (let* ((src (completing-read "diff: " (egg-all-refs)
+                               nil nil (or default "")))
+         (buf (egg-do-diff (egg-build-diff-info src nil))))
+    (pop-to-buffer buf t)))
 
 
 ;;;========================================================
