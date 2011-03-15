@@ -2202,6 +2202,7 @@ creat the buffer. FMT is used to construct the buffer name. The name is built as
     (define-key map (kbd "w") 'egg-buffer-stash-wip)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
+    (define-key map (kbd "d") 'egg-diff-ref)
     map)
   "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
 
