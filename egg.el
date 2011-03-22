@@ -50,6 +50,7 @@
 (require 'electric)
 (require 'ediff)
 (require 'ffap)
+(require 'diff-mode)
 
 (defconst egg-version "1.0.0")
 
@@ -2070,6 +2071,9 @@ physical offsets."
       (use-region-p)
     (and transient-mark-mode mark-active)))
 
+(defun egg-insert-current-line-buffer (buf)
+  (egg-insert-string-buffer (egg-current-line-string) buf))
+
 (defun egg-current-line-string ()
   (buffer-substring-no-properties
    (line-beginning-position) (line-beginning-position 2)))
@@ -2095,14 +2099,14 @@ physical offsets."
            (buffer-substring-no-properties head-beg head-end) buf)
           (goto-char hunk-beg)
           ;; insert beginning of hunk
-          (egg-insert-string-buffer (egg-current-line-string) buf)
+          (egg-insert-current-line-buffer buf)
           (forward-line)
           (let ((copy-op (if reverse "+" "-")))
             (while (< (point) hunk-end)
               (if (and (<= beg (point)) (< (point) end))
-                  (magit-insert-current-line buf)
+                  (egg-insert-current-line-buffer buf)
                 (cond ((looking-at " ")
-                       (magit-insert-current-line buf))
+                       (egg-insert-current-line-buffer buf))
                       ((looking-at copy-op)
                        (egg-insert-string-buffer
                         (concat
