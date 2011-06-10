@@ -52,7 +52,7 @@
 (require 'ffap)
 (require 'diff-mode)
 
-(defconst egg-version "1.0.0")
+(defconst egg-version "1.0.1")
 
 (defgroup egg nil
   "Controlling Git from Emacs."
