@@ -1672,7 +1672,8 @@ position that would remain visible when the section is hidden.
 KEYMAP is the local/context keymap for the section.
 NAVIGATION is the navigation id of the section. NAVIGATION can also
 a function to call to compute the navigation id of the section."
-  (let ((nav (cond ((functionp navigation)
+  (let ((nav (cond ((and (not (eq navigation 'file))
+                         (functionp navigation))
                     (funcall navigation sect-type section beg end))
                    ((null navigation) beg)
                    (t navigation))))
