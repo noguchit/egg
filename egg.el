@@ -1607,7 +1607,7 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defsubst egg-decorate-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
-                     'display 
+                     'display
                      (egg-text
                       (concat "\n"
                               (buffer-substring-no-properties beg
@@ -1618,7 +1618,7 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defsubst egg-decorate-cc-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
-                     'display 
+                     'display
                      (egg-text
                       (concat "\n"
                               (buffer-substring-no-properties beg
@@ -1697,7 +1697,7 @@ of the diff header.
 
 Diff info contains name and posistions of the diff. The beginning position
 is stored as a marker and the others are offset from the beginning posistion
- because the whole diff can be pushed around inside the buffer."  
+ because the whole diff can be pushed around inside the buffer."
   (let ((b (make-marker)))
     (set-marker b beg)
     ;; no insertion indo the diff
