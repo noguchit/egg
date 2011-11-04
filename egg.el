@@ -5382,7 +5382,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((start (point)) stash-beg stash-end beg end msg-beg msg-end
         name msg)
     (save-excursion
-      (while (re-search-forward "^\\(stash@{[0-9]+}\\): +\\(.+\\)$" nil t)
+      (while (re-search-forward "^\\(.*stash@{[0-9]+}\\): +\\(.+\\)$" nil t)
         (setq beg (match-beginning 0)
               stash-end (match-end 1)
               msg-beg (match-beginning 2)
