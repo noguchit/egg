@@ -4249,6 +4249,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
      commit)))
 
 (defun egg-log-buffer-create-new-branch (pos &optional force)
+  "Create a new branch, without checking it out."
   (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos)))
     (when (egg-do-create-branch
@@ -4258,6 +4259,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
 (defun egg-log-buffer-start-new-branch (pos &optional force)
+  "Create a new branch, and make it a new HEAD"
   (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
     (when (egg-do-create-branch
