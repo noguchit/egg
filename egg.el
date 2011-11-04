@@ -427,7 +427,8 @@ Different versions of git have different names for this subdir."
               (const :tag "File Log Buffer" :file-log)
               (const :tag "RefLog Buffer"   :reflog)
               (const :tag "Diff Buffer"     :diff)
-              (const :tag "Commit Buffer"   :commit)))
+              (const :tag "Commit Buffer"   :commit)
+              (const :tag "Stash Buffer"    :stash)))
 
 (define-widget 'egg-quit-window-actions-set 'lazy
   "Custom Type for quit-window actions."
@@ -5954,6 +5955,7 @@ current file contains unstaged changes."
   (define-key map (kbd "h") 'egg-file-log)
   (define-key map (kbd "o") 'egg-file-checkout-other-version)
   (define-key map (kbd "s") 'egg-status)
+  (define-key map (kbd "S") 'egg-stash)
   (define-key map (kbd "u") 'egg-file-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
