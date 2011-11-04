@@ -335,19 +335,19 @@ Many Egg faces inherit from this one by default."
 (defcustom egg-buffer-hide-section-type-on-start nil
   "Initially hide sections of the selected type."
   :group 'egg
-  :type '(set (cons :tag "Status Buffer" 
-                    (const :tag "Hide Blocks of type" 
+  :type '(set (cons :tag "Status Buffer"
+                    (const :tag "Hide Blocks of type"
                            egg-status-buffer-mode)
                     (radio (const :tag "Section" :section)
                            (const :tag "File" :diff)
                            (const :tag "Hunk" :hunk)))
-              (cons :tag "Commit Log Buffer" 
+              (cons :tag "Commit Log Buffer"
                     (const :tag "Hide Blocks of type"
                            egg-commit-buffer-mode)
                     (radio (const :tag "Section" :section)
                            (const :tag "File" :diff)
                            (const :tag "Hunk" :hunk)))
-              (cons :tag "Diff Buffer" 
+              (cons :tag "Diff Buffer"
                     (const :tag "Hide Blocks of type"
                            egg-diff-buffer-mode)
                     (radio (const :tag "File" :diff)
@@ -357,7 +357,7 @@ Many Egg faces inherit from this one by default."
   "Initially hide keybindings help."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   egg-status-buffer-mode)
-              (const :tag "Log Buffer"	    egg-log-buffer-mode)
+              (const :tag "Log Buffer"      egg-log-buffer-mode)
               (const :tag "File Log Buffer" egg-file-log-buffer-mode)
               (const :tag "RefLog Buffer"   egg-reflog-buffer-mode)
               (const :tag "Diff Buffer"     egg-diff-buffer-mode)
@@ -423,7 +423,7 @@ Different versions of git have different names for this subdir."
   "Display keybinding help in egg special buffers."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   :status)
-              (const :tag "Log Buffer"	    :log)
+              (const :tag "Log Buffer"      :log)
               (const :tag "File Log Buffer" :file-log)
               (const :tag "RefLog Buffer"   :reflog)
               (const :tag "Diff Buffer"     :diff)
@@ -708,7 +708,7 @@ END-RE is the regexp to match the end of a record."
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (goto-char (point-min))
-    (let ((beg (point-min)) 
+    (let ((beg (point-min))
           (end (point-max))
           lst)
       (save-match-data
@@ -760,7 +760,7 @@ END-RE is the regexp to match the end of a record."
   "return the (pre-read) git-dir of default-directory"
   (if (local-variable-p 'egg-git-dir)
       egg-git-dir
-    (set (make-local-variable 'egg-git-dir) 
+    (set (make-local-variable 'egg-git-dir)
          (or (egg-read-git-dir)
              (and error-if-not-git
                   (or (kill-local-variable 'egg-git-dir) t)
@@ -778,7 +778,7 @@ END-RE is the regexp to match the end of a record."
 
 (defun egg-HEAD ()
   "return HEAD. Either a symbolic ref or a sha1."
-  (let* ((git-dir (egg-git-dir))) 
+  (let* ((git-dir (egg-git-dir)))
     (if git-dir
         (egg-pick-file-contents (concat git-dir "/HEAD")
                                 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-f]+\\)" 1 2))))
@@ -788,7 +788,7 @@ END-RE is the regexp to match the end of a record."
   (append (egg-git-to-lines "rev-parse" "--symbolic"
                             "--branches" "--tags" "--remotes")
           (delq nil
-                (mapcar 
+                (mapcar
                  (lambda (head)
                    (if (file-exists-p (concat (egg-git-dir) "/" head))
                        head))
@@ -1557,7 +1557,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a unstaged diff section.
 \\{egg-unstaged-hunk-section-map}")
 
-(defconst egg-unmerged-hunk-section-map 
+(defconst egg-unmerged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
     ;; no hunking staging in unmerged file
     (set-keymap-parent map egg-wdir-hunk-section-map)
@@ -1572,7 +1572,7 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defun list-nav ()
   (interactive)
-  (message "nav: %c:%s-%c:%s" 
+  (message "nav: %c:%s-%c:%s"
            (preceding-char)
            (get-text-property (1- (point)) :navigation)
            (following-char)
