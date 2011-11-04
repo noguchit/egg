@@ -1446,13 +1446,11 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   (interactive "e")
   (egg-mouse-do-command event 'egg-section-cmd-toggle-hide-show))
 
-(defconst egg-hide-show-map 
+(defconst egg-hide-show-map
   (let ((map (make-sparse-keymap "Egg:HideShow")))
     (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
     (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
-
     (define-key map [mouse-2] 'egg-mouse-hide-show-cmd)
-    
     map)
   "Keymap for a section than can be hidden/shown.\\{egg-hide-show-map}")
 
@@ -1465,7 +1463,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   "Keymap for a section in sequence that can be navigated back and forth.
 \\{egg-section-map}")
 
-(defconst egg-diff-section-map 
+(defconst egg-diff-section-map
   (let ((map (make-sparse-keymap "Egg:Diff")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
@@ -1480,7 +1478,6 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
-
     (define-key map [C-down-mouse-2] 'egg-status-popup-staged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-staged-diff-menu)
 
@@ -1509,7 +1506,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a diff section in sequence of unstaged deltas.
 \\{egg-unstaged-diff-section-map}")
 
-(defconst egg-unmerged-diff-section-map 
+(defconst egg-unmerged-diff-section-map
   (let ((map (make-sparse-keymap "Egg:UnmergedDiff")))
     (set-keymap-parent map egg-unstaged-diff-section-map)
     (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
@@ -1517,7 +1514,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a diff section in sequence of unmerged deltas.
 \\{egg-unmerged-diff-section-map}")
 
-(defconst egg-hunk-section-map 
+(defconst egg-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
@@ -1526,7 +1523,7 @@ the index. \\{egg-wdir-diff-section-map}")
     map)
   "Keymap for a hunk in a diff section. \\{egg-hunk-section-map}")
 
-(defconst egg-staged-hunk-section-map 
+(defconst egg-staged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:StagedHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
@@ -1539,7 +1536,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a staged diff section.
 \\{egg-staged-hunk-section-map}")
 
-(defconst egg-wdir-hunk-section-map 
+(defconst egg-wdir-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:WdirHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
@@ -1547,7 +1544,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a diff section between the workdir and the index.
 \\{egg-wdir-hunk-section-map}")
 
-(defconst egg-unstaged-hunk-section-map 
+(defconst egg-unstaged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:UnstagedHunk")))
     (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
