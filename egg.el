@@ -3297,15 +3297,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (let ((inhibit-read-only t)
               (win (get-buffer-window (current-buffer))))
           (erase-buffer)
-          (if (windowp win) (egg-quit-buffer win))))
+          (kill-buffer)))
     (message "Please enter a log message!")
     (ding)))
 
 (defun egg-log-msg-cancel ()
   (interactive)
-  (if (> (length (window-list)) 1)
-      (delete-window)
-    (kill-buffer)))
+  (kill-buffer))
 
 (defun egg-log-msg-hist-cycle (&optional forward)
   "Cycle through message log history."
