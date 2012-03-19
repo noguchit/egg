@@ -4,11 +4,12 @@
 ;; Copyright (C) 2008  Linh Dang
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2009  Tim Moore
-;; Copyright (C) 2011  byplayer
 ;; Copyright (C) 2010  Alexander Prusov
+;; Copyright (C) 2011  byplayer
 ;;
 ;; Special Thanks to
-;;   Antoine Levitt
+;;   Antoine Levitt, Bogolisk,
+;;   Christian Köstlin
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -52,7 +53,7 @@
 (require 'ffap)
 (require 'diff-mode)
 
-(defconst egg-version "1.0.1")
+(defconst egg-version "1.0.2")
 
 (defgroup egg nil
   "Controlling Git from Emacs."
@@ -335,19 +336,19 @@ Many Egg faces inherit from this one by default."
 (defcustom egg-buffer-hide-section-type-on-start nil
   "Initially hide sections of the selected type."
   :group 'egg
-  :type '(set (cons :tag "Status Buffer" 
-                    (const :tag "Hide Blocks of type" 
+  :type '(set (cons :tag "Status Buffer"
+                    (const :tag "Hide Blocks of type"
                            egg-status-buffer-mode)
                     (radio (const :tag "Section" :section)
                            (const :tag "File" :diff)
                            (const :tag "Hunk" :hunk)))
-              (cons :tag "Commit Log Buffer" 
+              (cons :tag "Commit Log Buffer"
                     (const :tag "Hide Blocks of type"
                            egg-commit-buffer-mode)
                     (radio (const :tag "Section" :section)
                            (const :tag "File" :diff)
                            (const :tag "Hunk" :hunk)))
-              (cons :tag "Diff Buffer" 
+              (cons :tag "Diff Buffer"
                     (const :tag "Hide Blocks of type"
                            egg-diff-buffer-mode)
                     (radio (const :tag "File" :diff)
@@ -357,7 +358,7 @@ Many Egg faces inherit from this one by default."
   "Initially hide keybindings help."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   egg-status-buffer-mode)
-              (const :tag "Log Buffer"	    egg-log-buffer-mode)
+              (const :tag "Log Buffer"      egg-log-buffer-mode)
               (const :tag "File Log Buffer" egg-file-log-buffer-mode)
               (const :tag "RefLog Buffer"   egg-reflog-buffer-mode)
               (const :tag "Diff Buffer"     egg-diff-buffer-mode)
@@ -423,7 +424,7 @@ Different versions of git have different names for this subdir."
   "Display keybinding help in egg special buffers."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   :status)
-              (const :tag "Log Buffer"	    :log)
+              (const :tag "Log Buffer"      :log)
               (const :tag "File Log Buffer" :file-log)
               (const :tag "RefLog Buffer"   :reflog)
               (const :tag "Diff Buffer"     :diff)
@@ -616,7 +617,7 @@ Return the output lines as a list of strings."
 (defsubst egg-buf-git-name (&optional buf)
   "return the repo-relative name of the file visited by BUF.
 if BUF was nil then use current-buffer"
-  (egg-file-git-name (buffer-file-name buf)))
+  (egg-file-git-name (file-truename (buffer-file-name buf))))
 
 (defsubst egg-files-git-name (files)
   "return the repo-relative name for each file in the list of files FILES."
@@ -709,7 +710,7 @@ END-RE is the regexp to match the end of a record."
   (with-temp-buffer
     (insert-file-contents-literally file-name)
     (goto-char (point-min))
-    (let ((beg (point-min)) 
+    (let ((beg (point-min))
           (end (point-max))
           lst)
       (save-match-data
@@ -748,8 +749,10 @@ END-RE is the regexp to match the end of a record."
 
 (defun egg-read-git-dir ()
   "call GIT to read the git directory of default-directory."
-  (let ((dir (egg-git-to-string "rev-parse" "--git-dir")))
-    (if (stringp dir) 
+  (let* ((dotgit-parent (and (buffer-file-name) (locate-dominating-file (buffer-file-name) ".git")))
+         (dir (or (and dotgit-parent (concat dotgit-parent "/.git"))
+                  (egg-git-to-string "rev-parse" "--git-dir"))))
+    (if (stringp dir)
         (expand-file-name dir))))
 
 (defsubst egg-read-dir-git-dir (dir)
@@ -761,7 +764,7 @@ END-RE is the regexp to match the end of a record."
   "return the (pre-read) git-dir of default-directory"
   (if (local-variable-p 'egg-git-dir)
       egg-git-dir
-    (set (make-local-variable 'egg-git-dir) 
+    (set (make-local-variable 'egg-git-dir)
          (or (egg-read-git-dir)
              (and error-if-not-git
                   (or (kill-local-variable 'egg-git-dir) t)
@@ -779,7 +782,7 @@ END-RE is the regexp to match the end of a record."
 
 (defun egg-HEAD ()
   "return HEAD. Either a symbolic ref or a sha1."
-  (let* ((git-dir (egg-git-dir))) 
+  (let* ((git-dir (egg-git-dir)))
     (if git-dir
         (egg-pick-file-contents (concat git-dir "/HEAD")
                                 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-f]+\\)" 1 2))))
@@ -789,7 +792,7 @@ END-RE is the regexp to match the end of a record."
   (append (egg-git-to-lines "rev-parse" "--symbolic"
                             "--branches" "--tags" "--remotes")
           (delq nil
-                (mapcar 
+                (mapcar
                  (lambda (head)
                    (if (file-exists-p (concat (egg-git-dir) "/" head))
                        head))
@@ -1447,13 +1450,11 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   (interactive "e")
   (egg-mouse-do-command event 'egg-section-cmd-toggle-hide-show))
 
-(defconst egg-hide-show-map 
+(defconst egg-hide-show-map
   (let ((map (make-sparse-keymap "Egg:HideShow")))
     (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
     (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
-
     (define-key map [mouse-2] 'egg-mouse-hide-show-cmd)
-    
     map)
   "Keymap for a section than can be hidden/shown.\\{egg-hide-show-map}")
 
@@ -1466,7 +1467,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   "Keymap for a section in sequence that can be navigated back and forth.
 \\{egg-section-map}")
 
-(defconst egg-diff-section-map 
+(defconst egg-diff-section-map
   (let ((map (make-sparse-keymap "Egg:Diff")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
@@ -1481,7 +1482,6 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
-
     (define-key map [C-down-mouse-2] 'egg-status-popup-staged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-staged-diff-menu)
 
@@ -1510,7 +1510,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a diff section in sequence of unstaged deltas.
 \\{egg-unstaged-diff-section-map}")
 
-(defconst egg-unmerged-diff-section-map 
+(defconst egg-unmerged-diff-section-map
   (let ((map (make-sparse-keymap "Egg:UnmergedDiff")))
     (set-keymap-parent map egg-unstaged-diff-section-map)
     (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
@@ -1518,7 +1518,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a diff section in sequence of unmerged deltas.
 \\{egg-unmerged-diff-section-map}")
 
-(defconst egg-hunk-section-map 
+(defconst egg-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:Hunk")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
@@ -1527,7 +1527,7 @@ the index. \\{egg-wdir-diff-section-map}")
     map)
   "Keymap for a hunk in a diff section. \\{egg-hunk-section-map}")
 
-(defconst egg-staged-hunk-section-map 
+(defconst egg-staged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:StagedHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
@@ -1540,7 +1540,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a staged diff section.
 \\{egg-staged-hunk-section-map}")
 
-(defconst egg-wdir-hunk-section-map 
+(defconst egg-wdir-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:WdirHunk")))
     (set-keymap-parent map egg-hunk-section-map)
     (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
@@ -1548,7 +1548,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a diff section between the workdir and the index.
 \\{egg-wdir-hunk-section-map}")
 
-(defconst egg-unstaged-hunk-section-map 
+(defconst egg-unstaged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:UnstagedHunk")))
     (set-keymap-parent map egg-wdir-hunk-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
@@ -1561,7 +1561,7 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a unstaged diff section.
 \\{egg-unstaged-hunk-section-map}")
 
-(defconst egg-unmerged-hunk-section-map 
+(defconst egg-unmerged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
     ;; no hunking staging in unmerged file
     (set-keymap-parent map egg-wdir-hunk-section-map)
@@ -1576,7 +1576,7 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defun list-nav ()
   (interactive)
-  (message "nav: %c:%s-%c:%s" 
+  (message "nav: %c:%s-%c:%s"
            (preceding-char)
            (get-text-property (1- (point)) :navigation)
            (following-char)
@@ -1611,7 +1611,7 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defsubst egg-decorate-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
-                     'display 
+                     'display
                      (egg-text
                       (concat "\n"
                               (buffer-substring-no-properties beg
@@ -1622,7 +1622,7 @@ the index. \\{egg-wdir-diff-section-map}")
 
 (defsubst egg-decorate-cc-diff-header (beg end line-beg line-end)
   (put-text-property line-beg (1+ beg)
-                     'display 
+                     'display
                      (egg-text
                       (concat "\n"
                               (buffer-substring-no-properties beg
@@ -1702,7 +1702,7 @@ of the diff header.
 
 Diff info contains name and posistions of the diff. The beginning position
 is stored as a marker and the others are offset from the beginning posistion
- because the whole diff can be pushed around inside the buffer."  
+ because the whole diff can be pushed around inside the buffer."
   (let ((b (make-marker)))
     (set-marker b beg)
     ;; no insertion indo the diff
@@ -2490,7 +2490,7 @@ rebase session."
 
 (defun egg-status-buffer-stage-untracked-file ()
   (interactive)
-  (let ((file (ffap-file-at-point)))
+  (let ((file (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
     (when (egg-sync-do-file file egg-git-command nil nil
                             (list "add" "--" file))
       (message "new file %s added" file))))
@@ -3299,15 +3299,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (let ((inhibit-read-only t)
               (win (get-buffer-window (current-buffer))))
           (erase-buffer)
-          (if (windowp win) (egg-quit-buffer win))))
+          (kill-buffer)))
     (message "Please enter a log message!")
     (ding)))
 
 (defun egg-log-msg-cancel ()
   (interactive)
-  (if (> (length (window-list)) 1)
-      (delete-window)
-    (kill-buffer)))
+  (kill-buffer))
 
 (defun egg-log-msg-hist-cycle (&optional forward)
   "Cycle through message log history."
