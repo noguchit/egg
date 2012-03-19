@@ -1950,7 +1950,7 @@ See `egg-decorate-diff-sequence'."
                      (point)))
   (let ((commit (get-text-property pos :commit))
         (diff-info egg-diff-buffer-info)
-        src src-name dst commit)
+        src src-name dst)
     (find-file file)
     (cond (commit
            (setq src (egg-describe-rev (concat commit "^"))
