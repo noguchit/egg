@@ -1692,9 +1692,14 @@ a function to call to compute the navigation id of the section."
   "Build a hunk info NAME from BEG to END based on DIFF.
 Hunk info contains name and posistions of the hunk. Positions are offsets
 from DIFF because it can the whole diff can be pushed around inside
-the buffer."
+the buffer. 
+
+The fourth element of hunk info is NIL and is a placeholder for
+where the real file line number will be stored by
+`egg-calculate-hunk-line-numbers'
+"
   (let ((b (nth 1 diff)))
-    (list name (- beg b) (- end b))))
+    (list name (- beg b) (- end b) nil)))
 
 (defsubst egg-make-diff-info (name beg end head-end)
   "Build a diff info NAME from BEG to END. HEAD-END is the end position
@@ -1962,14 +1967,16 @@ See `egg-decorate-diff-sequence'."
     (unless src (error "Ooops!"))
     (egg-file-do-ediff src src-name dst nil 'ediff2)))
 
-(defun egg-hunk-compute-line-no (hunk-header hunk-beg)
-  "Calaculate the effective line number in the original file based
+(defun egg-hunk-compute-line-no (hunk-header hunk-beg &optional real-line)
+  "Calculate the effective line number in the original file based
 on the position of point in a hunk. HUNK-HEADER is the header and
 HUNK-BEG is the starting position of the current hunk."
   (let ((limit (line-end-position))
-        (line (string-to-number 
-               (nth 2 (save-match-data
-                        (split-string hunk-header "[ @,\+,-]+" t)))))
+        (line
+         (or real-line
+             (string-to-number 
+              (nth 2 (save-match-data
+                       (split-string hunk-header "[ @,\+,-]+" t))))))
         (adjust 0))
     (save-excursion
       (goto-char hunk-beg)
@@ -1983,27 +1990,30 @@ HUNK-BEG is the starting position of the current hunk."
 (defsubst egg-hunk-info-at (pos)
   "Rebuild the hunk info at POS.
 Hunk info are relative offsets. This function compute the
-physical offsets."
+physical offsets. The hunk-line may be NIL if this is not status
+or commit buffer and `egg-calculate-hunk-line-numbers' was
+not called"
   (let* ((diff-info (get-text-property pos :diff))
          (head-beg (nth 1 diff-info))
          (hunk-info (get-text-property pos :hunk))
          (hunk-beg (+ (nth 1 hunk-info) head-beg))
-         (hunk-end (+ (nth 2 hunk-info) head-beg)))
-    (list (car diff-info) (car hunk-info) hunk-beg hunk-end)))
+         (hunk-end (+ (nth 2 hunk-info) head-beg))
+         (hunk-line (nth 3 hunk-info)))
+    (list (car diff-info) (car hunk-info) hunk-beg hunk-end hunk-line)))
 
-(defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg
-                                             &rest ignored)
+(defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end
+                                             real-line &rest ignored)
   "Visit FILE and goto the current line of the hunk."
   (interactive (egg-hunk-info-at (point)))
-  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
+  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg real-line)))
     (find-file file)
     (goto-line line)))
 
-(defun egg-hunk-section-cmd-visit-file-other-window (file hunk-header hunk-beg
-                                                          &rest ignored)
+(defun egg-hunk-section-cmd-visit-file-other-window (file hunk-header hunk-beg hunk-end
+                                                          real-line &rest ignored)
   "Visit FILE in other-window and goto the current line of the hunk."
   (interactive (egg-hunk-info-at (point)))
-  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg)))
+  (let ((line (egg-hunk-compute-line-no hunk-header hunk-beg real-line)))
     (find-file-other-window file)
     (goto-line line)))
 
@@ -2541,8 +2551,7 @@ rebase session."
                                :hunk-map egg-unstaged-hunk-section-map
                                :cc-diff-map egg-unmerged-diff-section-map
                                :cc-hunk-map egg-unmerged-hunk-section-map
-                               :conflict-map egg-unmerged-hunk-section-map
-                               )))
+                               :conflict-map egg-unmerged-hunk-section-map)))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   "Insert the staged changes section into the status buffer."
@@ -2565,6 +2574,102 @@ rebase session."
                                :dst-prefix "INDEX:/"
                                :diff-map egg-staged-diff-section-map
                                :hunk-map egg-staged-hunk-section-map)))
+
+(defvar egg-hunk-line-no-cache nil
+  "A list of (FILENAME RANGE RANGE ...)) for each file in the
+buffer. The RANGE is a list of (L1 S1 L2 S2) from the \"@@
+-L1,S1 +L2,S2 @@\" from each hunk header")
+
+(make-variable-buffer-local 'egg-hunk-line-no-cache)
+
+(defun egg-get-hunk-range (pos)
+  "Return the 4 numbers from hunk header as list of integers"
+  (destructuring-bind (file hunk-header hunk-beg &rest ignore)
+      (egg-hunk-info-at pos)
+    (let* ((range (save-match-data
+                    (split-string hunk-header "[ @,\+,-]+" t))))
+      (mapcar 'string-to-number range))))
+
+(defun egg-ensure-hunk-line-no-cache ()
+  "Returns `egg-hunk-line-no-cache' re-creating it if its NIL."
+  (or egg-hunk-line-no-cache
+      (save-excursion
+        (let ((pos (point-min)) nav
+              last-file
+              list)
+          (while (setq pos (next-single-property-change (1+ pos) :navigation))
+            (let ((sect (get-text-property pos :section))
+                  (type (get-text-property pos :sect-type))
+                  (file (first (get-text-property pos :diff)))
+                  (nav (get-text-property pos :navigation)))
+              (when (and nav file sect)
+                (when (and (eq type :hunk)
+                           (eq sect 'unstaged))
+                  (when (not (equal last-file file))
+                    (push (setq list (cons file nil)) egg-hunk-line-no-cache)
+                    (setq last-file file))
+                  (setcdr list (cons (egg-get-hunk-range pos)
+                                     (cdr list)))))))
+          egg-hunk-line-no-cache))))
+
+(defun egg-unstaged-lines-delta-before-hunk (file line)
+  "Count how many lines any unstaged patches add before LINE line number"
+  (let ((cnt 0))
+    (dolist (range (cdr (assoc file (egg-ensure-hunk-line-no-cache))))
+      (destructuring-bind (l1 s1 l2 s2) range
+        ;; Consider the situation when old file is 100 line file, it
+        ;; has a change at line 10, that adds 500 lines, and another
+        ;; change at line 50 that adds 5 lines, and another change at
+        ;; line 80 that adds 5 lines
+        ;;
+        ;; If 1st two changes are unstaged, and 3rd change is staged,
+        ;; the status buffer will look like so:
+        ;;
+        ;; Unstaged:
+        ;;
+        ;; @@ -10,0 +10,500 @@
+        ;; @@ -50,0 +550,5 @@
+        ;;
+        ;; Staged:
+        ;;
+        ;; -80,1 +80,5
+        ;;
+        ;; But if we would like to go to the 3rd change in the file's buffer,
+        ;; since file buffer contains both staged and un-staged changes,
+        ;; the real line number 3rd hunk is 585, because hunks
+        ;; 1 and 2 added 500 and 5 lines before it.
+        (when (<= (+ l1 s1) line)
+          ;; Increment adjustment by how many lines were added
+          (incf cnt (- s2 s1)))))
+    cnt))
+
+(defun egg-calculate-hunk-line-numbers ()
+  "Calculate the correct line number in the real unstaged file,
+of each hunk in the current buffer, and store in the fourth
+element of the :hunk info"
+
+  ;; Refresh it
+  (setq egg-hunk-line-no-cache nil)
+
+  ;; Therefore for each staged diff, the line number has to be adjusted by the
+  ;; number of lines added by any unstaged diffs before it.
+  (save-excursion
+    (let ((pos (point-min)) nav
+          last-file
+          list)
+      (while (setq pos (next-single-property-change (1+ pos) :navigation))
+        (when (eq (get-text-property pos :sect-type) :hunk)
+          (let ((hunk-info (get-text-property pos :hunk)))
+            (setf (fourth hunk-info)
+                  (destructuring-bind (file hunk-header hunk-beg &rest ignore)
+                      (egg-hunk-info-at pos)
+                    (let ((start-line (string-to-number
+                                       (nth 2 (save-match-data
+                                                (split-string hunk-header "[ @,\+,-]+" t))))))
+                      (if (eq (get-text-property pos :section) 'unstaged) start-line
+                        (+ start-line (egg-unstaged-lines-delta-before-hunk
+                                       file
+                                       start-line))))))))))))
 
 (defun egg-checkout-ref (&optional default)
   "Prompt a revision to checkout. Default is DEFAULT."
@@ -2628,6 +2733,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
               ((eq sect 'unstaged) (egg-sb-insert-unstaged-section "Unstaged Changes:"))
               ((eq sect 'staged) (egg-sb-insert-staged-section "Staged Changes:"))
               ((eq sect 'untracked) (egg-sb-insert-untracked-section))))
+      (egg-calculate-hunk-line-numbers)
       (if init (egg-buffer-maybe-hide-all))
       (if init (egg-buffer-maybe-hide-help "help" 'repo))
       (goto-char orig-pos))))
@@ -3359,7 +3465,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
                (egg-sb-insert-unstaged-section "Deferred Changes:"))
               ((eq sect 'untracked)
                (egg-sb-insert-untracked-section))))
-
+      (egg-calculate-hunk-line-numbers)
       (put-text-property beg (point) 'read-only t)
       (put-text-property beg (point) 'front-sticky nil)
       (if init (egg-buffer-maybe-hide-all))
