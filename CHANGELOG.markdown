@@ -2,6 +2,7 @@
 
 ## v1.0.3 (not released)
 - Persistenk hunk state fixes
+- Made the mode compatible with package.el's format
 
 ## v1.0.2
 - fixed window kill when finish commit or cancel commit
