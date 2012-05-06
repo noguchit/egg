@@ -2523,13 +2523,23 @@ untracked files"
         (mapc #'(lambda (file)
                   (egg-sync-0 "add" file)
                   (setq files (concat files file " ")))
-              (split-string
-               (buffer-substring-no-properties (point) (mark)) "\n" t))
+              (progn
+                (if (< (point) (mark))
+                    (progn
+                      (goto-char (line-beginning-position))
+                      (exchange-point-and-mark)
+                      (goto-char (line-end-position)))
+                  (progn
+                    (goto-char (line-end-position))
+                    (exchange-point-and-mark)
+                    (goto-char (line-beginning-position))))
+                (split-string
+                 (buffer-substring-no-properties (point) (mark)) "\n" t)))
         (deactivate-mark)
-        (message "new files added: %s" files))
+        (unless (string= files "")
+          (message "new files added: %s" files)))
     ;; act only on single files
-    (let ((file (buffer-substring-no-properties
-                 (line-beginning-position) (line-end-position))))
+    (let ((file (ffap-file-at-point)))
       (when (egg-sync-do-file file egg-git-command nil nil
                               (list "add" "--" file))
         (message "new file %s added" file)))))
