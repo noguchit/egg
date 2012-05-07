@@ -2539,7 +2539,8 @@ untracked files"
         (unless (string= files "")
           (message "new files added: %s" files)))
     ;; act only on single files
-    (let ((file (ffap-file-at-point)))
+    (let ((file (buffer-substring-no-properties
+                 (line-beginning-position) (line-end-position))))
       (when (egg-sync-do-file file egg-git-command nil nil
                               (list "add" "--" file))
         (message "new file %s added" file)))))
