@@ -2694,7 +2694,7 @@ the section.
        ((= 4 len) range)
        ;; 3 way diff when merging, never seen >6
        ((= 6 len) (append (subseq range 0 2)
-                          (subseq range 4 2)))
+                          (subseq range 4 6)))
        ;; Adding sub-modules
        ((= 2 len) (append range range))
        ;; Adding symbolic links
@@ -2709,7 +2709,7 @@ the section.
        (t (warn "Weird hunk header %S" hunk-header)
           ;; treat as 6 line one
           (append (subseq range 0 2)
-                  (subseq range 4 2)))))))
+                  (subseq range 4 6)))))))
 
 (defun egg-ensure-hunk-ranges-cache ()
   "Returns `egg-hunk-ranges-cache' re-creating it if its NIL."
