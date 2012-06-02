@@ -1369,9 +1369,9 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
                 commit (plist-get commit-info :sha1)
                 author (plist-get commit-info :author) 
                 subject (plist-get commit-info :subject))
-          
-	  (goto-char (point-min))
-	  (forward-line (1- new-line))
+
+          (goto-char (point-min))
+          (forward-line (1- new-line))
           (setq beg (line-beginning-position)
                 end (save-excursion
                       (forward-line num)
