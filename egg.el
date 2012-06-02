@@ -3319,16 +3319,15 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-status (&optional select caller)
   (interactive "P")
-  (let* ((egg-internal-current-state 
-	  (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
+  (let* ((egg-internal-current-state
+          (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
          (buf (egg-get-status-buffer 'create)))
     (with-current-buffer buf
       (egg-status-buffer-redisplay buf 'init))
     (cond ((eq caller :sentinel) (pop-to-buffer buf))
           (select (pop-to-buffer buf t))
           (egg-switch-to-buffer (switch-to-buffer buf))
-          ;;((interactive-p) (display-buffer buf t))
-	  ((invoked-interactively-p) (display-buffer buf t))
+          ((invoked-interactively-p) (display-buffer buf t))
           (t (pop-to-buffer buf t)))))
 
 ;;;========================================================
@@ -5429,9 +5428,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-log (&optional all)
   (interactive "P")
-  (let* ((egg-internal-current-state 
-	  (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
-	 (git-dir (egg-git-dir (invoked-interactively-p)))
+  (let* ((egg-internal-current-state
+          (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
+         (git-dir (egg-git-dir (invoked-interactively-p)))
          (default-directory (file-name-directory git-dir))
          (buf (egg-get-log-buffer 'create))
          help)
@@ -5643,7 +5642,6 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-search-changes (string)
   (interactive "ssearch history for changes containing: ")
-  ;;(let* ((git-dir (egg-git-dir (interactive-p)))
   (let* ((git-dir (egg-git-dir (invoked-interactively-p)))
          (default-directory (file-name-directory git-dir))
          (buf (egg-get-query:commit-buffer 'create))
