@@ -5,6 +5,9 @@
 - Made the mode compatible with package.el's format
 - support emacs 22. use interactive-p wrapper function
 - fix not to use goto-char function
+- support stage multiple files
+  You can select target files and type "s" on status view,
+  you will stage selected files.
 
 ## v1.0.2
 - fixed window kill when finish commit or cancel commit
