@@ -768,7 +768,7 @@ END-RE is the regexp to match the end of a record."
 (defvar egg-git-dir nil)
 (defsubst egg-git-dir (&optional error-if-not-git)
   "return the (pre-read) git-dir of default-directory"
-  (if (local-variable-p 'egg-git-dir)
+  (if (and (local-variable-p 'egg-git-dir) egg-git-dir)
       egg-git-dir
     (set (make-local-variable 'egg-git-dir)
          (or (egg-read-git-dir)
@@ -1714,12 +1714,19 @@ of the diff header.
 Diff info contains name and posistions of the diff. The beginning position
 is stored as a marker and the others are offset from the beginning posistion
  because the whole diff can be pushed around inside the buffer."
-  (let ((b (make-marker)))
+  (let ((b (make-marker))
+	info)
     (set-marker b beg)
     ;; no insertion indo the diff
     (set-marker-insertion-type b t)
     ;; all other posistions are offsets from B.
-    (list name b (- end beg) (- head-end beg))))
+    (setq info (list name b (- end beg) (- head-end beg)))
+    (save-match-data
+      (save-excursion
+	(goto-char beg)
+	(if (re-search-forward "new file mode" head-end t)
+	    (setq info (nconc info (list 'newfile))))))
+    info))
 
 (defun egg-decorate-diff-sequence (args)
   "Decorate a sequence of deltas. ARGS is a plist containing the
