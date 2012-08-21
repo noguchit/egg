@@ -218,7 +218,7 @@ Many Egg faces inherit from this one by default."
   :group 'egg-faces)
 
 (defface egg-help-key
-  '((t :inherit 'egg-term :height 0.9))
+  '((t :inherit egg-term :height 0.9))
   "Hilight Face in help text."
   :group 'egg-faces)
 
@@ -5007,13 +5007,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "log" "--max-count=1" "-p" "-M" "--no-color"
-                          (concat
-                           "--pretty=format:"
-                           indent-spaces "%ai%n"
-                           indent-spaces "%an%n%n"
-                           "%b%n"
-                           )
+      (unless (egg-git-ok t "show" "--no-color" (concat "--pretty=format:"
+							indent-spaces "%ai%n"
+							indent-spaces "%an%n%n"
+							"%b%n")
                           sha1)
         (error "error calling git log %s!" ref))
       (setq end (point))
