@@ -5033,7 +5033,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
                                  :diff-map egg-log-diff-map
                                  :hunk-map egg-log-hunk-map)
       (goto-char beg)
-      (setq end (next-single-property-change beg :diff))
+      (setq end (or (next-single-property-change beg :diff) end))
       (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
       (put-text-property (+  indent-column beg) (line-end-position)
                          'face 'egg-text-2)
