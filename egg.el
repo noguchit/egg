@@ -1078,16 +1078,29 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
                    (nconc (list :staged
                                 (egg-git-to-lines "diff" "--cached"
                                                   "--name-only"))
-                          state)))))
+                          state)))
+	    
+	    ((eq req :name)
+             (setq state
+                   (nconc (list :name (egg-git-to-string "config" "user.name")) state)))
+	    ((eq req :email)
+             (setq state
+                   (nconc (list :email (egg-git-to-string "config" "user.email")) state)))))
     ;; update mode-line
     (egg-set-mode-info state)
     state))
 
-(defsubst egg-repo-state (&rest args)
+(defun egg-repo-state (&rest args)
   "return the cached repo state or re-read it.
 if ARGS contained :force then ignore the cached state."
-  (or (unless (memq :force args) egg-internal-current-state)
-      (egg-get-repo-state args)))
+  (if (or (null egg-internal-current-state) ;; not cached
+	  (memq :force args)		    ;; forced
+	  (memq nil ;; cached copy has no extra reqs
+		(mapcar (lambda (req)
+			  (memq req egg-internal-current-state))
+			args)))
+      (egg-get-repo-state args)
+    egg-internal-current-state))
 
 (defsubst egg-repo-clean (&optional state)
   "Whether the current repos is clean base on the current repo state.
@@ -3934,7 +3947,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let* ((git-dir (egg-git-dir))
          (default-directory (file-name-directory git-dir))
          (buf (egg-get-commit-buffer 'create))
-         (state (egg-repo-state))
+         (state (egg-repo-state :name :email))
+	 (user-name ())
          (head-info (egg-head))
          (head (or (cdr head-info)
                    (format "Detached HEAD! (%s)" (car head-info))))
@@ -3950,6 +3964,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
                     (t "Shit happens!"))
               "\n"
               "Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
+              "Committer: " (egg-text (plist-get state :name) 'egg-text-2) " "
+	      (egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
               (egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` when cancel) -"
                         'font-lock-comment-face))
       (put-text-property (point-min) (point) 'read-only t)
