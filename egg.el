@@ -1769,9 +1769,9 @@ positions of the sequence as well as the decorations.
                   "--- " a "\\(.+\\)\\|"		;5 src
                   "\\+\\+\\+ " b "\\(.+\\)\\|"		;6 dst
                   "index \\(.+\\)\\|"			;7 index
-                  "\\+\\+<<<<<<< \\(.+\\):.+\\|"	;8 conflict start
+                  "\\+\\+<<<<<<< \\(.+\\)\\(?::.+\\)\\|";8 conflict start
                   "\\(\\+\\+=======\\)\\|"		;9 conflict div
-                  "\\+\\+>>>>>>> \\(.+\\):.+\\|"	;10 conflict end
+                  "\\+\\+>>>>>>> \\(.+\\)\\(?::.+\\)\\|";10 conflict end
                   "\\(-.*\\)\\|"			;11 del
                   "\\(\\+.*\\)\\|"			;12 add
                   "\\( .*\\)"				;13 none
