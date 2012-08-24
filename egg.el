@@ -1336,6 +1336,8 @@ success."
     (define-key map (kbd "l") 'egg-blame-locate-commit)
     (define-key map (kbd "RET") 'egg-blame-locate-commit)
     (define-key map (kbd "q") 'egg-file-toggle-blame-mode)
+    (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
+    (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     map)
   "Keymap for an annotated section.\\{egg-blame-map}")
 
@@ -1400,6 +1402,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
                       (line-beginning-position)))
           ;; mark the blame chunk
           (put-text-property beg end :blame chunk)
+	  (put-text-property beg end :navigation commit)
 
           ;; make an overlay with blame info as 'before-string
           ;; on the current chunk.
