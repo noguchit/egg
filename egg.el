@@ -4219,6 +4219,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
+    (define-key map (kbd "p") 'egg-log-buffer-pick-1cherry)
     (define-key map (kbd "R") 'egg-log-buffer-rebase-interactive)
     map))
 
@@ -4556,7 +4557,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
                           (egg-text (char-to-string char)
                                     'egg-log-buffer-mark))))
       (forward-line step)
-      (while (not (or (get-text-property pos :commit)
+      (while (not (or (get-text-property (point) :commit)
                       (eobp) (bobp)))
         (forward-line step))
       (move-to-column col))))
@@ -4865,6 +4866,52 @@ If INIT was not nil, then perform 1st-time initializations as well."
                                   nil nil ref-at-point))
     (when (egg-rm-ref force victim)
       (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-do-pick-1cherry (rev edit-commit-msg)
+  (let ((pre-pick (egg-get-current-sha1))
+        pick-cmd-res modified-files res feed-back)
+    (with-temp-buffer
+      (setq pick-cmd-res 
+	    (egg-git-ok (current-buffer)
+			"cherry-pick" (if edit-commit-msg "-n" "--ff") rev))
+      (goto-char (point-min))
+      (setq modified-files
+            (egg-git-to-lines "diff" "--name-only" pre-pick))
+      (setq feed-back
+            (save-match-data
+              (car (nreverse (split-string (buffer-string)
+                                           "[\n]+" t)))))
+      (egg-run-buffers-update-hook)
+      (list :success pick-cmd-res
+            :files modified-files
+            :message feed-back))))
+
+(defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
+  (interactive "d\nP")
+  
+  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic))
+	res modified-files old-msg)
+    (unless (and rev (stringp rev))
+      (error "No cherry here for picking! must be a bad season!" ))
+    (when (string-equal rev "HEAD")
+      (error "Cannot pick your own HEAD!"))
+
+    (if (not (y-or-n-p (format "pick %s and put it on HEAD%s? " rev
+			       (if edit-commit-msg " (with new commit message)" ""))))
+	(message "Nah! that cherry (%s) looks rotten!!!" rev)
+      
+      (setq old-msg (egg-commit-message rev))
+      (setq res (egg-do-pick-1cherry rev edit-commit-msg))
+      (setq modified-files (plist-get res :files) )
+      (if modified-files
+	  (egg-revert-visited-files modified-files))
+      (message "GIT-CHERRY_PICK> %s" (plist-get res :message))
+      (when (and (plist-get res :success) edit-commit-msg)
+	(egg-commit-log-edit (concat
+			      (egg-text "Newly Picked Cherry:  " 'egg-text-3)
+			      (egg-text rev 'egg-branch))
+			     #'egg-log-msg-commit
+			     old-msg)))))
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
   (interactive "d")
