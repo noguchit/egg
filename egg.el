@@ -329,6 +329,11 @@ Many Egg faces inherit from this one by default."
   "Face to highlight HEAD in the log buffer."
   :group 'egg-faces)
 
+(defface egg-log-HEAD-name
+  '((t (:inherit (egg-log-HEAD egg-branch-mono))))
+  "Face to highlight HEAD in the log buffer."
+  :group 'egg-faces)
+
 (defcustom egg-buffer-hide-sub-blocks-on-start nil
   "Initially hide all sub-blocks."
   :group 'egg
@@ -828,9 +833,10 @@ END-RE is the regexp to match the end of a record."
                                      tag-properties
                                      atag-properties
                                      remote-ref-properties
-                                     remote-site-properties)
+                                     remote-site-properties
+				     &optional head-properties-HEAD)
   "Build an alist of (ref . :type) cells.
-A ref string of a head will be decorated with head-PROPERTIES.  A
+A ref string of a head will be decorated with HEAD-PROPERTIES.  A
 ref string of a tag will be decorated with TAG-PROPERTIES or
 ATAG-PROPERTIES.  A ref string of a remote will be formatted with
 REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
@@ -845,6 +851,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; 6: remote-host
           ;; 7: is annotated tag
           '(1 2 3 4 5 6 7) "show-ref" "-d"))
+	(symbolic-HEAD (egg-get-symbolic-HEAD))
         annotated-tags)
     ;; remove the annotated tags from the list
     (setq refs-desc-list
@@ -868,7 +875,11 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                        (cons full-name
                              (apply 'propertize name
                                     :ref (cons name :head)
-                                    head-properties)))
+				    (if (and head-properties-HEAD
+					     (string-equal name
+							   symbolic-HEAD))
+					head-properties-HEAD
+				      head-properties))))
                       ((assq 3 desc)
                        ;; tag
                        (cons full-name
@@ -4318,7 +4329,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
           (list 'face 'egg-tag-mono 'keymap tag-map 'help-echo (egg-tooltip-func))
           (list 'face 'egg-an-tag-mono 'keymap tag-map 'help-echo (egg-tooltip-func))
           (list 'face 'egg-branch-mono 'keymap remote-map 'help-echo (egg-tooltip-func))
-          (list 'face 'egg-remote-mono 'keymap remote-site-map 'help-echo (egg-tooltip-func))))
+          (list 'face 'egg-remote-mono 'keymap remote-site-map 'help-echo (egg-tooltip-func))
+	  (list 'face 'egg-log-HEAD-name 'keymap head-map 'help-echo (egg-tooltip-func))))
         (ref-string-len 0)
         (dashes-len 0)
         (min-dashes-len 300)
@@ -5539,7 +5551,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    (egg-text "annotated-tag" 'egg-an-tag-mono) " "
    (egg-text "remote/" 'egg-remote-mono)
    (egg-text "branch" 'egg-branch-mono) " "
-   (egg-text "  HEAD  " 'egg-log-HEAD) " "
+   (egg-text "  HEAD  " 'egg-log-HEAD-name) " "
    "\n"))
 
 (defun egg-log-buffer-diff-revs (pos)
