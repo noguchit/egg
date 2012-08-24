@@ -530,12 +530,25 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
 
 (defsubst egg-commit-message (rev)
   "Retrieve the commit message of REV."
-  (with-temp-buffer
-    (call-process egg-git-command nil t nil "cat-file" "commit" rev)
-    (goto-char (point-min))
-    (re-search-forward "^\n")
-    (buffer-substring-no-properties (match-end 0) (point-max))))
+  (save-match-data
+    (with-temp-buffer
+      (call-process egg-git-command nil t nil "cat-file" "commit" rev)
+      (goto-char (point-min))
+      (re-search-forward "^\n")
+      (buffer-substring-no-properties (match-end 0) (point-max)))))
 
+(defun egg-commit-subject (rev)
+  "Retrieve the commit subject of REV."
+  (save-match-data
+    (with-temp-buffer
+      (call-process egg-git-command nil t nil "cat-file" "commit" rev)
+      (goto-char (point-min))
+      (re-search-forward "^\n")
+      (buffer-substring-no-properties (match-end 0)
+				      (if (or (re-search-forward "\n\n" nil t)
+					      (re-search-forward "\n" nil t))
+					  (match-beginning 0)
+					(point-max))))))
 
 (defsubst egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
@@ -563,6 +576,12 @@ current-buffer would be used."
   (= (apply 'call-process program nil buffer nil args) 0))
 
 (defsubst egg-git-ok (buffer &rest args)
+  "run GIT with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
+  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+
+(defsubst egg-git-ok-args (buffer args)
   "run GIT with ARGS and insert output into BUFFER at point.
 return the t if the exit-code was 0. if BUFFER was t then
 current-buffer would be used."
@@ -4532,12 +4551,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
          (first-head (if (stringp refs) refs (car (last refs))))
          (ref-at-point (car (get-text-property pos :ref)))
          (head-sha1 (egg-get-current-sha1)))
-    (if (and (not (memq :no-HEAD options)) (string= head-sha1 commit))
-        "HEAD"
-      (or ref-at-point first-head
-          (if (memq :symbolic options)
-              (egg-describe-rev commit)
-            commit)))))
+    (if (memq :sha1 options)
+	commit
+      (if (and (not (memq :no-HEAD options)) (string= head-sha1 commit))
+	  "HEAD"
+	(or ref-at-point first-head
+	    (if (memq :symbolic options)
+		(egg-describe-rev commit)
+	      commit))))))
 
 (defun egg-log-buffer-do-remove-mark (mark-char)
   (let ((pos (point-min))
@@ -4882,24 +4903,25 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (egg-rm-ref force victim)
       (funcall egg-buffer-refresh-func (current-buffer)))))
 
-(defun egg-do-pick-1cherry (rev edit-commit-msg)
-  (let ((pre-pick (egg-get-current-sha1))
-        pick-cmd-res modified-files res feed-back)
+(defun egg-do-apply-rev (rev cmd &rest cmd-args)
+  (let ((orig (egg-get-current-sha1))
+	(args (append cmd-args (list rev)))
+        cmd-res modified-files feed-back)
     (with-temp-buffer
-      (setq pick-cmd-res 
-	    (egg-git-ok (current-buffer)
-			"cherry-pick" (if edit-commit-msg "-n" "--ff") rev))
+      (setq cmd-res (egg-git-ok-args (current-buffer) (cons cmd args)))
       (goto-char (point-min))
       (setq modified-files
-            (egg-git-to-lines "diff" "--name-only" pre-pick))
+            (egg-git-to-lines "diff" "--name-only" orig))
       (setq feed-back
             (save-match-data
-              (car (nreverse (split-string (buffer-string)
-                                           "[\n]+" t)))))
+              (car (nreverse (split-string (buffer-string) "[\n]+" t)))))
       (egg-run-buffers-update-hook)
-      (list :success pick-cmd-res
+      (list :success cmd-res
             :files modified-files
             :message feed-back))))
+
+(defun egg-do-pick-1cherry (rev edit-commit-msg)
+  (egg-do-apply-rev rev "cherry-pick" (if edit-commit-msg "-n" "--ff")))
 
 (defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
   (interactive "d\nP")
@@ -4927,6 +4949,47 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			      (egg-text rev 'egg-branch))
 			     #'egg-log-msg-commit
 			     old-msg)))))
+
+(defun egg-do-revert-rev (rev &optional use-default-commit-msg)
+  (if use-default-commit-msg
+      (egg-do-apply-rev rev "revert" "--no-edit")
+    (egg-do-apply-rev rev "revert" "--no-commit")))
+
+(defun egg-log-buffer-revert-rev (pos &optional use-default-commit-msg)
+  (interactive "d\nP")
+  (let ((sha1 (egg-log-buffer-get-rev-at pos :sha1))
+	(rev (egg-log-buffer-get-rev-at pos :symbolic))
+	res modified-files old-subject cmd-ok)
+    (unless (and rev (stringp rev))
+      (error "No tumour to remove here! very healthy body!" ))
+    (when (string-equal rev "HEAD")
+      (error "Just chop your own HEAD (use anchor a.k.a git-reset)! no need to revert HEAD"))
+    
+    (setq old-subject (egg-commit-subject rev))
+
+    (if (not (y-or-n-p (format "undo changes introduced by %s%s? " rev
+			       (if use-default-commit-msg " (with git's default commit message)" ""))))
+	(message "Nah! that lump (%s) looks benign!!!" old-subject)
+      
+      (setq res (egg-do-revert-rev rev use-default-commit-msg))
+      (setq modified-files (plist-get res :files) )
+      (if modified-files
+	  (egg-revert-visited-files modified-files))
+      (message "GIT-REVERT> %s" (plist-get res :message))
+      (setq cmd-ok (plist-get res :success))
+      (cond ((and cmd-ok use-default-commit-msg)
+	     nil)			;; everything seems find and dandy
+
+	    ((not cmd-ok)		;; likely a failed merge
+	     (egg-status))
+	    
+	    (t				;; cmd ok, now edit the commit message
+	     (egg-commit-log-edit (concat
+				   (egg-text "Undo Changes Introduced by:  " 'egg-text-3)
+				   (egg-text rev 'egg-branch)) 
+				  #'egg-log-msg-commit
+				  (format "Revert \"%s\"\n\nThis reverts commit %s\n"
+					  old-subject sha1)))))))
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
   (interactive "d")
