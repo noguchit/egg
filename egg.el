@@ -4229,6 +4229,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
+    (define-key map (kbd "DEL") 'egg-log-buffer-unmark)
 
     (define-key map (kbd "*") 'egg-log-buffer-mark)
     (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
@@ -5892,7 +5893,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (define-key map "n" 'egg-stash-buffer-next-stash)
     (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-stash-buffer-prev-stash)
-    (define-key map "RET" 'egg-stash-buffer-pop)
+    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
     (define-key map "o" 'egg-stash-buffer-pop)
     (define-key map "l" 'egg-log)
     map))
