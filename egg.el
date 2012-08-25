@@ -779,8 +779,7 @@ END-RE is the regexp to match the end of a record."
 
 (defun egg-read-git-dir ()
   "call GIT to read the git directory of default-directory."
-  (let* ((dotgit-parent (and (buffer-file-name)
-			     (locate-dominating-file (buffer-file-name) ".git")))
+  (let* ((dotgit-parent (locate-dominating-file default-directory ".git"))
 	 (dotgit (and dotgit-parent (concat dotgit-parent "/.git")))
          (dir (or (and dotgit (file-directory-p dotgit) dotgit)
 		  (egg-git-to-string "rev-parse" "--git-dir")))
