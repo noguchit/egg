@@ -779,18 +779,21 @@ END-RE is the regexp to match the end of a record."
 
 (defun egg-read-git-dir ()
   "call GIT to read the git directory of default-directory."
-  (let* ((dotgit-parent (and (buffer-file-name) (locate-dominating-file (buffer-file-name) ".git")))
-         (dir (or (and dotgit-parent (concat dotgit-parent "/.git"))
-                  (egg-git-to-string "rev-parse" "--git-dir"))))
-    (if (stringp dir)
-        (expand-file-name dir))))
-
-(defsubst egg-read-dir-git-dir (dir)
-  "call GIT to read the git directory of DIR."
-  (let ((default-directory dir)) (egg-read-git-dir)))
+  (let* ((dotgit-parent (and (buffer-file-name)
+			     (locate-dominating-file (buffer-file-name) ".git")))
+	 (dotgit (and dotgit-parent (concat dotgit-parent "/.git")))
+         (dir (or (and dotgit (file-directory-p dotgit) dotgit)
+		  (egg-git-to-string "rev-parse" "--git-dir")))
+	 (work-tree dotgit-parent))
+    (when (stringp dir)
+      (setq dir (expand-file-name dir))
+      (when (stringp work-tree) 
+	(setq work-tree (expand-file-name work-tree))
+	(put-text-property 0 (length dir) :work-tree work-tree dir))
+      dir)))
 
 (defvar egg-git-dir nil)
-(defsubst egg-git-dir (&optional error-if-not-git)
+(defun egg-git-dir (&optional error-if-not-git)
   "return the (pre-read) git-dir of default-directory"
   (if (and (local-variable-p 'egg-git-dir) egg-git-dir)
       egg-git-dir
@@ -804,6 +807,17 @@ END-RE is the regexp to match the end of a record."
     ;; egg-set-mode-info
     (set (intern (concat "egg-" egg-git-dir "-HEAD")) " Egg")
     egg-git-dir))
+
+(defsubst egg-work-tree-dir (&optional git-dir)
+  (unless git-dir (setq git-dir (egg-git-dir)))
+  (or (get-text-property 0 :work-tree git-dir)
+      (file-name-directory git-dir)))
+
+(defsubst egg-repo-name (&optional git-dir)
+  (let* ((dir (or git-dir (egg-git-dir)))
+	 (work-tree-dir (egg-work-tree-dir dir)))
+    (when (stringp work-tree-dir)
+      (file-name-nondirectory (directory-file-name work-tree-dir)))))
 
 (defsubst egg-buf-git-dir (buffer)
   "return the (pre-read) git-dir of BUFFER."
@@ -1275,7 +1289,7 @@ as repo state instead of re-read from disc."
   "Run GIT asynchronously with ARGS.
 if EXIT code is an exit-code from GIT other than zero but considered
 success."
-  (let ((dir (file-name-directory (egg-git-dir)))
+  (let ((dir (egg-work-tree-dir))
         (buf (get-buffer-create "*egg-process*"))
         (inhibit-read-only inhibit-read-only)
         (accepted-msg (and (integerp exit-code)
@@ -2255,12 +2269,11 @@ exit code ACCEPTED-CODE is considered a success."
 
 (defun egg-get-buffer (fmt create)
   "Get a special egg buffer. If buffer doesn't exist and CREATE was not nil then
-creat the buffer. FMT is used to construct the buffer name. The name is built as:
-(format FMT current-dir-name git-dir-full-path)."
+creat the buffer. FMT is used to construct the buffer name. The name is built
+as: (format FMT current-dir-name git-dir-full-path)."
   (let* ((git-dir (egg-git-dir))
-	 (dir (file-name-directory git-dir))
-	 (dir-name (file-name-nondirectory
-		    (directory-file-name dir)))
+	 (dir (egg-work-tree-dir git-dir))
+	 (dir-name (egg-repo-name git-dir))
 	 (buf-name (format fmt dir-name git-dir))
 	 (default-directory dir)
 	 (buf (get-buffer buf-name)))
@@ -2359,7 +2372,7 @@ See `egg-do-rebase-head'."
           (error "Repo %s is not clean" git-dir))
       (unless (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
         (error "No rebase in progress in directory %s"
-               (file-name-directory git-dir))))
+               (egg-work-tree-dir git-dir))))
     (setq res (egg-do-rebase-head upstream-or-action old-base prompt))
     (setq modified-files (plist-get res :files))
     (if modified-files
@@ -3436,7 +3449,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-revert-visited-files (file-or-files)
   (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir))
+         (default-directory (egg-work-tree-dir git-dir))
          (files (if (consp file-or-files)
                     file-or-files
                   (list file-or-files))))
@@ -3450,7 +3463,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-revert-all-visited-files ()
   (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir))
+         (default-directory (egg-work-tree-dir git-dir))
          bufs files)
     (setq files
           (delq nil (mapcar (lambda (buf)
@@ -3535,7 +3548,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (egg-sync-do egg-git-command (cons beg end) nil args))
 
 (defun egg-sync-do-file (file program stdin accepted-codes args)
-  (let ((default-directory (file-name-directory (egg-git-dir)))
+  (let ((default-directory (egg-work-tree-dir))
         output)
     (setq file (expand-file-name file))
     (setq args (mapcar (lambda (word)
@@ -3654,21 +3667,18 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-stage-all-files ()
   (interactive)
-  (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir)))
+  (let ((default-directory (egg-work-tree-dir)))
     (when (egg-sync-0 "add" "-u")
       (message "staged all tracked files's modifications"))))
 
 (defun egg-stage-untracked-files ()
   (interactive)
-  (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir)))
+  (let ((default-directory (egg-work-tree-dir)))
     (when (egg-sync-0 "add" ".")
       (message "staged all untracked files"))))
 
 (defun egg-do-stash-wip (msg)
-  (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir)))
+  (let ((default-directory (egg-work-tree-dir)))
     (if (egg-repo-clean)
         (error "No WIP to stash")
       (when (egg-show-git-output
@@ -3679,8 +3689,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (egg-revert-all-visited-files)))))
 
 (defun egg-do-checkout (rev)
-  (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir)))
+  (let* ((default-directory (egg-work-tree-dir)))
     (if (egg-sync-0 "checkout" rev)
         (egg-revert-all-visited-files))))
 
@@ -3840,7 +3849,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (define-derived-mode egg-log-msg-mode text-mode "Egg-LogMsg"
   "Major mode for editing Git log message.\n\n
 \{egg-log-msg-mode-map}."
-  (setq default-directory (file-name-directory (egg-git-dir)))
+  (setq default-directory (egg-work-tree-dir))
   (make-local-variable 'egg-log-msg-action)
   (set (make-local-variable 'egg-log-msg-ring-idx) nil)
   (set (make-local-variable 'egg-log-msg-text-beg) nil)
@@ -3978,10 +3987,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
                        #'egg-log-msg-commit
                        nil)))
   (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir))
+         (default-directory (egg-work-tree-dir git-dir))
          (buf (egg-get-commit-buffer 'create))
          (state (egg-repo-state :name :email))
-	 (user-name ())
          (head-info (egg-head))
          (head (or (cdr head-info)
                    (format "Detached HEAD! (%s)" (car head-info))))
@@ -4136,8 +4144,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (plist-put info :help help)))
 
 (defun egg-do-diff (diff-info)
-  (let* ((git-dir (egg-git-dir))
-         (dir (file-name-directory git-dir))
+  (let* ((default-directory (egg-work-tree-dir))
          (buf (egg-get-diff-buffer 'create)))
     (with-current-buffer buf
       (set (make-local-variable 'egg-diff-buffer-info) diff-info)
@@ -4145,9 +4152,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     buf))
 
 (defun egg-build-diff-info (src dst &optional file)
-  (let* ((git-dir (egg-git-dir))
-         (dir (file-name-directory git-dir))
-         info tmp)
+  (let ((dir (egg-work-tree-dir))
+	info tmp)
     (setq info
           (cond ((and (null src) (null dst))
                  (list :args (list "--no-color" "-p"
@@ -5638,8 +5644,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (interactive "P")
   (let* ((egg-internal-current-state
           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
-         (git-dir (egg-git-dir (invoked-interactively-p)))
-         (default-directory (file-name-directory git-dir))
+         (default-directory (egg-work-tree-dir 
+			     (egg-git-dir (invoked-interactively-p))))
          (buf (egg-get-log-buffer 'create))
          help)
     (with-current-buffer buf
@@ -5850,8 +5856,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-search-changes (string)
   (interactive "ssearch history for changes containing: ")
-  (let* ((git-dir (egg-git-dir (invoked-interactively-p)))
-         (default-directory (file-name-directory git-dir))
+  (let* ((default-directory (egg-work-tree-dir (egg-git-dir (invoked-interactively-p))))
          (buf (egg-get-query:commit-buffer 'create))
          (desc (concat (egg-text "Commits containing: " 'egg-text-2)
                        (egg-text string 'egg-term)))
@@ -6148,7 +6153,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-create-annotated-tag (name commit-1)
   (let* ((git-dir (egg-git-dir))
-         (default-directory (file-name-directory git-dir))
+         (default-directory (egg-work-tree-dir git-dir))
          (buf (egg-get-tag:msg-buffer 'create))
          (commit (egg-git-to-string "rev-parse" "--verify" commit-1))
          (pretty (egg-describe-rev commit))
@@ -6508,7 +6513,7 @@ current file contains unstaged changes."
 (defun egg-describe-state (state)
   (let* ((git-dir (plist-get state :gitdir))
          (current-file (buffer-file-name))
-         (default-directory (file-name-directory git-dir))
+         (default-directory (egg-work-tree-dir git-dir))
          (file-git-name (and current-file (egg-file-git-name current-file)))
          (unstaged-files (plist-get state :unstaged))
          (staged-files (plist-get state :staged))
@@ -6581,7 +6586,7 @@ current file contains unstaged changes."
                             ((memq :file-is-modified described-state)
                              "contains unstaged changes")
                             (t "is not modified"))
-                      (file-name-directory (egg-git-dir))
+                      (egg-work-tree-dir)
                       (cond ((memq :wdir-has-merged-conflict described-state)
                              "has files with conflicting merge changes")
                             ((memq :wdir-is-modified described-state)
