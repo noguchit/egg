@@ -3622,14 +3622,21 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-diff-section-cmd-unstage (pos)
   (interactive (list (point)))
-  (let ((newfile (memq 'newfile (get-text-property pos :diff))))
-    (if newfile
-	(egg-show-git-output
-	 (egg-diff-section-patch-cmd pos 0 "rm" "--cached")
-	 1  "GIT-RM")
-      (egg-show-git-output
-       (egg-diff-section-patch-cmd pos 1 "reset" "HEAD" "--")
-       1  "GIT-RESET"))))
+  (let ((is-merging (or (plist-get (egg-repo-state) :merge-heads)
+			(plist-get (egg-repo-state) :rebase-dir)))
+	(newfile (memq 'newfile (get-text-property pos :diff))))
+    (cond (newfile
+	   (egg-show-git-output
+	    (egg-diff-section-patch-cmd pos 0 "rm" "--cached")
+	    1  "GIT-RM"))
+	  (is-merging
+	   (egg-show-git-output
+	    (egg-diff-section-patch-cmd pos 1 "checkout" "-m")
+	    1  "GIT-CHECKOUT"))
+	  (t 
+	   (egg-show-git-output
+	    (egg-diff-section-patch-cmd pos 1 "reset" "HEAD" "--")
+	    1  "GIT-RESET")))))
 
 (defun egg-diff-section-cmd-undo-old-no-revsion-check (pos)
   (interactive (list (point)))
