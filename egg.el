@@ -4556,14 +4556,16 @@ If INIT was not nil, then perform 1st-time initializations as well."
          (first-head (if (stringp refs) refs (car (last refs))))
          (ref-at-point (car (get-text-property pos :ref)))
          (head-sha1 (egg-get-current-sha1)))
-    (if (memq :sha1 options)
-	commit
-      (if (and (not (memq :no-HEAD options)) (string= head-sha1 commit))
-	  "HEAD"
-	(or ref-at-point first-head
-	    (if (memq :symbolic options)
-		(egg-describe-rev commit)
-	      commit))))))
+    
+    (when (stringp commit)
+      (if (memq :sha1 options)
+	  commit
+	(if (and (not (memq :no-HEAD options)) (string= head-sha1 commit))
+	    "HEAD"
+	  (or ref-at-point first-head
+	      (if (memq :symbolic options)
+		  (egg-describe-rev commit)
+		commit)))))))
 
 (defun egg-log-buffer-do-remove-mark (mark-char)
   (let ((pos (point-min))
