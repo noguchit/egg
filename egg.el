@@ -2574,39 +2574,40 @@ rebase session."
         (kill-buffer (current-buffer))))
     (egg-buffer-cmd-refresh)))
 
-(defun egg-status-buffer-stage-untracked-file ()
+(defun egg-status-buffer-stage-untracked-file (&optional no-stage)
   "add untracked file(s) to the repository
 
 acts on a single file or on a region which contains the names of
-untracked files"
-  (interactive)
-  ;; act on multiple files
-  (if mark-active
-      (let ((files ""))
-        (mapc #'(lambda (file)
-                  (egg-sync-0 "add" file)
-                  (setq files (concat files file " ")))
-              (progn
-                (if (< (point) (mark))
-                    (progn
-                      (goto-char (line-beginning-position))
-                      (exchange-point-and-mark)
-                      (goto-char (line-end-position)))
-                  (progn
-                    (goto-char (line-end-position))
-                    (exchange-point-and-mark)
-                    (goto-char (line-beginning-position))))
-                (split-string
-                 (buffer-substring-no-properties (point) (mark)) "\n" t)))
-        (deactivate-mark)
-        (unless (string= files "")
-          (message "new files added: %s" files)))
-    ;; act only on single files
-    (let ((file (buffer-substring-no-properties
-                 (line-beginning-position) (line-end-position))))
-      (when (egg-sync-do-file file egg-git-command nil nil
-                              (list "add" "--" file))
-        (message "new file %s added" file)))))
+untracked files. If NO-STAGE, then only create the index entries without
+adding the contents."
+  (interactive "P")
+  (let ((files (if mark-active
+		   (progn
+		     (if (< (point) (mark))
+			 (progn
+			   (goto-char (line-beginning-position))
+			   (exchange-point-and-mark)
+			   (goto-char (line-end-position)))
+		       (progn
+			 (goto-char (line-end-position))
+			 (exchange-point-and-mark)
+			 (goto-char (line-beginning-position))))
+		     (split-string
+		      (buffer-substring-no-properties (point) (mark)) "\n" t))
+		 (list (buffer-substring-no-properties
+			(line-beginning-position) (line-end-position)))))
+	args files-string)
+    (setq files (delete "" files))
+    (setq files (delete nil files))
+    (if (consp files)
+	(setq files-string (mapconcat 'identity files ", "))
+      (error "No file to stage!"))
+    (setq args (nconc (list "-v" "--") files))
+    (if no-stage
+	(setq args (cons "-N" args)))
+    
+    (when (apply 'egg-sync-0 "add" args)
+      (message "%s %s to git." (if no-stage "registered" "added") files-string))))
 
 (defconst egg-untracked-file-map
   (let ((map (make-sparse-keymap "Egg:UntrackedFile")))
