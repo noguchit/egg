@@ -4257,7 +4257,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
-    (define-key map (kbd "p") 'egg-log-buffer-pick-1cherry)
+    (define-key map (kbd "c") 'egg-log-buffer-pick-1cherry)
     (define-key map (kbd "R") 'egg-log-buffer-rebase-interactive)
     map))
 
