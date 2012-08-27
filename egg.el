@@ -3978,62 +3978,75 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-commit-log-edit (title-function
                             action-function
-                            insert-init-text-function)
-  (interactive (if current-prefix-arg
-                   (list (concat
-                          (egg-text "Amending  " 'egg-text-3)
-                          (egg-text (egg-pretty-head-name) 'egg-branch))
-                         #'egg-log-msg-amend-commit
-                         (egg-commit-message "HEAD"))
-                 (list (concat
-                        (egg-text "Committing into  " 'egg-text-3)
-                        (egg-text (egg-pretty-head-name) 'egg-branch))
-                       #'egg-log-msg-commit
-                       nil)))
-  (let* ((git-dir (egg-git-dir))
-         (default-directory (egg-work-tree-dir git-dir))
-         (buf (egg-get-commit-buffer 'create))
-         (state (egg-repo-state :name :email))
-         (head-info (egg-head))
-         (head (or (cdr head-info)
-                   (format "Detached HEAD! (%s)" (car head-info))))
-         (inhibit-read-only inhibit-read-only))
-    (with-current-buffer buf
-      (setq inhibit-read-only t)
-      (erase-buffer)
-      (set (make-local-variable 'egg-log-msg-action)
-           action-function)
-      (insert (cond ((functionp title-function)
-                     (funcall title-function state))
-                    ((stringp title-function) title-function)
-                    (t "Shit happens!"))
-              "\n"
-              "Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
-              "Committer: " (egg-text (plist-get state :name) 'egg-text-2) " "
-	      (egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
-              (egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` when cancel) -"
-                        'font-lock-comment-face))
-      (put-text-property (point-min) (point) 'read-only t)
-      (put-text-property (point-min) (point) 'rear-sticky nil)
-      (insert "\n")
-      (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
-      (set-marker-insertion-type egg-log-msg-text-beg nil)
-      (put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg
-                         :navigation 'commit-log-text)
-      (insert (egg-prop "\n------------------------ End of Commit Message ------------------------"
-                        'read-only t 'front-sticky nil
-                        'face 'font-lock-comment-face))
-      (set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
-      (set-marker-insertion-type egg-log-msg-diff-beg nil)
-      (egg-commit-log-buffer-show-diffs buf 'init)
-      (goto-char egg-log-msg-text-beg)
-      (cond ((functionp insert-init-text-function)
-             (funcall insert-init-text-function))
-            ((stringp insert-init-text-function)
-             (insert insert-init-text-function)))
-      (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
-      (set-marker-insertion-type egg-log-msg-text-end t))
-    (pop-to-buffer buf t)))
+                            insert-init-text-function &optional amend-no-msg)
+  (interactive (let ((prefix (car current-prefix-arg)))
+		 (setq prefix (if (numberp prefix)
+				  prefix
+				0))
+		 (cond ((> prefix 15)
+			(list nil nil nil t))
+		       ((> prefix 3)
+			(list (concat
+			       (egg-text "Amending  " 'egg-text-3)
+			       (egg-text (egg-pretty-head-name) 'egg-branch))
+			      #'egg-log-msg-amend-commit
+			      (egg-commit-message "HEAD")))
+		       (t (list (concat
+				 (egg-text "Committing into  " 'egg-text-3)
+				 (egg-text (egg-pretty-head-name) 'egg-branch))
+				#'egg-log-msg-commit
+				nil)))))
+  (if amend-no-msg
+      (let (cmd-res feed-back)
+	(with-temp-buffer
+	  (setq cmd-res (egg-git-ok (current-buffer) "commit" "--amend" "--no-edit"))
+	  (setq feed-back (car (nreverse (split-string (buffer-string) "[\n]+" t))))
+	  (egg-run-buffers-update-hook))
+	(message "GIT-COMMIT> %s" feed-back))
+    (let* ((git-dir (egg-git-dir))
+	   (default-directory (egg-work-tree-dir git-dir))
+	   (buf (egg-get-commit-buffer 'create))
+	   (state (egg-repo-state :name :email))
+	   (head-info (egg-head))
+	   (head (or (cdr head-info)
+		     (format "Detached HEAD! (%s)" (car head-info))))
+	   (inhibit-read-only inhibit-read-only))
+      (with-current-buffer buf
+	(setq inhibit-read-only t)
+	(erase-buffer)
+	(set (make-local-variable 'egg-log-msg-action)
+	     action-function)
+	(insert (cond ((functionp title-function)
+		       (funcall title-function state))
+		      ((stringp title-function) title-function)
+		      (t "Shit happens!"))
+		"\n"
+		"Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
+		"Committer: " (egg-text (plist-get state :name) 'egg-text-2) " "
+		(egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
+		(egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` when cancel) -"
+			  'font-lock-comment-face))
+	(put-text-property (point-min) (point) 'read-only t)
+	(put-text-property (point-min) (point) 'rear-sticky nil)
+	(insert "\n")
+	(set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
+	(set-marker-insertion-type egg-log-msg-text-beg nil)
+	(put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg
+			   :navigation 'commit-log-text)
+	(insert (egg-prop "\n------------------------ End of Commit Message ------------------------"
+			  'read-only t 'front-sticky nil
+			  'face 'font-lock-comment-face))
+	(set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
+	(set-marker-insertion-type egg-log-msg-diff-beg nil)
+	(egg-commit-log-buffer-show-diffs buf 'init)
+	(goto-char egg-log-msg-text-beg)
+	(cond ((functionp insert-init-text-function)
+	       (funcall insert-init-text-function))
+	      ((stringp insert-init-text-function)
+	       (insert insert-init-text-function)))
+	(set (make-local-variable 'egg-log-msg-text-end) (point-marker))
+	(set-marker-insertion-type egg-log-msg-text-end t))
+      (pop-to-buffer buf t))))
 
 ;;;========================================================
 ;;; diff-mode
