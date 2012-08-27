@@ -3697,7 +3697,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
 (defun egg-do-checkout (rev)
   (let* ((default-directory (egg-work-tree-dir)))
-    (if (egg-sync-0 "checkout" rev)
+    (if (egg-show-git-output 
+	 (egg-sync-0 "checkout" rev)
+	 -1 "GIT-CHECKOUT")
         (egg-revert-all-visited-files))))
 
 (defun egg-do-tag (&optional rev prompt force)
@@ -3727,8 +3729,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-do-apply-stash (stash)
   (let ((state (egg-repo-state))
         output)
-
-    (setq output (egg-sync-0 "stash" "apply" stash))
+    (setq output (egg-sync-0 "stash" "apply" "--index" stash))
     (if output
         (egg-revert-all-visited-files)
       (message "GIT-STASH> failed to apply %s" stash)
@@ -3738,7 +3739,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-do-pop-stash ()
   (let ((state (egg-repo-state))
         output)
-    (setq output (egg-sync-0 "stash" "pop"))
+    (setq output (egg-sync-0 "stash" "pop" "--index"))
     (if output
         (egg-revert-all-visited-files)
       (message "GIT-STASH> failed to pop WIP")
