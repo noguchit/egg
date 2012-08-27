@@ -3737,13 +3737,11 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (egg-status nil :sentinel))
     output))
 
-(defun egg-do-move-head (rev &optional update-wdir update-index)
-  (when (egg-show-git-output
-         (cond (update-wdir (egg-sync-0 "reset" "--hard" rev))
-               (update-index (egg-sync-0 "reset" rev))
-               (t (egg-sync-0 "reset" "--soft" rev)))
-         -1 "GIT-RESET")
-    (if update-wdir (egg-revert-all-visited-files))))
+(defun egg-do-move-head (rev reset-flag)
+  (when (egg-show-git-output (egg-sync-0 "reset" reset-flag rev)
+			     -1 "GIT-RESET")
+    (if (member reset-flag '("--keep" "--hard" "--merge"))
+	(egg-revert-all-visited-files))))
 
 (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
   (let ((msg (or msg (concat "merging in " rev)))
@@ -4905,19 +4903,32 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
          (commit (egg-commit-at-point))
          (branch (egg-current-branch))
-         (update-index (> strict-level 3))
-         (update-wdir (> strict-level 15))
-         (prompt (format "%s to %s%s? "
+         (hard (> strict-level 3))
+         (ask (> strict-level 15))
+	 (key-mode-alist '((?s . "--soft")
+			   (?h . "--hard")
+			   (?x . "--mixed")
+			   (?k . "--keep")
+			   (?m . "--merge")))
+	 (reset-mode "--keep")
+	 prompt mode-key)
+    
+    (setq prompt (format "%s to %s%s? "
                          (if branch
                              (concat "move " branch)
                            "attach HEAD")
                          (if branch (substring commit 0 8) rev)
-                         (cond (update-wdir " (and update workdir)")
-                               (update-index " (and update index)")
-                               (t "")))))
-    (if (y-or-n-p prompt)
-        (egg-do-move-head (if branch commit rev)
-                          update-wdir update-index))))
+                         (cond (ask (setq reset-mode "--bad") " (will prompt for advanced mode)")
+                               (hard (setq reset-mode "--hard") " (throw away all un-committed changes)")
+                               (t (setq reset-mode "--keep") " (but keep current changes)"))))
+    (when (y-or-n-p prompt)
+      (when ask
+	(setq mode-key (read-key-sequence "git-reset: (s)oft (h)ard mi(x)ed (k)eep (m)erge: "))
+	(setq mode-key (string-to-char mode-key))
+	(setq reset-mode (cdr (assq mode-key key-mode-alist)))
+	(unless (stringp reset-mode)
+	  (error "Invalid choice: %c (must be of of s,h,x,k,m)" mode-key)))
+      (egg-do-move-head (if branch commit rev) reset-mode))))
 
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
@@ -5311,14 +5322,12 @@ Each line representing a commit has extra keybindings:\\<egg-log-commit-map>
 \\[egg-log-buffer-start-new-branch] start in a new branch from the current commit.
 \\[egg-log-buffer-checkout-commit] checkout the current commit.
 \\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit.
-\\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) to the
-current commit (the underlying git command is `reset --soft'.
-C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
-the index to the current commit (the underlying git command
-is `reset --mixed'.)
-C-u C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
-the index to the current commit, the work dir will also be
-updated (the underlying git command is `reset --hard').
+\\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
+the index to the current commit if it's safe to do so (the underlying git command is `reset --keep'.)
+C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
+the index to the current commit, the work dir will also be updated (the underlying
+git command is `reset --hard').
+C-u C-u \\[egg-log-buffer-attach-head] will let the user specify a mode to run git-reset.
 \\[egg-log-buffer-merge] will merge the current commit into HEAD.
 C-u \\[egg-log-buffer-merge] will merge the current commit into HEAD but will not
 auto-commit if the merge was successful.
