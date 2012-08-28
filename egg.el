@@ -1548,6 +1548,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
+    (define-key map (kbd "x") 'egg-diff-section-cmd-revert-to-head)
     (define-key map [C-down-mouse-2] 'egg-status-popup-staged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-staged-diff-menu)
 
@@ -1568,6 +1569,7 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
+    (define-key map (kbd "x") 'egg-diff-section-cmd-revert-to-head)
 
     (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-unstaged-diff-menu)
@@ -2345,6 +2347,8 @@ as: (format FMT current-dir-name git-dir-full-path)."
     (define-key map (kbd "w") 'egg-buffer-stash-wip)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
+    (define-key map (kbd "U") 'egg-unstage-all-files)
+    (define-key map (kbd "X") 'egg-status-buffer-revert)
     (define-key map (kbd "d") 'egg-diff-ref)
     map)
   "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
@@ -2477,10 +2481,14 @@ rebase session."
     "\\[egg-commit-log-edit]:commit staged modifications  "
     "\\[egg-log]:show repo's history\n"
     "\\[egg-stage-all-files]:stage all modifications  "
-    "\\[egg-diff-ref]:diff other repos  "
+    "\\[egg-unstage-all-files]:unstage all modifications  "
+    "\\[egg-diff-ref]:diff other revision\n"
+    "\\[egg-status-buffer-revert]: throw away ALL modifications  "
+    "\\<egg-unstaged-diff-section-map>"
+    "\\[egg-diff-section-cmd-revert-to-head]:throw away file's modifications\n"
     "\\<egg-hide-show-map>"
     "\\[egg-section-cmd-toggle-hide-show]:hide/show block  "
-    "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  \n"
+    "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  "
     "\\<egg-buffer-mode-map>"
     "\\[egg-buffer-cmd-refresh]:redisplay  "
     "\\[egg-quit-buffer]:quit\n")))
@@ -3412,6 +3420,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
                                         egg-commit-log-edit))
   (define-key menu [stage] '(menu-item "Stage All Modifications"
                                        egg-stage-all-files))
+  (define-key menu [stage] '(menu-item "UnStage All Staged Modifications"
+                                       egg-stage-all-files))
   (define-key menu [stage-untracked] '(menu-item "Stage All Untracked Files"
                                                  egg-stage-untracked-files))
   (define-key menu [sp1] '("--"))
@@ -3541,6 +3551,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defsubst egg-sync-0 (&rest args)
   (egg-sync-do egg-git-command nil nil args))
 
+(defsubst egg-sync-0-args (args)
+  (egg-sync-do egg-git-command nil nil args))
+
 (defsubst egg-sync-do-region (program beg end &rest args)
   (egg-sync-do program (cons beg end) nil args))
 
@@ -3551,9 +3564,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let ((default-directory (egg-work-tree-dir))
         output)
     (setq file (expand-file-name file))
-    (setq args (mapcar (lambda (word)
-                         (if (string= word file) file word))
-                       args))
+    ;; (setq args (mapcar (lambda (word)
+    ;;                      (if (string= word file) file word))
+    ;;                    args))
     (when (setq output (egg-sync-do program stdin accepted-codes args))
       (cons file output))))
 
@@ -3580,6 +3593,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (stringp output)
       (message "%s> %s" prefix output)
       t)))
+
+(defsubst egg-show-sync-0-args (prefix &rest args)
+  (egg-show-git-output (egg-sync-0-args args) -1 prefix))
 
 (defun egg-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
@@ -3664,7 +3680,19 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (when (stringp file)
         (egg-revert-visited-files file)))))
 
-(defun egg-file-stage-current-file ()
+(defun egg-diff-section-cmd-revert-to-head (pos)
+  (interactive (list (point)))
+  (let ((file (car (or (get-text-property pos :diff)
+                       (error "No diff with file-name here!"))))
+        args)
+    (unless (or (not egg-confirm-undo)
+		(y-or-n-p (format "irreversibly revert %s to HEAD? " file)))
+      (error "Too chicken to proceed with reset operation!"))
+    (setq args (list "checkout" "HEAD" "--" file))
+    (when (egg-sync-do-file file egg-git-command nil nil args)
+      (egg-revert-visited-files file))))
+
+ (defun egg-file-stage-current-file ()
   (interactive)
   (let ((git-dir (egg-git-dir))
         (file (buffer-file-name)))
@@ -3677,6 +3705,34 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let ((default-directory (egg-work-tree-dir)))
     (when (egg-sync-0 "add" "-u")
       (message "staged all tracked files's modifications"))))
+
+(defun egg-unstage-all-files ()
+  (interactive)
+  (let ((default-directory (egg-work-tree-dir)))
+    (when (egg-sync-0 "reset" "HEAD")
+      (message "unstaged all modfications in INDEX"))))
+
+(defun egg-revert-to-index (really-do-it)
+  (interactive (list (or current-prefix-arg
+			 (y-or-n-p "throw away all unstaged modifications? "))))
+  (when really-do-it
+    (let ((default-directory (egg-work-tree-dir)))
+      (when (egg-sync-0 "checkout-index" "-f" "-a")
+	(message "revert all files to INDEX")))))
+
+(defun egg-revert-to-HEAD (really-do-it)
+  (interactive (list (or current-prefix-arg
+			 (y-or-n-p "throw away all (staged and unstaged) modifications? "))))
+  (when really-do-it
+    (let ((default-directory (egg-work-tree-dir)))
+      (when (egg-sync-0 "reset" "--hard")
+	(message "revert INDEX and all files to HEAD")))))
+
+(defun egg-status-buffer-revert (harder)
+  (interactive "P")
+  (funcall (if harder #'egg-revert-to-HEAD #'egg-revert-to-index) 
+	   (y-or-n-p (format "throw away ALL %s modifications? " 
+			     (if harder "(staged AND unstaged)" "unstaged")))))
 
 (defun egg-stage-untracked-files ()
   (interactive)
