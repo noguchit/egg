@@ -1359,6 +1359,11 @@ success."
                 (egg-async-exit-msg msg))
             (apply callback-func callback-args))))))
 
+
+;;;========================================================
+;;; New: internal command
+;;;========================================================
+
 ;;;========================================================
 ;;; Blame utils
 ;;;========================================================
@@ -3570,32 +3575,127 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (setq output (egg-sync-do program stdin accepted-codes args))
       (cons file output))))
 
+(defun egg--do (stdin program args)
+  (let (logger ret output-buf)
+    (setq logger (egg-cmd-log "RUN:" program " "
+                              (mapconcat 'identity args " ")
+                              (if stdin " <REGION\n" "\n")))
+    (setq output-buf (car logger))
+    (setq ret
+          (cond ((stringp stdin)
+                 (with-temp-buffer
+                   (insert stdin)
+                   (apply 'call-process-region (point-min) (point-max)
+                          program nil output-buf nil args)))
+                ((consp stdin)
+                 (apply 'call-process-region (car stdin) (cdr stdin)
+                        program nil output-buf nil args))
+                ((null stdin)
+                 (apply 'call-process program nil output-buf nil args))))
+    (cons ret logger)))
+
+(defun egg--do-git (stdin cmd args)
+  (egg--do stdin "git" (cons cmd args)))
+
+(defun egg--do-handle-exit (exit-info regexp &optional line-no accepted-codes buffer-to-update)
+  (let ((ret (car exit-info))
+	(buf (cadr exit-info))
+	(pos (cddr exit-info))
+	(line (if (numberp line-no) line-no -1))
+	(ok-list (cond ((numberp accepted-codes) (list accepted-codes))
+		       ((consp accepted-codes) accepted-codes)
+		       (t (list 0))))
+	output beg end lines line matched-line)
+    (with-current-buffer buf
+      (save-excursion
+	(goto-char pos)
+	(setq end (point-max))
+	(forward-line 1)
+	(setq beg (point))
+	(when (> (- end beg) 0)
+	  (setq output (buffer-substring-no-properties beg end))
+	  (setq lines (delete "" (save-match-data
+				   (split-string output "\n"))))
+
+
+	  (setq line (cond ((< line-no 0) (nth (- -1 line-no) (nreverse lines)))
+			   ((> line-no 0) (nth (1- line-no) lines))
+			   (t nil)))
+	  (setq matched-line
+		(when (stringp regexp)
+		  (save-match-data
+		    (when (re-search-forward regexp end t)
+		      (goto-char (match-beginning 0))
+		      (buffer-substring-no-properties 
+		       (line-beginning-position)
+		       (line-end-position)))))))))
+
+    (egg-cmd-log (format "RET:%d" ret))
+    (if (member ret ok-list)
+	(progn 
+	  (if (bufferp buffer-to-update)
+	    (with-current-buffer buffer-to-update
+	      (funcall egg-buffer-refresh-func buffer-to-update))
+	    (egg-run-buffers-update-hook))
+	  (list t (or line matched-line) output))
+      (list nil (or matched-line line) output))))
+
+(defun egg--do-show-output (cmd-name output-info)
+  (let ((ok (car output-info))
+	(line (nth 1 output-info))
+	(output (nth 2 output-info))
+	prefix)
+    (setq prefix (concat (if (stringp cmd-name) cmd-name "GIT")
+			 (if ok "> " ":ERROR> ")))
+    (message (concat prefix line))
+    (unless ok (ding))))
+
+(defun egg--do-git-cmd (cmd codes regexp line-no buffer-to-update args)
+  (egg--do-show-output (concat "GIT-" (upcase cmd))
+   (egg--do-handle-exit (egg--do-git nil cmd args) regexp line-no
+			codes buffer-to-update)))
+
+(defun egg--git-push-cmd (buffer-to-update &rest args)
+  (egg--do-git-cmd "push" nil "\\( -> \\|\\<not\\>\\)" -1 buffer-to-update args))
+
+(defun egg--git-push-cmd-test (from to repo)
+  (interactive "sPush: \nsOnTo: \nsAt:")
+  (egg--git-push-cmd nil repo (concat from ":" to)))
+
+(defun egg-show-git-output (output line-no &optional prefix)
+  (unless (stringp prefix) (setq prefix "GIT"))
+  (if (consp output) (setq output (cdr output)))
+  (when (and (stringp output) (> (length output) 1))
+    (cond ((numberp line-no)
+	   (when (setq output (save-match-data (split-string output "\n" t)))
+	     (cond ((< line-no 0)
+		    (setq line-no (1+ line-no))
+		    (setq output (nth line-no (nreverse output))))
+		   ((> line-no 0)
+		    (setq line-no (1- line-no))
+		    (setq output (nth line-no output)))
+		   (t (setq output nil)))))
+	  ((stringp line-no)
+	   (with-temp-buffer
+	     (insert output)
+	     (goto-char (point-min))
+	     (setq output 
+		   (and (re-search-forward line-no nil t)
+			(buffer-substring-no-properties (line-beginning-position)
+							(line-end-position)))))))
+    (when (stringp output)
+      (message "%s> %s" prefix output)
+      t)))
+
+(defsubst egg-show-sync-0-args (prefix line-or-regex &rest args)
+  (egg-show-git-output (egg-sync-0-args args) -1 prefix))
+
 (defun egg-hunk-section-patch-cmd (pos program &rest args)
   (let ((patch (egg-hunk-section-patch-string pos (find "--reverse" args)))
         (file (car (get-text-property pos :diff))))
     (unless (stringp file)
       (error "No diff with file-name here!"))
     (egg-sync-do-file file program patch nil args)))
-
-(defun egg-show-git-output (output line-no &optional prefix)
-  (unless (stringp prefix) (setq prefix "GIT"))
-  (if (consp output) (setq output (cdr output)))
-  (when (and (stringp output) (> (length output) 1))
-    (when (numberp line-no)
-      (when (setq output (save-match-data (split-string output "\n" t)))
-        (cond ((< line-no 0)
-               (setq line-no (1+ line-no))
-               (setq output (nth line-no (nreverse output))))
-              ((> line-no 0)
-               (setq line-no (1- line-no))
-               (setq output (nth line-no output)))
-              (t (setq output nil)))))
-    (when (stringp output)
-      (message "%s> %s" prefix output)
-      t)))
-
-(defsubst egg-show-sync-0-args (prefix &rest args)
-  (egg-show-git-output (egg-sync-0-args args) -1 prefix))
 
 (defun egg-hunk-section-cmd-stage (pos)
   (interactive (list (point)))
