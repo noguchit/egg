@@ -4348,6 +4348,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map (kbd "*") 'egg-log-buffer-mark)
     (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
 
+    (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
+    
     (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
 
@@ -4358,15 +4360,13 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (set-keymap-parent map egg-log-commit-map)
     (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
     (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
-    (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
-    (define-key map (kbd "d") 'egg-log-buffer-ff-pull)
     map))
 
 (defconst egg-log-local-ref-map
   (let ((map (make-sparse-keymap "Egg:LogLocalRef")))
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
-    (define-key map (kbd "D") 'egg-log-buffer-push-head-to-local)
+    (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-local-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-local-ref-menu)
@@ -4885,22 +4885,31 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (unless (and (plist-get res :success) (null no-commit))
         (egg-status)))))
 
-(defun egg-log-buffer-ff-pull (pos)
-  (interactive "d")
-  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
-        res modified-files buf)
+(defun egg-log-buffer-do-ff-pull (rev &optional non-ff)
+  (let (res modified-files)
     (unless (egg-repo-clean)
       (egg-status)
       (error "Repo is not clean!"))
-    (if  (null (y-or-n-p (format "merge %s to HEAD? " rev)))
-        (message "cancel merge from %s to HEAD!" rev)
-      (setq res (egg-do-merge-to-head rev "--ff-only"))
-      (setq modified-files (plist-get res :files))
-      (if modified-files
-          (egg-revert-visited-files modified-files))
-      (message "GIT-MERGE> %s" (plist-get res :message))
-      (unless (plist-get res :success)
-        (egg-status)))))
+    (setq res (egg-do-merge-to-head rev (unless non-ff "--ff-only")))
+    (setq modified-files (plist-get res :files))
+    (if modified-files
+	(egg-revert-visited-files modified-files))
+    (message "GIT-MERGE> %s" (plist-get res :message))
+    (unless (plist-get res :success)
+      (egg-status))))
+
+(defun egg-log-buffer-do-local-push (src dst &optional non-ff)
+  (when (egg-show-git-output
+	 (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
+		     (concat src ":" dst))
+	 -1 "GIT-PUSH")
+    (funcall egg-buffer-refresh-func (current-buffer))))
+
+(defun egg-log-buffer-ff-pull (pos &optional non-ff)
+  (interactive "d\nP")
+  (egg-log-buffer-do-ff-pull 
+   (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
+   non-ff))
 
 (defun egg-log-buffer-rebase (pos &optional move)
   (interactive "d\nP")
@@ -5146,19 +5155,43 @@ If INIT was not nil, then perform 1st-time initializations as well."
                              (format "refs/heads/%s:refs/remotes/%s/%s"
                                      name remote name))))))
 
-(defun egg-log-buffer-push-to-local (pos &optional non-ff)
-  (interactive "d\nP")
-  (let* ((src (car (get-text-property pos :ref)))
-         dst)
+;; (defun egg-log-buffer-push-to-local (pos &optional non-ff)
+;;   (interactive "d\nP")
+;;   (let* ((src (car (get-text-property pos :ref)))
+;;          dst)
+;;     (unless src
+;;       (error "Nothing to push here!"))
+;;     (setq dst (completing-read (format "use %s to update: " src)
+;;                                (egg-local-refs) nil t))
+;;     (when (egg-show-git-output
+;;            (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
+;;                        (concat src ":" dst))
+;;            -1 "GIT-PUSH")
+;;       (funcall egg-buffer-refresh-func (current-buffer)))))
+
+(defun egg-log-buffer-push-to-local (pos &optional level)
+  "Push a ref or a commit at POS onto HEAD.
+With C-u, instead of HEAD, prompt for another ref as destination.
+With C-u C-u, will force the push evel if it would be non-ff.
+When the destination of the push is HEAD, the underlying git command
+would be a pull (by default --ff-only)."
+  (interactive "d\np")
+  (let ((src (or (car (get-text-property pos :ref))
+		 (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
+	(prompt-dst (> level 3))
+	(non-ff (> level 15))
+	(dst "HEAD"))
     (unless src
       (error "Nothing to push here!"))
-    (setq dst (completing-read (format "use %s to update: " src)
-                               (egg-local-refs) nil t))
-    (when (egg-show-git-output
-           (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
-                       (concat src ":" dst))
-           -1 "GIT-PUSH")
-      (funcall egg-buffer-refresh-func (current-buffer)))))
+    (if prompt-dst
+	(setq dst (completing-read (format "use %s to update: " src)
+				   (cons dst (egg-local-refs)) nil t dst)))
+    (if (y-or-n-p (format "push %s on %s%s? " src dst 
+			  (if non-ff " (allowed non-ff move)" "")))
+	(if (string-equal dst "HEAD")
+	    (egg-log-buffer-do-ff-pull src non-ff)
+	  (egg-log-buffer-do-local-push src dst non-ff))
+      (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-head-to-local (pos &optional non-ff)
   (interactive "d\nP")
@@ -5414,8 +5447,7 @@ auto-commit if the merge was successful.
 
 Each ref on the commit line has extra extra keybindings:\\<egg-log-ref-map>
 \\[egg-log-buffer-rm-ref] delete the ref under the cursor.
-\\[egg-log-buffer-push-to-local] update another local ref using the ref under the cursor.
-\\[egg-log-buffer-ff-pull] update HEAD using the ref under the cursor.
+\\[egg-log-buffer-push-to-local] update HEAD or another local ref using the ref.
 
 Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-local-ref-map>
 \\[egg-log-buffer-push-to-remote] upload to a remote the ref under the cursor.
@@ -5508,7 +5540,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                    'egg-log-buffer-push-to-remote
                                    :visible '(egg-ref-at-point)
                                    :enable '(not (egg-remote-at-point))))
-    (define-key map [update] (list 'menu-item "Push to Another Local Branch"
+    (define-key map [update] (list 'menu-item "Push to HEAD or Another Local Branch"
                                    'egg-log-buffer-push-to-local
                                    :visible '(egg-ref-at-point)))
     (define-key map [sp5] '("--"))
@@ -5720,10 +5752,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    (egg-pretty-help-text
     "\\<egg-log-local-ref-map>"
     "\\[egg-log-buffer-rm-ref]:delete ref  "
-    "\\[egg-log-buffer-push-to-local]:update another local ref  "
-    "\\[egg-log-buffer-ff-pull]:update HEAD with ref  "
+    "\\[egg-log-buffer-push-to-local]:update HEAD (or a local ref) with ref  "
+    "\\[egg-log-buffer-push-head-to-local]:update this ref with HEAD\n"
     "\\[egg-log-buffer-push-to-remote]:upload to remote  "
-    "\\[egg-log-buffer-push-head-to-local]:download to this ref (from remote site or HEAD)\n")
+    "\\<egg-log-remote-ref-map>"
+    "\\[egg-log-buffer-fetch-remote-ref]:download this ref from remote\n")
    (egg-text "Extra Key Bindings for a Diff Block:" 'egg-help-header-2)
    "\n"
    (egg-pretty-help-text
