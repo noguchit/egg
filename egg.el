@@ -473,14 +473,6 @@ desirable way to invoke GIT."
   :group 'egg
   :type 'string)
 
-(defcustom egg-patch-command "patch"
-  "Name or full-path to the patch command.
-Set this to the appropriate string in the case where `patch' is not the
-desirable way to invoke gnu patch command."
-  :group 'egg
-  :type 'string)
-
-
 (defcustom egg-dummy-option nil
   "Foo bar"
   :group 'egg
@@ -3715,8 +3707,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (unless (or (not egg-confirm-undo)
               (y-or-n-p "irreversibly remove the hunk under cursor? "))
     (error "Too chicken to proceed with undo operation!"))
-  (let ((file (egg-hunk-section-patch-cmd pos egg-patch-command
-                                          "-p1" "--quiet" "--reverse")))
+  (let ((file (egg-hunk-section-patch-cmd pos egg-git-command "apply"
+                                          "-p1" "--reverse")))
     (if (consp file) (setq file (car file)))
     (when (stringp file)
       (egg-revert-visited-files file))))
