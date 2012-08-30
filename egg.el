@@ -481,6 +481,48 @@ desirable way to invoke GIT."
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
+
+(defmacro with-egg-debug-buffer (&rest body)
+  "Create a temporary buffer, and evaluate BODY there like `progn'.
+See also `with-temp-file' and `with-output-to-string'."
+  (declare (indent 0) (debug t))
+  (let ((egg-debug-buffer (make-symbol "egg-debug-buffer"))
+	(egg-debug-dir (make-symbol "egg-debug-dir")))
+    `(let ((,egg-debug-dir (egg-work-tree-dir))
+	   (,egg-debug-buffer (get-buffer-create (concat "*egg-debug:" (egg-git-dir) "*"))))
+       ;; FIXME: kill-buffer can change current-buffer in some odd cases.
+       (with-current-buffer ,egg-debug-buffer
+	 (setq default-directory ,egg-debug-dir)
+         (unwind-protect
+	     (progn ,@body)
+           )))))
+
+(defmacro with-egg-async-buffer (&rest body)
+  "Create a temporary buffer, and evaluate BODY there like `progn'.
+See also `with-temp-file' and `with-output-to-string'."
+  (declare (indent 0) (debug t))
+  (let ((egg-async-buffer (make-symbol "egg-async-buffer"))
+	(egg-async-dir (make-symbol "egg-async-dir")))
+    `(let ((,egg-async-dir (egg-work-tree-dir))
+	   (,egg-async-buffer (get-buffer-create (concat "*egg-async:" (egg-git-dir) "*"))))
+       ;; FIXME: kill-buffer can change current-buffer in some odd cases.
+       (with-current-buffer ,egg-async-buffer
+	 (setq default-directory ,egg-async-dir)
+         (unwind-protect
+	     (progn ,@body)
+           )))))
+
+;; (cl-macroexpand '(with-egg-debug-buffer (do-something)))
+;; (let* ((egg-debug-dir (egg-work-tree-dir))
+;;        (egg-debug-buffer (get-buffer-create (concat "*egg-debug:" (egg-git-dir) "*"))))
+;;   (with-current-buffer egg-debug-buffer 
+;;     (setq default-directory egg-debug-dir)
+;;     (unwind-protect 
+;; 	(progn (do-something))
+;;       (and (buffer-name egg-debug-buffer) 
+;; 	   (kill-buffer egg-debug-buffer)))))
+
+
 (defmacro egg-text (text face)
   "Format TEXT with face FACE at compile-time or run-time."
   (cond ((stringp text)
@@ -1269,46 +1311,45 @@ as repo state instead of re-read from disc."
 ;;;========================================================
 
 (defsubst egg-async-process ()
-  (let* ((buffer (get-buffer-create "*egg-process*"))
-         (proc (get-buffer-process buffer)))
-    (if (and (processp proc) 		;; is a process
-             (not (eq (process-status proc) 'exit)) ;; not finised
-             (= (process-exit-status proc) 0))      ;; still running
-        proc)))
+  (with-egg-async-buffer
+   (let ((proc (get-buffer-process (current-buffer))))
+     (if (and (processp proc) 		;; is a process
+	      (not (eq (process-status proc) 'exit)) ;; not finised
+	      (= (process-exit-status proc) 0))      ;; still running
+	 proc))))
 
 (defun egg-async-do (exit-code func-args args)
   "Run GIT asynchronously with ARGS.
 if EXIT code is an exit-code from GIT other than zero but considered
 success."
-  (let ((dir (egg-work-tree-dir))
-        (buf (get-buffer-create "*egg-process*"))
-        (inhibit-read-only inhibit-read-only)
+  (let ((inhibit-read-only inhibit-read-only)
         (accepted-msg (and (integerp exit-code)
                            (format "exited abnormally with code %d"
                                    exit-code)))
         proc)
-    (setq proc (get-buffer-process buf))
-    (when (and (processp proc) 		;; is a process
-               (not (eq (process-status proc) 'exit)) ;; not finised
-               (= (process-exit-status proc) 0))      ;; still running
-      (error "EGG: %s is already running!" (process-command proc)))
-    (with-current-buffer buf
+    
+    (with-egg-async-buffer
+      (erase-buffer)
+      (setq proc (get-buffer-process (current-buffer)))
+      (when (and (processp proc)		       ;; is a process
+		 (not (eq (process-status proc) 'exit)) ;; not finised
+		 (= (process-exit-status proc) 0)) ;; still running
+	(error "EGG: %s is already running!" (process-command proc)))
       (setq inhibit-read-only t)
-      (setq default-directory dir)
       ;;(erase-buffer)
       (widen)
       (goto-char (point-max))
       (insert "EGG-GIT-CMD:\n")
       (insert (format "%S\n" args))
       (insert "EGG-GIT-OUTPUT:\n")
-      (setq proc (apply 'start-process "egg-git" buf egg-git-command args))
+      (setq proc (apply 'start-process "egg-git" (current-buffer) egg-git-command args))
       (setq mode-line-process " git")
       (when (and (consp func-args) (functionp (car func-args)))
-        (process-put proc :callback-func (car func-args))
-        (process-put proc :callback-args (cdr func-args)))
+	(process-put proc :callback-func (car func-args))
+	(process-put proc :callback-args (cdr func-args)))
       (when (stringp accepted-msg)
-        (process-put proc :accepted-msg accepted-msg)
-        (process-put proc :accepted-code exit-code))
+	(process-put proc :accepted-msg accepted-msg)
+	(process-put proc :accepted-code exit-code))
       (process-put proc :cmds (cons egg-git-command args))
       (set-process-sentinel proc #'egg-process-sentinel))
     proc))
@@ -3492,7 +3533,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
             dir)
         (unless git-dir
           (error "Can't find git dir in %s" default-directory))
-        (setq dir (file-name-nondirectory git-dir))
+        (setq dir (egg-work-tree-dir git-dir))
         (setq default-directory dir)
         (get-buffer-create (concat " *egg-cmd-logs@" git-dir "*")))))
 
@@ -3922,12 +3963,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-do-rebase-head (upstream-or-action
                            &optional old-base prompt)
   (let ((pre-merge (egg-get-current-sha1))
-	(dir (egg-work-tree-dir))
         cmd-res modified-files feed-back old-choices)
 ;;;     (with-temp-buffer
-    (with-current-buffer (get-buffer-create "*egg-debug*")
+    (with-egg-debug-buffer
       (erase-buffer)
-      (setq default-directory dir)
       (when (and (stringp upstream-or-action) ;; start a rebase
                  (eq old-base t))	      ;; ask for old-base
         (unless (egg-git-ok (current-buffer) "rev-list"
@@ -4852,6 +4891,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (write-region (point-min) (point-max)
                     (concat rebase-dir "onto"))
       (erase-buffer)
+      (insert "\n")
+      (write-region (point-min) (point-max)
+                    (concat rebase-dir "quiet"))
+      (erase-buffer)
+      (insert onto "\n")
+      (write-region (point-min) (point-max)
+                    (concat rebase-dir "stopped-sha"))
+      (erase-buffer)
       (insert "# Rebase " upstream ".." orig-head-sha1 " onto " onto "\n")
       (dolist (rev-info commit-alist)
         (insert (cond ((eq (nth 1 rev-info) ?+) "pick")
@@ -4864,7 +4911,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
                     (concat rebase-dir "git-rebase-todo.backup")))
 
     (setenv "GIT_REFLOG_ACTION" (format "rebase -i (%s)" onto))
-    (with-current-buffer (get-buffer-create "*egg-debug*")
+    (with-egg-debug-buffer
+      (erase-buffer)
       (egg-git-ok nil "update-ref" "ORIG_HEAD" orig-head-sha1)
       (egg-git-ok nil "checkout" onto)
       (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
