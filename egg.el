@@ -3922,10 +3922,12 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg-do-rebase-head (upstream-or-action
                            &optional old-base prompt)
   (let ((pre-merge (egg-get-current-sha1))
+	(dir (egg-work-tree-dir))
         cmd-res modified-files feed-back old-choices)
 ;;;     (with-temp-buffer
     (with-current-buffer (get-buffer-create "*egg-debug*")
       (erase-buffer)
+      (setq default-directory dir)
       (when (and (stringp upstream-or-action) ;; start a rebase
                  (eq old-base t))	      ;; ask for old-base
         (unless (egg-git-ok (current-buffer) "rev-list"
@@ -5640,16 +5642,16 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                     'egg-log-buffer-rebase
                                     :visible '(egg-commit-at-point)
                                     :enable '(egg-log-buffer-get-marked-alist)))
-    (define-key map [unmark] (list 'menu-item "Unmark for interractive Rebase "
+    (define-key map [unmark] (list 'menu-item "Unmark for interactive Rebase "
                                    'egg-log-buffer-unmark
                                    :visible '(egg-commit-at-point)))
-    (define-key map [edit] (list 'menu-item "Mark for Editing in upcoming interractive Rebase "
+    (define-key map [edit] (list 'menu-item "Mark for Editing in upcoming interactive Rebase "
                                  'egg-log-buffer-mark-edit
                                  :visible '(egg-commit-at-point)))
-    (define-key map [squash] (list 'menu-item "Mark to be Squashed in upcoming interractive Rebase "
+    (define-key map [squash] (list 'menu-item "Mark to be Squashed in upcoming interactive Rebase "
                                    'egg-log-buffer-mark-squash
                                    :visible '(egg-commit-at-point)))
-    (define-key map [pick] (list 'menu-item "Mark to be Picked in upcoming interractive Rebase "
+    (define-key map [pick] (list 'menu-item "Mark to be Picked in upcoming interactive Rebase "
                                  'egg-log-buffer-mark-pick
                                  :visible '(egg-commit-at-point)))
     (define-key map [base] (list 'menu-item "Mark as Base Commit "
