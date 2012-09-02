@@ -3630,7 +3630,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg--do-git (stdin cmd args)
   (egg--do stdin "git" (cons cmd args)))
 
-(defun egg--do-handle-exit (exit-info regexp &optional line-no accepted-codes buffer-to-update)
+(defun egg--do-handle-exit (exit-info regexp &optional line-no accepted-codes
+				      buffer-to-update post-proc-func)
   (let ((ret (car exit-info))
 	(buf (cadr exit-info))
 	(pos (cddr exit-info))
@@ -3638,7 +3639,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(ok-list (cond ((numberp accepted-codes) (list accepted-codes))
 		       ((consp accepted-codes) accepted-codes)
 		       (t (list 0))))
-	output beg end lines line matched-line)
+	output beg end lines line matched-line pp-results)
     (with-current-buffer buf
       (save-excursion
 	(goto-char pos)
@@ -3661,32 +3662,47 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		      (goto-char (match-beginning 0))
 		      (buffer-substring-no-properties 
 		       (line-beginning-position)
-		       (line-end-position)))))))))
+		       (line-end-position))))))
+
+	  (when (functionp post-proc-func)
+	    (save-restriction
+	      (narrow-to-region beg end)
+	      (goto-char (point-min))
+	      (setq pp-results (funcall post-proc-func ret)))))))
 
     (egg-cmd-log (format "RET:%d" ret))
-    (if (member ret ok-list)
-	(progn 
-	  (if (bufferp buffer-to-update)
-	    (with-current-buffer buffer-to-update
-	      (funcall egg-buffer-refresh-func buffer-to-update))
-	    (egg-run-buffers-update-hook))
-	  (list t (or line matched-line) output))
-      (list nil (or matched-line line) output))))
+    (nconc (if (member ret ok-list)
+	       (progn 
+		 (cond ((bufferp buffer-to-update)
+			(with-current-buffer buffer-to-update
+			  (funcall egg-buffer-refresh-func buffer-to-update)))
+		       ((memq buffer-to-update '(t all))
+			(egg-run-buffers-update-hook))
+		       (t nil))
+		 (list :result t :line (or line matched-line) :output output))
+	     (list :result nil :line (or matched-line line) :output output))
+	   pp-results)))
 
 (defun egg--do-show-output (cmd-name output-info)
-  (let ((ok (car output-info))
-	(line (nth 1 output-info))
-	(output (nth 2 output-info))
+  (let ((ok (plist-get output-info :result))
+	(line (or (plist-get output-info :feed-back)
+		  (plist-get output-info :line)))
 	prefix)
     (setq prefix (concat (if (stringp cmd-name) cmd-name "GIT")
 			 (if ok "> " ":ERROR> ")))
     (message (concat prefix line))
-    (unless ok (ding))))
+    (unless ok (ding))
+    output-info))
 
 (defun egg--do-git-cmd (cmd codes regexp line-no buffer-to-update args)
   (egg--do-show-output (concat "GIT-" (upcase cmd))
    (egg--do-handle-exit (egg--do-git nil cmd args) regexp line-no
 			codes buffer-to-update)))
+
+(defun egg--do-git-cmd-pp (cmd codes regexp line-no buffer-to-update pp-func args)
+  (egg--do-show-output (concat "GIT-" (upcase cmd))
+   (egg--do-handle-exit (egg--do-git nil cmd args) regexp line-no
+			codes buffer-to-update pp-func)))
 
 (defun egg--git-push-cmd (buffer-to-update &rest args)
   (egg--do-git-cmd "push" nil "\\( -> \\|\\<not\\>\\)" -1 buffer-to-update args))
@@ -3694,6 +3710,65 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg--git-push-cmd-test (from to repo)
   (interactive "sPush: \nsOnTo: \nsAt:")
   (egg--git-push-cmd nil repo (concat from ":" to)))
+
+(defun egg--git-pp-change-stat (&optional ret-code)
+  (save-match-data
+    (let (num-changed files)
+      (goto-char (point-min))
+      (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
+	(setq num-changed (string-to-number (match-string-no-properties 1)))
+	(goto-char (point-min))
+	(while (re-search-forward "^ \\(\\S-+\\) +|.+$" nil t)
+	  (setq files (cons (match-string-no-properties 1) files)))
+	(unless (= (length files) num-changed)
+	  (error "num changed files mismatched! %d vs %d" (length files) num-changed)))
+      (when files 
+	(list :files files)))))
+
+(defun egg--git-pp-merge-next-action (&optional ret-code)
+  (save-match-data
+    (goto-char (point-min))
+    (when (re-search-forward 
+	   (concat
+	    ;; 1- squash or no commit
+	    "\\(stopped before committing as requested\\)\\|"
+	    ;; 2- conflict
+	    "\\(fix conflicts and then commit the result\\)")
+	   nil t)
+      (cond ((match-beginning 1)
+	     (list :next-action 'commit))
+	    ((match-beginning 2)
+	     (list :next-action 'status))
+	    (t nil)))))
+
+(defun egg--git-pp-merge-line (ret-code)
+  ;; if ret code wasn't 0, then :line is already correct
+  (when (= ret-code 0)
+    (save-match-data
+      (goto-char (point-min))
+      (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
+	(list :feed-back (buffer-substring-no-properties
+			  (line-beginning-position)
+			  (line-end-position)))))))
+
+(defun egg--git-merge-cmd (buffer-to-update &rest args)
+  (egg--do-git-cmd-pp "merge"
+		      '(0 1) ;; 0- ok, 1- conflict, 128- failed
+		      "\\<\\(not\\|cannot\\|failed\\)\\>"
+		      -1
+		      buffer-to-update
+		      (lambda (ret-code)
+			(nconc (egg--git-pp-merge-next-action ret-code)
+			       (egg--git-pp-change-stat ret-code)
+			       (egg--git-pp-merge-line ret-code)))
+		      args))
+
+(defun egg--git-merge-cmd-test (ff-only from)
+  (interactive "P\nsMerge: ")
+  (if ff-only
+      (egg--git-merge-cmd t "-v" "--ff-only" from)
+    (egg--git-merge-cmd t "-v" from)))
+
 
 (defun egg-show-git-output (output line-no &optional prefix)
   (unless (stringp prefix) (setq prefix "GIT"))
@@ -3945,6 +4020,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (let ((msg (or msg (concat "merging in " rev)))
         (pre-merge (egg-get-current-sha1))
         merge-cmd-res modified-files res feed-back)
+    (egg--git-merge-cmd 'all )
     (with-temp-buffer
       (setq merge-cmd-res (egg-git-ok (current-buffer)
                                       "merge" "--log" merge-mode-flag "-m" msg rev))
@@ -5040,12 +5116,12 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (unless (plist-get res :success)
       (egg-status))))
 
-(defun egg-log-buffer-do-local-push (src dst &optional non-ff)
-  (when (egg-show-git-output
-	 (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
-		     (concat src ":" dst))
-	 -1 "GIT-PUSH")
-    (funcall egg-buffer-refresh-func (current-buffer))))
+;; (defun egg-log-buffer-do-local-push (src dst &optional non-ff)
+;;   (when (egg-show-git-output
+;; 	 (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
+;; 		     (concat src ":" dst))
+;; 	 -1 "GIT-PUSH")
+;;     (funcall egg-buffer-refresh-func (current-buffer))))
 
 (defun egg-log-buffer-ff-pull (pos &optional non-ff)
   (interactive "d\nP")
@@ -5331,8 +5407,9 @@ would be a pull (by default --ff-only)."
     (if (y-or-n-p (format "push %s on %s%s? " src dst 
 			  (if non-ff " (allowed non-ff move)" "")))
 	(if (string-equal dst "HEAD")
-	    (egg-log-buffer-do-ff-pull src non-ff)
-	  (egg-log-buffer-do-local-push src dst non-ff))
+	    (egg--git-merge-cmd (current-buffer) src non-ff)
+	  (egg--git-push-cmd (current-buffer) (if non-ff "-v" "-vf")
+			     "." (concat src ":" dst)))
       (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-head-to-local (pos &optional non-ff)
@@ -5341,11 +5418,9 @@ would be a pull (by default --ff-only)."
     (unless dst
       (error "Nothing here to push to!"))
     (if (y-or-n-p (format "update %s with HEAD? " dst))
-        (when (egg-show-git-output
-               (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
-                           (concat "HEAD:" dst))
-               -1 "GIT-PUSH")
-          (funcall egg-buffer-refresh-func (current-buffer))))))
+	(egg--git-push-cmd (current-buffer) (if non-ff "-v" "-vf")
+			   "." (concat "HEAD:" dst))
+      (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
   (interactive "d\nP")
