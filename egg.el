@@ -4039,26 +4039,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (if (member reset-flag '("--keep" "--hard" "--merge"))
 	(egg-revert-all-visited-files))))
 
-;; (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
-;;   (let ((msg (or msg (concat "merging in " rev)))
-;;         (pre-merge (egg-get-current-sha1))
-;;         merge-cmd-res modified-files res feed-back)
-;;     (egg--git-merge-cmd 'all )
-;;     (with-temp-buffer
-;;       (setq merge-cmd-res (egg-git-ok (current-buffer)
-;;                                       "merge" "--log" merge-mode-flag "-m" msg rev))
-;;       (goto-char (point-min))
-;;       (setq modified-files
-;;             (egg-git-to-lines "diff" "--name-only" pre-merge))
-;;       (setq feed-back
-;;             (save-match-data
-;;               (car (nreverse (split-string (buffer-string)
-;;                                            "[\n]+" t)))))
-;;       (egg-run-buffers-update-hook)
-;;       (list :success merge-cmd-res
-;;             :files modified-files
-;;             :message feed-back))))
-
 (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
   (let ((msg (or msg (concat "merging in " rev)))
 	(merge-mode-flag (or merge-mode-flag "-v"))
@@ -5160,13 +5140,21 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		  t))
       (egg-do-merge-to-head rev (nth 3 option)))))
 
-(defun egg-log-buffer-ff-pull (pos &optional non-ff)
-  (interactive "d\nP")
+(defun egg-log-buffer-ff-pull (pos)
+  (interactive "d")
   (unless (egg-repo-clean)
     (egg-status)
     (error "Repo is not clean!"))
   (egg-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
-			(unless non-ff "--ff-only") t))
+			"--ff-only" t))
+
+(defun egg-log-buffer-merge-n-squash (pos)
+  (interactive "d")
+  (unless (egg-repo-clean)
+    (egg-status)
+    (error "Repo is not clean!"))
+  (egg-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
+			"--squash" t))
 
 (defun egg-log-buffer-rebase (pos &optional move)
   (interactive "d\nP")
@@ -5432,7 +5420,7 @@ would be a pull (by default --ff-only)."
     (if (y-or-n-p (format "push %s on %s%s? " src dst 
 			  (if non-ff " (allowed non-ff move)" "")))
 	(if (string-equal dst "HEAD")
-	    (egg--git-merge-cmd (current-buffer) src non-ff)
+	    (egg-do-merge-to-head src (if non-ff "--commit" "--ff-only") t)
 	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
 			     "." (concat src ":" dst)))
       (message "local push cancelled!"))))
