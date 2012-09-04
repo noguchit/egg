@@ -3699,6 +3699,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (stringp matched-line)
       (list :line matched-line))))
 
+(defconst egg--git-pp-reset-regex-list
+  '("Entry.+not uptodate" "^fatal" "^M\t\\(\\S-+\\)" "^HEAD is now at"))
+
 (defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex &optional line-no)
   (if (memq ret-code accepted-codes)
       (nconc (list :success t )
@@ -3722,6 +3725,27 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg--git-push-cmd-test (from to repo)
   (interactive "sPush: \nsOnTo: \nsAt:")
   (egg--git-push-cmd nil repo (concat from ":" to)))
+
+(defun egg--git-reset-cmd (buffer-to-update reset-mode rev)
+  (let ((pre-reset (egg-get-current-sha1)))
+    (egg--do-git-action
+     "reset" buffer-to-update
+     `(lambda (ret-code)
+	(if (= ret-code 0)
+	    (nconc (list :success t)
+		   (cond ((string-equal "--hard" reset-mode)
+			  (nconc (list :files (egg-git-to-lines "diff" "--name-only" ,pre-reset)
+				       :next-action 'log)
+				 (egg--git-pp-grab-line-matching "^HEAD is now at")))
+			 ((string-equal "--keep" reset-mode)
+			  (nconc (list :files (egg-git-to-lines "diff" "--name-only" ,pre-reset)
+				       :next-action 'status)))
+			 ((string-equal "--keep" reset-mode)
+			  (nconc (list :files (egg-git-to-lines "diff" "--name-only" ,pre-reset)
+				       :next-action 'log)
+				 (egg--git-pp-grab-line-matching "^HEAD is now at")))))
+	  (nconc (list :success nil))))
+     reset-mode rev)))
 
 (defun egg--git-pp-change-stat (&optional ret-code)
   (save-match-data
@@ -4975,13 +4999,17 @@ If INIT was not nil, then perform 1st-time initializations as well."
 
       (write-region (point-min) (point-min)
                     (concat rebase-dir "interactive"))
+      (write-region (point-min) (point-min)
+                    (concat rebase-dir "verbose"))
       (insert (plist-get repo-state :head) "\n")
       (write-region (point-min) (point-max)
                     (concat rebase-dir "head-name"))
       (erase-buffer)
       (insert (plist-get repo-state :sha1) "\n")
-      (write-region (point-min) (point-max)
+      (write-region (point-min) (point-max) ;; no longer needed
                     (concat rebase-dir "head"))
+      (write-region (point-min) (point-max)
+                    (concat rebase-dir "orig-head"))
       (erase-buffer)
       (insert upstream "\n")
       (write-region (point-min) (point-max)
