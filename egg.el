@@ -3708,6 +3708,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	   (or (egg--git-pp-grab-line-matching bad-regex)
 	       (egg--git-pp-grab-line-no (or line-no -1))))))
 
+(defsubst egg--git-failed-to-parse-output (cmd)
+  (error "Don't know now to parse %s's ouput:[%s]" cmd (buffer-string)))
+
 (defun egg--git-push-cmd (buffer-to-update &rest args)
   (egg--do-git-action 
    "push" buffer-to-update
@@ -3734,21 +3737,26 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (when files 
 	(list :files files)))))
 
-(defun egg--git-pp-merge-next-action (&optional ret-code)
+(defun egg--git-pp-merge-next-action (ret-code cmd)
   (save-match-data
     (goto-char (point-min))
-    (when (re-search-forward 
-	   (concat
-	    ;; 1- squash or no commit
-	    "\\(stopped before committing as requested\\)\\|"
-	    ;; 2- conflict
-	    "\\(fix conflicts and then commit the result\\)")
-	   nil t)
-      (cond ((match-beginning 1)
-	     (list :next-action 'commit))
-	    ((match-beginning 2)
-	     (list :next-action 'status))
-	    (t nil)))))
+    (cond ((= ret-code 0)
+	   (if (re-search-forward "stopped before committing as requested" nil t)
+	       ;; --squash or --no-edit
+	       (list :next-action 'commit)
+	     ;; nothing to do for "Already up-to-date" 
+	     nil))
+	  
+	  ((= ret-code 1)
+	   (if (re-search-forward  "fix conflicts and then commit the result" nil t)
+	       ;; conflicts, auto-merge failed
+	       (list :next-action 'status)
+	     ;; unexpected!!!
+	     (egg--git-failed-to-parse-output cmd)))
+	  ((= ret-code 128) ;; "fatal", nothing to do
+	   nil)
+	  ;; unknown return code
+	  (t (egg--git-failed-to-parse-output cmd)))))
 
 (defun egg--git-pp-merge-line (ret-code)
   ;; if ret code wasn't 0, then :line is already correct
@@ -3774,7 +3782,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 		  ((= ret-code 128)
 		   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
 		  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
-	    (egg--git-pp-merge-next-action ret-code)
+	    (egg--git-pp-merge-next-action ret-code "merge")
 	    (egg--git-pp-change-stat ret-code)))
    args))
 
@@ -4031,25 +4039,46 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (if (member reset-flag '("--keep" "--hard" "--merge"))
 	(egg-revert-all-visited-files))))
 
+;; (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
+;;   (let ((msg (or msg (concat "merging in " rev)))
+;;         (pre-merge (egg-get-current-sha1))
+;;         merge-cmd-res modified-files res feed-back)
+;;     (egg--git-merge-cmd 'all )
+;;     (with-temp-buffer
+;;       (setq merge-cmd-res (egg-git-ok (current-buffer)
+;;                                       "merge" "--log" merge-mode-flag "-m" msg rev))
+;;       (goto-char (point-min))
+;;       (setq modified-files
+;;             (egg-git-to-lines "diff" "--name-only" pre-merge))
+;;       (setq feed-back
+;;             (save-match-data
+;;               (car (nreverse (split-string (buffer-string)
+;;                                            "[\n]+" t)))))
+;;       (egg-run-buffers-update-hook)
+;;       (list :success merge-cmd-res
+;;             :files modified-files
+;;             :message feed-back))))
+
 (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
   (let ((msg (or msg (concat "merging in " rev)))
-        (pre-merge (egg-get-current-sha1))
-        merge-cmd-res modified-files res feed-back)
-    (egg--git-merge-cmd 'all )
-    (with-temp-buffer
-      (setq merge-cmd-res (egg-git-ok (current-buffer)
-                                      "merge" "--log" merge-mode-flag "-m" msg rev))
-      (goto-char (point-min))
-      (setq modified-files
-            (egg-git-to-lines "diff" "--name-only" pre-merge))
-      (setq feed-back
-            (save-match-data
-              (car (nreverse (split-string (buffer-string)
-                                           "[\n]+" t)))))
-      (egg-run-buffers-update-hook)
-      (list :success merge-cmd-res
-            :files modified-files
-            :message feed-back))))
+	(merge-mode-flag (or merge-mode-flag "-v"))
+        merge-cmd-ok res modified-files next-action)
+
+    (setq res (if (eq msg t)		;; no msg
+		  (egg--git-merge-cmd 'all merge-mode-flag "--log" rev)
+		(egg--git-merge-cmd 'all merge-mode-flag "--log" "-m" msg rev)))
+    (setq modified-files (plist-get res :files)
+	  next-action (plist-get res :next-action))
+
+    (when (consp modified-files)
+      (egg-revert-visited-files modified-files))
+
+    (when (symbolp next-action)
+      (cond ((eq next-action 'commit)
+	     (call-interactively 'egg-commit-log-edit))
+	    ((eq next-action 'status)
+	     (call-interactively 'egg-status))))
+    res))
 
 (defun egg-do-rebase-head (upstream-or-action
                            &optional old-base prompt)
@@ -5096,53 +5125,48 @@ If INIT was not nil, then perform 1st-time initializations as well."
              (ding)
              (message "Automatic rebase failed!"))))))
 
-(defun egg-log-buffer-merge (pos &optional no-commit)
-  (interactive "d\nP")
+(defun egg-log-buffer-merge (pos &optional level)
+  (interactive "d\np")
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
-        res modified-files buf msg)
+	(merge-options-alist '((?c "(c)ommit" "" "--commit")
+			       (?n "(n)o-commit" " (without merge commit)" "--no-commit")
+			       (?s "(s)quash" " (without merge data)" "--squash")
+			       (?f "(f)f-only" " (fast-forward only)" "--ff-only")))
+        res msg option key)
     (unless (egg-repo-clean)
       (egg-status)
       (error "Repo is not clean!"))
-    (if  (null (y-or-n-p (format "merge %s to HEAD? " rev)))
-        (message "cancel merge from %s to HEAD!" rev)
-      (setq msg (unless no-commit
-		  (read-string "merge commit message: " 
-			       (concat "merging in " rev))))
-      (setq res (egg-do-merge-to-head rev 
-				      (if no-commit "--no-commit" "--commit")
-				      msg))
-      (setq modified-files (plist-get res :files))
-      (if modified-files
-          (egg-revert-visited-files modified-files))
-      (message "GIT-MERGE> %s" (plist-get res :message))
-      (unless (and (plist-get res :success) (null no-commit))
-        (egg-status)))))
 
-(defun egg-log-buffer-do-ff-pull (rev &optional non-ff)
-  (let (res modified-files)
-    (unless (egg-repo-clean)
-      (egg-status)
-      (error "Repo is not clean!"))
-    (setq res (egg-do-merge-to-head rev (unless non-ff "--ff-only")))
-    (setq modified-files (plist-get res :files))
-    (if modified-files
-	(egg-revert-visited-files modified-files))
-    (message "GIT-MERGE> %s" (plist-get res :message))
-    (unless (plist-get res :success)
-      (egg-status))))
+      (setq option
+	    (cond ((> level 15)
+		   (or (assq (setq key
+				   (string-to-char
+				    (read-key-sequence
+				     (format "merge option - %s: "
+					     (mapconcat 'identity 
+							(mapcar 'cadr 
+								merge-options-alist)
+							" ")))))
+			     merge-options-alist)
+		       (error "Invalid choice:%c (must be one of: c,n,s,f)" key)))
+		  ((> level 3) (nth 1 merge-options-alist))
+		  (t (car merge-options-alist))))
 
-;; (defun egg-log-buffer-do-local-push (src dst &optional non-ff)
-;;   (when (egg-show-git-output
-;; 	 (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
-;; 		     (concat src ":" dst))
-;; 	 -1 "GIT-PUSH")
-;;     (funcall egg-buffer-refresh-func (current-buffer))))
+    (if  (null (y-or-n-p (format "merge %s to HEAD%s? " rev (nth 2 option))))
+        (message "cancel merge from %s to HEAD%s!" rev (nth 2 option))
+      (setq msg (if (string= (nth 3 option) "--commit")
+		    (read-string "merge commit message: " 
+				 (concat "merging in " rev))
+		  t))
+      (egg-do-merge-to-head rev (nth 3 option)))))
 
 (defun egg-log-buffer-ff-pull (pos &optional non-ff)
   (interactive "d\nP")
-  (egg-log-buffer-do-ff-pull 
-   (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
-   non-ff))
+  (unless (egg-repo-clean)
+    (egg-status)
+    (error "Repo is not clean!"))
+  (egg-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
+			(unless non-ff "--ff-only") t))
 
 (defun egg-log-buffer-rebase (pos &optional move)
   (interactive "d\nP")
@@ -5388,20 +5412,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
                              (format "refs/heads/%s:refs/remotes/%s/%s"
                                      name remote name))))))
 
-;; (defun egg-log-buffer-push-to-local (pos &optional non-ff)
-;;   (interactive "d\nP")
-;;   (let* ((src (car (get-text-property pos :ref)))
-;;          dst)
-;;     (unless src
-;;       (error "Nothing to push here!"))
-;;     (setq dst (completing-read (format "use %s to update: " src)
-;;                                (egg-local-refs) nil t))
-;;     (when (egg-show-git-output
-;;            (egg-sync-0 "push" "." (if non-ff "-vf" "-v")
-;;                        (concat src ":" dst))
-;;            -1 "GIT-PUSH")
-;;       (funcall egg-buffer-refresh-func (current-buffer)))))
-
 (defun egg-log-buffer-push-to-local (pos &optional level)
   "Push a ref or a commit at POS onto HEAD.
 With C-u, instead of HEAD, prompt for another ref as destination.
@@ -5423,7 +5433,7 @@ would be a pull (by default --ff-only)."
 			  (if non-ff " (allowed non-ff move)" "")))
 	(if (string-equal dst "HEAD")
 	    (egg--git-merge-cmd (current-buffer) src non-ff)
-	  (egg--git-push-cmd (current-buffer) (if non-ff "-v" "-vf")
+	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
 			     "." (concat src ":" dst)))
       (message "local push cancelled!"))))
 
