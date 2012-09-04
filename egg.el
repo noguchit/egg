@@ -3630,16 +3630,11 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defun egg--do-git (stdin cmd args)
   (egg--do stdin "git" (cons cmd args)))
 
-(defun egg--do-handle-exit (exit-info regexp &optional line-no accepted-codes
-				      buffer-to-update post-proc-func)
+(defun egg--do-handle-exit (exit-info post-proc-func &optional buffer-to-update)
   (let ((ret (car exit-info))
 	(buf (cadr exit-info))
 	(pos (cddr exit-info))
-	(line (if (numberp line-no) line-no -1))
-	(ok-list (cond ((numberp accepted-codes) (list accepted-codes))
-		       ((consp accepted-codes) accepted-codes)
-		       (t (list 0))))
-	output beg end lines line matched-line pp-results)
+	beg end pp-results)
     (with-current-buffer buf
       (save-excursion
 	(goto-char pos)
@@ -3647,23 +3642,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(forward-line 1)
 	(setq beg (point))
 	(when (> (- end beg) 0)
-	  (setq output (buffer-substring-no-properties beg end))
-	  (setq lines (delete "" (save-match-data
-				   (split-string output "\n"))))
-
-
-	  (setq line (cond ((< line-no 0) (nth (- -1 line-no) (nreverse lines)))
-			   ((> line-no 0) (nth (1- line-no) lines))
-			   (t nil)))
-	  (setq matched-line
-		(when (stringp regexp)
-		  (save-match-data
-		    (when (re-search-forward regexp end t)
-		      (goto-char (match-beginning 0))
-		      (buffer-substring-no-properties 
-		       (line-beginning-position)
-		       (line-end-position))))))
-
 	  (when (functionp post-proc-func)
 	    (save-restriction
 	      (narrow-to-region beg end)
@@ -3671,22 +3649,17 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	      (setq pp-results (funcall post-proc-func ret)))))))
 
     (egg-cmd-log (format "RET:%d" ret))
-    (nconc (if (member ret ok-list)
-	       (progn 
-		 (cond ((bufferp buffer-to-update)
-			(with-current-buffer buffer-to-update
-			  (funcall egg-buffer-refresh-func buffer-to-update)))
-		       ((memq buffer-to-update '(t all))
-			(egg-run-buffers-update-hook))
-		       (t nil))
-		 (list :result t :line (or line matched-line) :output output))
-	     (list :result nil :line (or matched-line line) :output output))
-	   pp-results)))
+    (cond ((bufferp buffer-to-update)
+	   (with-current-buffer buffer-to-update
+	     (funcall egg-buffer-refresh-func buffer-to-update)))
+	  ((memq buffer-to-update '(t all))
+	   (egg-run-buffers-update-hook))
+	  (t nil))
+    pp-results))
 
 (defun egg--do-show-output (cmd-name output-info)
-  (let ((ok (plist-get output-info :result))
-	(line (or (plist-get output-info :feed-back)
-		  (plist-get output-info :line)))
+  (let ((ok (plist-get output-info :success))
+	(line (plist-get output-info :line))
 	prefix)
     (setq prefix (concat (if (stringp cmd-name) cmd-name "GIT")
 			 (if ok "> " ":ERROR> ")))
@@ -3694,18 +3667,54 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (unless ok (ding))
     output-info))
 
-(defun egg--do-git-cmd (cmd codes regexp line-no buffer-to-update args)
+(defun egg--do-git-action (cmd buffer-to-update post-proc-func args)
   (egg--do-show-output (concat "GIT-" (upcase cmd))
-   (egg--do-handle-exit (egg--do-git nil cmd args) regexp line-no
-			codes buffer-to-update)))
+		       (egg--do-handle-exit (egg--do-git nil cmd args)
+					    post-proc-func buffer-to-update)))
 
-(defun egg--do-git-cmd-pp (cmd codes regexp line-no buffer-to-update pp-func args)
-  (egg--do-show-output (concat "GIT-" (upcase cmd))
-   (egg--do-handle-exit (egg--do-git nil cmd args) regexp line-no
-			codes buffer-to-update pp-func)))
+(defun egg--git-pp-grok-exit-code (ret-code &rest accepted-codes)
+  (let ((codes (or accepted-codes (list 0))))
+    (when (memq ret-code accepted-codes)
+      (list :success t))))
+
+(defun egg--git-pp-grab-line-no (line-no)
+  (let* ((lines (delete "" (save-match-data
+			     (split-string (buffer-string) "\n"))))
+	 (line (cond ((< line-no 0) (nth (- -1 line-no) (nreverse lines)))
+		     ((> line-no 0) (nth (1- line-no) lines))
+		     (t nil))))
+    (when (string line)
+      (list :line line))))
+
+(defun egg--git-pp-grab-line-matching (regex)
+  (let ((matched-line 
+	 (when (stringp regex)
+	   (save-match-data
+	     (goto-char (point-min))
+	     (when (re-search-forward regex nil t)
+	       (goto-char (match-beginning 0))
+	       (buffer-substring-no-properties 
+		(line-beginning-position)
+		(line-end-position)))))))
+    (when (stringp matched-line)
+      (list :line matched-line))))
+
+(defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex &optional line-no)
+  (if (memq ret-code accepted-codes)
+      (nconc (list :success t )
+	     (or (egg--git-pp-grab-line-matching ok-regex)
+		 (egg--git-pp-grab-line-no (or line-no -1))))
+    (nconc (list :success nil )
+	   (or (egg--git-pp-grab-line-matching bad-regex)
+	       (egg--git-pp-grab-line-no (or line-no -1))))))
 
 (defun egg--git-push-cmd (buffer-to-update &rest args)
-  (egg--do-git-cmd "push" nil "\\( -> \\|\\<not\\>\\)" -1 buffer-to-update args))
+  (egg--do-git-action 
+   "push" buffer-to-update
+   (lambda (ret-code)
+     (egg--git-pp-generic ret-code '(0) " -> \\|Everything up-to-date"
+			  "\\<not\\>\\|rejected"))
+   args))
 
 (defun egg--git-push-cmd-test (from to repo)
   (interactive "sPush: \nsOnTo: \nsAt:")
@@ -3752,16 +3761,22 @@ If INIT was not nil, then perform 1st-time initializations as well."
 			  (line-end-position)))))))
 
 (defun egg--git-merge-cmd (buffer-to-update &rest args)
-  (egg--do-git-cmd-pp "merge"
-		      '(0 1) ;; 0- ok, 1- conflict, 128- failed
-		      "\\<\\(not\\|cannot\\|failed\\)\\>"
-		      -1
-		      buffer-to-update
-		      (lambda (ret-code)
-			(nconc (egg--git-pp-merge-next-action ret-code)
-			       (egg--git-pp-change-stat ret-code)
-			       (egg--git-pp-merge-line ret-code)))
-		      args))
+  (egg--do-git-action 
+   "merge" buffer-to-update
+   (lambda (ret-code)
+     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
+	    (cond ((= ret-code 0)
+		   (or (egg--git-pp-grab-line-matching
+			"merge went well\\|Already up-to-date\\|as requested\\|files? changed\\|insertions\\|deletions")
+		       (egg--git-pp-grab-line-no -1)))
+		  ((= ret-code 1)
+		   (egg--git-pp-grab-line-matching "fix conflicts and then commit"))
+		  ((= ret-code 128)
+		   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
+		  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
+	    (egg--git-pp-merge-next-action ret-code)
+	    (egg--git-pp-change-stat ret-code)))
+   args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
   (interactive "P\nsMerge: ")
