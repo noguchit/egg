@@ -3549,7 +3549,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (goto-char (point-max))
     (cons (current-buffer)
           (prog1 (point)
-	    (insert-buffer-string buffer)
+	    (insert-buffer-substring buffer)
 	    (goto-char (point-max))))))
 
 (defun egg-sync-handle-exit-code (ret accepted-codes logger)
@@ -3687,13 +3687,16 @@ See also `with-temp-file' and `with-output-to-string'."
       (list :success (= ret 0))		;; default result
       )))
 
+(defvar egg--do-git-quiet nil)		;; don't show git's output
+
 (defun egg--do-show-output (cmd-name output-info)
   (let ((ok (plist-get output-info :success))
 	(line (plist-get output-info :line))
 	prefix)
     (setq prefix (concat (if (stringp cmd-name) cmd-name "GIT")
 			 (if ok "> " ":ERROR> ")))
-    (message (concat prefix (if (stringp line) line "*no output*")))
+    (when (and (not egg--do-git-quiet) ok)
+      (message (concat prefix (if (stringp line) line "*no output*"))))
     (unless ok (ding))
     output-info))
 
@@ -3862,6 +3865,41 @@ See also `with-temp-file' and `with-output-to-string'."
       (egg--git-merge-cmd t "-v" "--ff-only" from)
     (egg--git-merge-cmd t "-v" from)))
 
+(defun egg--git-add-cmd (buffer-to-update &rest args)
+  (egg--do-git-action
+   "add" buffer-to-update
+   (lambda (ret-code)
+     (if (= ret-code 0)
+	 (nconc (list :success t)
+		(egg--git-pp-grab-line-matching "nothing added")
+		(let (files)
+		  (goto-char (point-min))
+		  (while (re-search-forward "^add '\\(.+\\)'$" nil t)
+		    (add-to-list 'files (match-string-no-properties 1)))
+		  (when (consp files)
+		    (list :files files))))
+       (or (egg--git-pp-grab-line-matching 
+	    "Could not\\|did not match\\|Aborted\\|ignored by\\|failed\\|incompatible\\|corrupt\\|Unable\\|is beyond")
+	   (egg--git-pp-grab-line-no -1))))
+   args))
+
+(defun egg--git-rm-cmd (buffer-to-update &rest args)
+  (egg--do-git-action
+   "rm" buffer-to-update
+   (lambda (ret-code)
+     (if (= ret-code 0)
+	 (nconc (list :success t)
+		(let (files)
+		  (goto-char (point-min))
+		  (while (re-search-forward "^rm '\\(.+\\)'$" nil t)
+		    (add-to-list 'files (match-string-no-properties 1)))
+		  (when (consp files)
+		    (list :files files))))
+       (or (egg--git-pp-grab-line-matching 
+	    "\\<\\(corrupt\\|did not match\\|not removing\\|[Uu]nable to\\)\\>")
+	   (egg--git-pp-grab-line-no -1))))
+   args))
+
 
 (defun egg-show-git-output (output line-no &optional prefix)
   (unless (stringp prefix) (setq prefix "GIT"))
@@ -4003,14 +4041,15 @@ See also `with-temp-file' and `with-output-to-string'."
 
 (defun egg-stage-all-files ()
   (interactive)
-  (let ((default-directory (egg-work-tree-dir)))
-    (when (egg-sync-0 "add" "-u")
+  (let ((default-directory (egg-work-tree-dir))
+	(egg--do-git-quiet t))
+    (when (egg--git-add-cmd t "-v" "-u")
       (message "staged all tracked files's modifications"))))
 
 (defun egg-unstage-all-files ()
   (interactive)
   (let ((default-directory (egg-work-tree-dir)))
-    (when (egg-sync-0 "reset" "HEAD")
+    (when (egg-status-buffer-do-move-head "--mixed" "HEAD")
       (message "unstaged all modfications in INDEX"))))
 
 (defun egg-revert-to-index (really-do-it)
@@ -4037,8 +4076,9 @@ See also `with-temp-file' and `with-output-to-string'."
 
 (defun egg-stage-untracked-files ()
   (interactive)
-  (let ((default-directory (egg-work-tree-dir)))
-    (when (egg-sync-0 "add" ".")
+  (let ((default-directory (egg-work-tree-dir))
+	(egg--do-git-quiet t))
+    (when (egg--git-add-cmd t "-v" ".")
       (message "staged all untracked files"))))
 
 (defun egg-do-stash-wip (msg)
@@ -4103,19 +4143,25 @@ See also `with-temp-file' and `with-output-to-string'."
       (egg-status nil :sentinel))
     output))
 
-(defun egg-log-buffer-do-move-head (reset-mode rev)
+(defun egg-do-move-head (reset-mode rev &optional take-next-action next-action-ignore)
   (let (files res next-action)
     (setq res (egg--git-reset-cmd t reset-mode rev))
     (setq files (plist-get res :files))
     (setq next-action (plist-get res :next-action))
     (when files (egg-revert-visited-files files))
-    (when next-action
-      (call-interactively (cond ((eq next-action 'status)
-				 'egg-status)
-				((eq next-action 'log)
-				 'egg-buffer-cmd-refresh))))
+    (when (and next-action take-next-action)
+      (unless (eq next-action next-action-ignore)
+	(cond ((eq next-action 'status)
+	       (call-interactively 'egg-status))
+	      ((eq next-action 'log)
+	       (call-interactively 'egg-log)))))
     (plist-get res :success)))
 
+(defsubst egg-log-buffer-do-move-head (reset-mode rev &optional interactively-used)
+  (egg-do-move-head reset-mode rev interactively-used 'log))
+
+(defsubst egg-status-buffer-do-move-head (reset-mode rev &optional interactively-used)
+  (egg-do-move-head reset-mode rev interactively-used 'status))
 
 (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
   (let ((msg (or msg (concat "merging in " rev)))
@@ -5342,7 +5388,7 @@ See also `with-temp-file' and `with-output-to-string'."
 	(setq reset-mode (cdr (assq mode-key key-mode-alist)))
 	(unless (stringp reset-mode)
 	  (error "Invalid choice: %c (must be of of s,h,x,k,m)" mode-key)))
-      (egg-log-buffer-do-move-head reset-mode rev))))
+      (egg-log-buffer-do-move-head reset-mode rev (invoked-interactively-p)))))
 
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
@@ -5504,7 +5550,7 @@ would be a pull (by default --ff-only)."
 	(if (string-equal dst "HEAD")
 	    (if non-ff
 		(if (egg-repo-clean)
-		    (egg-log-buffer-do-move-head "--hard" src)
+		    (egg-log-buffer-do-move-head "--hard" src (invoked-interactively-p))
 		  (error "Can't push on dirty repo"))
 	      (egg-do-merge-to-head src "--ff-only" t))
 	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
