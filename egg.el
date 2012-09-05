@@ -483,14 +483,13 @@ desirable way to invoke GIT."
 ;;;========================================================
 
 (defmacro with-egg-debug-buffer (&rest body)
-  "Create a temporary buffer, and evaluate BODY there like `progn'.
+  "Evaluate BODY there like `progn' in the egg's debug buffer.
 See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))
   (let ((egg-debug-buffer (make-symbol "egg-debug-buffer"))
 	(egg-debug-dir (make-symbol "egg-debug-dir")))
     `(let ((,egg-debug-dir (egg-work-tree-dir))
 	   (,egg-debug-buffer (get-buffer-create (concat "*egg-debug:" (egg-git-dir) "*"))))
-       ;; FIXME: kill-buffer can change current-buffer in some odd cases.
        (with-current-buffer ,egg-debug-buffer
 	 (setq default-directory ,egg-debug-dir)
          (unwind-protect
@@ -498,7 +497,7 @@ See also `with-temp-file' and `with-output-to-string'."
            )))))
 
 (defmacro with-egg-async-buffer (&rest body)
-  "Create a temporary buffer, and evaluate BODY there like `progn'.
+  "Evaluate BODY there like `progn' in the egg's async buffer.
 See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))
   (let ((egg-async-buffer (make-symbol "egg-async-buffer"))
@@ -3537,12 +3536,21 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (setq default-directory dir)
         (get-buffer-create (concat " *egg-cmd-logs@" git-dir "*")))))
 
-(defsubst egg-cmd-log (&rest strings)
+(defun egg-cmd-log (&rest strings)
   (with-current-buffer (egg-cmd-log-buffer)
     (goto-char (point-max))
     (cons (current-buffer)
           (prog1 (point)
-            (apply 'insert "LOG/" strings)))))
+            (apply 'insert-before-markers "LOG/" strings)
+	    (goto-char (point-max))))))
+
+(defun egg-cmd-log-whole-buffer (buffer)
+  (with-current-buffer (egg-cmd-log-buffer)
+    (goto-char (point-max))
+    (cons (current-buffer)
+          (prog1 (point)
+	    (insert-buffer-string buffer)
+	    (goto-char (point-max))))))
 
 (defun egg-sync-handle-exit-code (ret accepted-codes logger)
   (let (output)
@@ -3608,54 +3616,76 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (setq output (egg-sync-do program stdin accepted-codes args))
       (cons file output))))
 
+(defsubst egg--do-output (&optional erase)
+  (let ((buffer (get-buffer-create (concat " *egg-output:" (egg-git-dir) "*"))))
+    (with-current-buffer buffer
+      (widen)
+      (if erase (erase-buffer)))
+    buffer))
+
+(defmacro with-egg--do-buffer (&rest body)
+  "Evaluate BODY there like `progn' in the egg--do-output buffer.
+See also `with-temp-file' and `with-output-to-string'."
+  (declare (indent 0) (debug t))  
+  `(with-current-buffer (egg--do-output)
+     (setq default-directory (egg-work-tree-dir))
+     (unwind-protect
+	 (progn ,@body)
+       )))
+
+(defmacro with-clean-egg--do-buffer (&rest body)
+  "Evaluate BODY there like `progn' in the egg--do-output buffer.
+See also `with-temp-file' and `with-output-to-string'."
+  (declare (indent 0) (debug t))  
+  `(with-current-buffer (egg--do-output t)
+     (setq default-directory (egg-work-tree-dir))
+     (unwind-protect
+	 (progn ,@body)
+       )))
+
 (defun egg--do (stdin program args)
-  (let (logger ret output-buf)
-    (setq logger (egg-cmd-log "RUN:" program " "
-                              (mapconcat 'identity args " ")
-                              (if stdin " <REGION\n" "\n")))
-    (setq output-buf (car logger))
-    (setq ret
-          (cond ((stringp stdin)
-                 (with-temp-buffer
-                   (insert stdin)
-                   (apply 'call-process-region (point-min) (point-max)
-                          program nil output-buf nil args)))
-                ((consp stdin)
-                 (apply 'call-process-region (car stdin) (cdr stdin)
-                        program nil output-buf nil args))
-                ((null stdin)
-                 (apply 'call-process program nil output-buf nil args))))
-    (cons ret logger)))
+  (let (ret)
+    (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
+		 (if stdin " <REGION\n" "\n"))
+    (with-clean-egg--do-buffer
+     (setq ret (cond ((stringp stdin)
+		      (with-temp-buffer
+			(insert stdin)
+			(apply 'call-process-region (point-min) (point-max)
+			       program nil t nil args)))
+		     ((consp stdin)
+		      (apply 'call-process-region (car stdin) (cdr stdin)
+			     program nil t nil args))
+		     ((null stdin)
+		      (apply 'call-process program nil t nil args))))
+     (egg-cmd-log-whole-buffer (current-buffer))
+     (egg-cmd-log (format "RET:%d\n" ret))
+     (cons ret (current-buffer)))))
 
 (defun egg--do-git (stdin cmd args)
   (egg--do stdin "git" (cons cmd args)))
 
 (defun egg--do-handle-exit (exit-info post-proc-func &optional buffer-to-update)
   (let ((ret (car exit-info))
-	(buf (cadr exit-info))
-	(pos (cddr exit-info))
+	(buf (cdr exit-info))
 	beg end pp-results)
     (with-current-buffer buf
-      (save-excursion
-	(goto-char pos)
-	(setq end (point-max))
-	(forward-line 1)
-	(setq beg (point))
-	(when (> (- end beg) 0)
-	  (when (functionp post-proc-func)
-	    (save-restriction
-	      (narrow-to-region beg end)
-	      (goto-char (point-min))
-	      (setq pp-results (funcall post-proc-func ret)))))))
-
-    (egg-cmd-log (format "RET:%d" ret))
+      (setq beg (point-min))
+      (setq end (point-max))
+      (when (> (- end beg) 0)
+	(when (functionp post-proc-func)
+	  (goto-char (point-min))
+	  (setq pp-results (funcall post-proc-func ret)))))
     (cond ((bufferp buffer-to-update)
 	   (with-current-buffer buffer-to-update
 	     (funcall egg-buffer-refresh-func buffer-to-update)))
 	  ((memq buffer-to-update '(t all))
 	   (egg-run-buffers-update-hook))
 	  (t nil))
-    pp-results))
+    (if (memq :success pp-results)
+	pp-results
+      (list :success (= ret 0))		;; default result
+      )))
 
 (defun egg--do-show-output (cmd-name output-info)
   (let ((ok (plist-get output-info :success))
@@ -3663,7 +3693,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	prefix)
     (setq prefix (concat (if (stringp cmd-name) cmd-name "GIT")
 			 (if ok "> " ":ERROR> ")))
-    (message (concat prefix line))
+    (message (concat prefix (if (stringp line) line "*no output*")))
     (unless ok (ding))
     output-info))
 
@@ -3699,8 +3729,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (when (stringp matched-line)
       (list :line matched-line))))
 
-(defconst egg--git-pp-reset-regex-list
-  '("Entry.+not uptodate" "^fatal" "^M\t\\(\\S-+\\)" "^HEAD is now at"))
 
 (defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex &optional line-no)
   (if (memq ret-code accepted-codes)
@@ -3726,26 +3754,44 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (interactive "sPush: \nsOnTo: \nsAt:")
   (egg--git-push-cmd nil repo (concat from ":" to)))
 
+(defun egg--git-pp-reset-output (ret-code reset-mode orig-rev)
+  (if (= ret-code 0)
+      (nconc (list :success t)
+	     (cond ((string-equal "--hard" reset-mode)
+		    (nconc (list :files (egg-git-to-lines "diff" "--name-only"
+							  orig-rev)
+				 :next-action 'log)
+			   (egg--git-pp-grab-line-matching "^HEAD is now at")))
+		   ((string-equal "--keep" reset-mode)
+		    (nconc (list :files (egg-git-to-lines "diff" "--name-only"
+							  orig-rev)
+				 :next-action 'status)
+			   (egg--git-pp-grab-line-no -1)))
+		   ((string-equal "--soft" reset-mode)
+		    (nconc (list :next-action 'status)
+			   (egg--git-pp-grab-line-no -1)))
+		   ((string-equal "--mixed" reset-mode)
+		    (nconc (list :files (egg-git-to-lines "diff" "--name-only")
+				 :next-action 'status)
+			   (if (egg--git-pp-grab-line-matching "Unstaged changes after reset")
+			       (list :line "there are unstaged changes after reset"))))))
+    (nconc (list :success nil)
+	   (or (egg--git-pp-grab-line-matching "Entry.+not uptodate")
+	       (egg--git-pp-grab-line-matching "Cannot\\|Could not\\|Failed to\\|not allowed\\|incompatible")
+	       (egg--git-pp-grab-line-matching "^fatal")
+	       (egg--git-pp-grab-line-no -1)))))
+
 (defun egg--git-reset-cmd (buffer-to-update reset-mode rev)
   (let ((pre-reset (egg-get-current-sha1)))
     (egg--do-git-action
      "reset" buffer-to-update
      `(lambda (ret-code)
-	(if (= ret-code 0)
-	    (nconc (list :success t)
-		   (cond ((string-equal "--hard" reset-mode)
-			  (nconc (list :files (egg-git-to-lines "diff" "--name-only" ,pre-reset)
-				       :next-action 'log)
-				 (egg--git-pp-grab-line-matching "^HEAD is now at")))
-			 ((string-equal "--keep" reset-mode)
-			  (nconc (list :files (egg-git-to-lines "diff" "--name-only" ,pre-reset)
-				       :next-action 'status)))
-			 ((string-equal "--keep" reset-mode)
-			  (nconc (list :files (egg-git-to-lines "diff" "--name-only" ,pre-reset)
-				       :next-action 'log)
-				 (egg--git-pp-grab-line-matching "^HEAD is now at")))))
-	  (nconc (list :success nil))))
-     reset-mode rev)))
+	(egg--git-pp-reset-output ret-code reset-mode pre-reset))
+     (list reset-mode rev))))
+
+(defun egg--git-reset-cmd-test (mode rev)
+  (interactive "sreset mode:\nsrev:")
+  (egg--git-reset-cmd t mode rev))
 
 (defun egg--git-pp-change-stat (&optional ret-code)
   (save-match-data
@@ -4057,11 +4103,19 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (egg-status nil :sentinel))
     output))
 
-(defun egg-do-move-head (rev reset-flag)
-  (when (egg-show-git-output (egg-sync-0 "reset" reset-flag rev)
-			     -1 "GIT-RESET")
-    (if (member reset-flag '("--keep" "--hard" "--merge"))
-	(egg-revert-all-visited-files))))
+(defun egg-log-buffer-do-move-head (reset-mode rev)
+  (let (files res next-action)
+    (setq res (egg--git-reset-cmd t reset-mode rev))
+    (setq files (plist-get res :files))
+    (setq next-action (plist-get res :next-action))
+    (when files (egg-revert-visited-files files))
+    (when next-action
+      (call-interactively (cond ((eq next-action 'status)
+				 'egg-status)
+				((eq next-action 'log)
+				 'egg-buffer-cmd-refresh))))
+    (plist-get res :success)))
+
 
 (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
   (let ((msg (or msg (concat "merging in " rev)))
@@ -5145,20 +5199,20 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (egg-status)
       (error "Repo is not clean!"))
 
-      (setq option
-	    (cond ((> level 15)
-		   (or (assq (setq key
-				   (string-to-char
-				    (read-key-sequence
-				     (format "merge option - %s: "
-					     (mapconcat 'identity 
-							(mapcar 'cadr 
-								merge-options-alist)
-							" ")))))
-			     merge-options-alist)
-		       (error "Invalid choice:%c (must be one of: c,n,s,f)" key)))
-		  ((> level 3) (nth 1 merge-options-alist))
-		  (t (car merge-options-alist))))
+    (setq option
+	  (cond ((> level 15)
+		 (or (assq (setq key
+				 (string-to-char
+				  (read-key-sequence
+				   (format "merge option - %s: "
+					   (mapconcat 'identity 
+						      (mapcar 'cadr 
+							      merge-options-alist)
+						      " ")))))
+			   merge-options-alist)
+		     (error "Invalid choice:%c (must be one of: c,n,s,f)" key)))
+		((> level 3) (nth 1 merge-options-alist))
+		(t (car merge-options-alist))))
 
     (if  (null (y-or-n-p (format "merge %s to HEAD%s? " rev (nth 2 option))))
         (message "cancel merge from %s to HEAD%s!" rev (nth 2 option))
@@ -5288,7 +5342,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 	(setq reset-mode (cdr (assq mode-key key-mode-alist)))
 	(unless (stringp reset-mode)
 	  (error "Invalid choice: %c (must be of of s,h,x,k,m)" mode-key)))
-      (egg-do-move-head (if branch commit rev) reset-mode))))
+      (egg-log-buffer-do-move-head reset-mode rev))))
 
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
@@ -5448,7 +5502,11 @@ would be a pull (by default --ff-only)."
     (if (y-or-n-p (format "push %s on %s%s? " src dst 
 			  (if non-ff " (allowed non-ff move)" "")))
 	(if (string-equal dst "HEAD")
-	    (egg-do-merge-to-head src (if non-ff "--commit" "--ff-only") t)
+	    (if non-ff
+		(if (egg-repo-clean)
+		    (egg-log-buffer-do-move-head "--hard" src)
+		  (error "Can't push on dirty repo"))
+	      (egg-do-merge-to-head src "--ff-only" t))
 	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
 			     "." (concat src ":" dst)))
       (message "local push cancelled!"))))
@@ -5694,8 +5752,8 @@ Each line representing a commit has extra keybindings:\\<egg-log-commit-map>
 \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
 the index to the current commit if it's safe to do so (the underlying git command is `reset --keep'.)
 C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
-the index to the current commit, the work dir will also be updated (the underlying
-git command is `reset --hard').
+the index to the current commit, the work dir will also be updated, uncommitted changes
+will be lost (the underlying git command is `reset --hard').
 C-u C-u \\[egg-log-buffer-attach-head] will let the user specify a mode to run git-reset.
 \\[egg-log-buffer-merge] will merge the current commit into HEAD.
 C-u \\[egg-log-buffer-merge] will merge the current commit into HEAD but will not
@@ -5750,14 +5808,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defun egg-references-at-point ()
   (get-text-property (point) :references))
 
-(defun egg-log-commit-line-menu-attach-head-index (pos)
+(defun egg-log-commit-line-menu-attach-head-ignore-changes (pos)
   (interactive "d")
   (egg-log-buffer-attach-head pos 4))
-
-(defun egg-log-commit-line-menu-attach-head-index-wdir (pos)
-  (interactive "d")
-  (egg-log-buffer-attach-head pos 16))
-
 
 (defun egg-log-make-commit-line-menu (&optional heading)
   (let ((map (make-sparse-keymap heading)))
@@ -5829,11 +5882,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                   'egg-log-buffer-merge
                                   :visible '(egg-commit-at-point)))
     (define-key map [sp3] '("--"))
-    (define-key map [rh-16] (list 'menu-item "Anchor HEAD (update INDEX and Workdir)"
-                                  'egg-log-commit-line-menu-attach-head-index-wdir
-                                  :visible '(egg-commit-at-point)))
-    (define-key map [rh-4] (list 'menu-item "Anchor HEAD (update INDEX)"
-                                 'egg-log-commit-line-menu-attach-head-index
+    (define-key map [rh-4] (list 'menu-item "Anchor HEAD (ignore changes)"
+                                 'egg-log-commit-line-menu-attach-head-ignore-changes
                                  :visible '(egg-commit-at-point)))
     (define-key map [rh-0] (list 'menu-item "Anchor HEAD"
                                  'egg-log-buffer-attach-head
