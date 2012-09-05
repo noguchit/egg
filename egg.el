@@ -684,20 +684,18 @@ if BUF was nil then use current-buffer"
 
 (defsubst egg-files-git-name (files)
   "return the repo-relative name for each file in the list of files FILES."
-  (delete-duplicates
-   (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)
-   :test 'string-equal))
+  (delete-dups
+   (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)))
 
 (defsubst egg-unmerged-files ()
   "return a list of repo-relative names for each unmerged files."
   (save-match-data
-    (delete-duplicates
+    (delete-dups
      (mapcar 'car
              (mapcar 'last
                      (mapcar
                       'split-string
-                      (egg-git-to-lines "ls-files" "--full-name" "-u"))))
-     :test 'string-equal)))
+                      (egg-git-to-lines "ls-files" "--full-name" "-u")))))))
 
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
@@ -3789,12 +3787,75 @@ See also `with-temp-file' and `with-output-to-string'."
     (egg--do-git-action
      "reset" buffer-to-update
      `(lambda (ret-code)
-	(egg--git-pp-reset-output ret-code reset-mode pre-reset))
+	(egg--git-pp-reset-output ret-code ,reset-mode ,pre-reset))
      (list reset-mode rev))))
 
 (defun egg--git-reset-cmd-test (mode rev)
   (interactive "sreset mode:\nsrev:")
   (egg--git-reset-cmd t mode rev))
+
+(defun egg--git-reset-files-cmd (buffer-to-update rev &rest files)
+  (egg--do-git-action
+   "reset" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0) (list :success t :next-action 'status))
+	   ((> ret-code 1) 
+	    (nconc (list :success nil) (egg--git-pp-grab-line-matching "^fatal")))
+	   ((= ret-code 1)
+	    (nconc (list :success t)
+		   (and (egg--git-pp-grab-line-matching "Unstaged changes after reset:")
+			(list :line "there are unstaged changes after reset"
+			      :next-action 'status
+			      :files
+			      (let (files)
+				(goto-char (point-min))
+				(while (re-search-forward "^[A-Z]\t\\(\\S-+\\)$" nil t)
+				  (add-to-list 'files (match-string-no-properties 1)))
+				files)))))))
+   (nconc (list (or rev "HEAD") "--") files)))
+
+
+(defconst egg--git-co-failed-regex 
+  "\\<\\([uU]nable\\|failed\\|internal error\\|yet to be born\\|invalid\\|is not\\|[Cc]annot\\|incompatible\\|needs a\\|mutually exclusive\\|does not\\)\\>")
+
+(defun egg--git-pp-co-files-output (ret-code file-or-files)
+  (if (= ret-code 0)
+      (list :success t :files (if (consp file-or-files) file-or-files (list file-or-files)))
+    (nconc (list :success nil :next-action 'status)
+	   (or (egg--git-pp-grab-line-matching egg--git-co-failed-regex)
+	       (egg--git-pp-grab-line-matching "^fatal")))))
+
+(defun egg--git-co-files-cmd (buffer-to-update file-or-files &rest args)
+  (egg--do-git-action
+   "checkout" buffer-to-update
+   `(lambda (ret-code)
+      (egg--git-pp-co-files-output ret-code ,file-or-files))
+   (append args (if (consp file-or-files) 
+		   (cons "--" file-or-files)
+		 (list "--" file-or-files)))))
+
+
+(defun egg--git-pp-co-rev-output (ret-code orig-rev)
+  (let (files)
+    (if (= ret-code 0)
+	(nconc 
+	 (list :success t :files (egg-git-to-lines "diff" "--name-only" orig-rev)
+	       :next-action 'status)
+	 (or (egg--git-pp-grab-line-matching 
+	      "HEAD is now at\\|Switched to \\(a new \\)?branch\\|Reset branch")
+	     (egg--git-pp-grab-line-no -1)))
+      (nconc 
+       (list :success nil)
+       (or (egg--git-pp-grab-line-matching egg--git-co-failed-regex)
+	   (egg--git-pp-grab-line-matching "^fatal"))))))
+
+(defun egg--git-co-rev-cmd (buffer-to-update rev &rest args)
+  (let ((pre-co (egg-get-current-sha1)))
+    (egg--do-git-action "checkout" buffer-to-update 
+			`(lambda (ret-code)
+			   (egg--git-pp-co-rev-output ret-code ,pre-co))
+     (append args (list rev)))))
+
 
 (defun egg--git-pp-change-stat (&optional ret-code)
   (save-match-data
@@ -3877,7 +3938,7 @@ See also `with-temp-file' and `with-output-to-string'."
 		  (while (re-search-forward "^add '\\(.+\\)'$" nil t)
 		    (add-to-list 'files (match-string-no-properties 1)))
 		  (when (consp files)
-		    (list :files files))))
+		    (list :files files :next-action 'status))))
        (or (egg--git-pp-grab-line-matching 
 	    "Could not\\|did not match\\|Aborted\\|ignored by\\|failed\\|incompatible\\|corrupt\\|Unable\\|is beyond")
 	   (egg--git-pp-grab-line-no -1))))
@@ -3894,7 +3955,7 @@ See also `with-temp-file' and `with-output-to-string'."
 		  (while (re-search-forward "^rm '\\(.+\\)'$" nil t)
 		    (add-to-list 'files (match-string-no-properties 1)))
 		  (when (consp files)
-		    (list :files files))))
+		    (list :files files :next-action 'status))))
        (or (egg--git-pp-grab-line-matching 
 	    "\\<\\(corrupt\\|did not match\\|not removing\\|[Uu]nable to\\)\\>")
 	   (egg--git-pp-grab-line-no -1))))
@@ -3970,28 +4031,27 @@ See also `with-temp-file' and `with-output-to-string'."
 (defun egg-diff-section-cmd-stage (pos)
   (interactive (list (point)))
   (let ((file (car (get-text-property pos :diff))))
-    (egg-diff-section-patch-cmd pos nil
-                                (if (file-exists-p file)
-                                    "add"
-                                  "rm"))))
+    (cond ((not (stringp file))
+	   (error "No diff with file-name here!"))
+	  ((file-exists-p file)
+	   ;; add file to index, nothing change in wdir
+	   ;; diff and status buffers must be updated
+	   ;; just update them all
+	   (egg--git-add-cmd t "-v" file))
+	  (t ;; file is deleted, update the index
+	   (egg--git-rm-cmd t file)))))
 
 (defun egg-diff-section-cmd-unstage (pos)
   (interactive (list (point)))
   (let ((is-merging (or (plist-get (egg-repo-state) :merge-heads)
 			(plist-get (egg-repo-state) :rebase-dir)))
-	(newfile (memq 'newfile (get-text-property pos :diff))))
-    (cond (newfile
-	   (egg-show-git-output
-	    (egg-diff-section-patch-cmd pos 0 "rm" "--cached")
-	    1  "GIT-RM"))
-	  (is-merging
-	   (egg-show-git-output
-	    (egg-diff-section-patch-cmd pos 1 "checkout" "-m")
-	    1  "GIT-CHECKOUT"))
-	  (t 
-	   (egg-show-git-output
-	    (egg-diff-section-patch-cmd pos 1 "reset" "HEAD" "--")
-	    1  "GIT-RESET")))))
+	(diff-info (get-text-property pos :diff))
+	file newfile)
+    (setq newfile (memq 'newfile diff-info)
+	  file (car diff-info))
+    (cond (newfile (egg--git-rm-cmd t "--cached" file))
+	  (is-merging (egg--git-co-files-cmd t file "-m"))
+	  (t (egg--git-reset-files-cmd t nil file)))))
 
 (defun egg-diff-section-cmd-undo-old-no-revsion-check (pos)
   (interactive (list (point)))
@@ -4045,6 +4105,12 @@ See also `with-temp-file' and `with-output-to-string'."
 	(egg--do-git-quiet t))
     (when (egg--git-add-cmd t "-v" "-u")
       (message "staged all tracked files's modifications"))))
+
+(defsubst egg-log-buffer-do-move-head (reset-mode rev &optional interactively-used)
+  (egg-do-move-head reset-mode rev interactively-used 'log))
+
+(defsubst egg-status-buffer-do-move-head (reset-mode rev &optional interactively-used)
+  (egg-do-move-head reset-mode rev interactively-used 'status))
 
 (defun egg-unstage-all-files ()
   (interactive)
@@ -4156,12 +4222,6 @@ See also `with-temp-file' and `with-output-to-string'."
 	      ((eq next-action 'log)
 	       (call-interactively 'egg-log)))))
     (plist-get res :success)))
-
-(defsubst egg-log-buffer-do-move-head (reset-mode rev &optional interactively-used)
-  (egg-do-move-head reset-mode rev interactively-used 'log))
-
-(defsubst egg-status-buffer-do-move-head (reset-mode rev &optional interactively-used)
-  (egg-do-move-head reset-mode rev interactively-used 'status))
 
 (defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
   (let ((msg (or msg (concat "merging in " rev)))
