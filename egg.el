@@ -870,6 +870,36 @@ END-RE is the regexp to match the end of a record."
         (egg-pick-file-contents (concat git-dir "/HEAD")
                                 "^ref: refs/heads/\\(.+\\)\\|^\\([0-9a-f]+\\)" 1 2))))
 
+(defsubst egg-get-symbolic-HEAD (&optional file)
+  ;; get the symbolic name of HEAD
+  (setq file (or file (concat (egg-git-dir) "/HEAD")))
+  (egg-pick-file-contents file
+                          "^ref: refs/heads/\\(.+\\)"
+                          1))
+
+(defsubst egg-get-full-symbolic-HEAD (&optional file)
+  ;; get the symbolic full name of HEAD
+  (setq file (or file (concat (egg-git-dir) "/HEAD")))
+  (egg-pick-file-contents file
+                          "^ref: \\(refs/heads/.+\\)"
+                          1))
+
+(defsubst egg-get-current-sha1 ()
+  (or (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD")
+      "0000000000000000000000000000000000000000"))
+
+(defsubst egg-set-mode-info (state)
+  "Set the mode-line string for buffers visiting files in the current repo.
+The string is built based on the current state STATE."
+  (set (intern (concat "egg-" egg-git-dir "-HEAD"))
+       (format " Git:%s" (cond ((plist-get state :rebase-dir)
+                                "(rebasing)")
+                               ((plist-get state :merge-heads)
+                                "(merging)")
+                               ((plist-get state :branch)
+                                (plist-get state :branch))
+                               (t "(detached)")))))
+
 (defun egg-all-refs ()
   "Get a list of all refs."
   (append (egg-git-to-lines "rev-parse" "--symbolic"
@@ -1022,36 +1052,6 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                      ((stringp prefix) prefix)
                      ((null prefix) nil)
                      (t string)))))))
-
-(defsubst egg-get-symbolic-HEAD (&optional file)
-  ;; get the symbolic name of HEAD
-  (setq file (or file (concat (egg-git-dir) "/HEAD")))
-  (egg-pick-file-contents file
-                          "^ref: refs/heads/\\(.+\\)"
-                          1))
-
-(defsubst egg-get-full-symbolic-HEAD (&optional file)
-  ;; get the symbolic full name of HEAD
-  (setq file (or file (concat (egg-git-dir) "/HEAD")))
-  (egg-pick-file-contents file
-                          "^ref: \\(refs/heads/.+\\)"
-                          1))
-
-(defsubst egg-get-current-sha1 ()
-  (or (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD")
-      "0000000000000000000000000000000000000000"))
-
-(defsubst egg-set-mode-info (state)
-  "Set the mode-line string for buffers visiting files in the current repo.
-The string is built based on the current state STATE."
-  (set (intern (concat "egg-" egg-git-dir "-HEAD"))
-       (format " Git:%s" (cond ((plist-get state :rebase-dir)
-                                "(rebasing)")
-                               ((plist-get state :merge-heads)
-                                "(merging)")
-                               ((plist-get state :branch)
-                                (plist-get state :branch))
-                               (t "(detached)")))))
 
 (defsubst egg-get-rebase-merge-state (rebase-dir)
   "Build a plist of rebase info of REBASE-DIR.
@@ -3193,13 +3193,13 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
                  (goto-char restore-pt)
                (goto-char (point-min)))))))
 
-(defun egg-checkout-ref (&optional default)
+(defun egg-checkout-ref (called-interactively &optional default)
   "Prompt a revision to checkout. Default is DEFAULT."
-  (interactive (list (car (get-text-property (point) :ref))))
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		(car (get-text-property (point) :ref))))
   (egg-do-co-rev (completing-read "checkout: " (egg-all-refs)
 				  nil nil (or default "HEAD"))
-		 (invoked-interactively-p)
-		 t 'status))
+		 called-interactively 'status))
 
 (defsubst egg-buffer-show-all ()
   (interactive)
@@ -3716,7 +3716,7 @@ See also `with-temp-file' and `with-output-to-string'."
 	 (line (cond ((< line-no 0) (nth (- -1 line-no) (nreverse lines)))
 		     ((> line-no 0) (nth (1- line-no) lines))
 		     (t nil))))
-    (when (string line)
+    (when (stringp line)
       (list :line line))))
 
 (defun egg--git-pp-grab-line-matching (regex)
@@ -3855,7 +3855,7 @@ See also `with-temp-file' and `with-output-to-string'."
 		    (nconc 
 		     (list :success t :next-action 'status)
 		     (or (egg--git-pp-grab-line-matching 
-			  "HEAD is now at\\|Switched to \\(a new \\)?branch\\|Reset branch")
+			  "Already on\\|HEAD is now at\\|Switched to \\(a new \\)?branch\\|Reset branch")
 			 (egg--git-pp-grab-line-no -1))))
 		   ((= ret-code 1)
 		    (nconc (list :success nil)
@@ -6567,6 +6567,29 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (egg-git-ok t "stash" "list" ;; "--pretty=oneline"
               ))
 
+(defconst egg-stash-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:StashBuffer")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map "n" 'egg-stash-buffer-next-stash)
+    (define-key map "s" 'egg-status)
+    (define-key map "p" 'egg-stash-buffer-prev-stash)
+    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
+    (define-key map "o" 'egg-stash-buffer-pop)
+    (define-key map "l" 'egg-log)
+    map))
+
+(defconst egg-stash-map
+  (let ((map (make-sparse-keymap "Egg:Stash")))
+    (set-keymap-parent map egg-hide-show-map)
+    (define-key map (kbd "SPC") 'egg-stash-buffer-show)
+    (define-key map (kbd "RET") 'egg-stash-buffer-apply)
+    (define-key map "a" 'egg-stash-buffer-apply)
+    (define-key map (kbd "DEL") 'egg-stash-buffer-drop)
+    (define-key map "x" 'egg-stash-buffer-drop)
+    (define-key map "X" 'egg-stash-buffer-clear)
+    (define-key map "o" 'egg-stash-buffer-pop)
+    map))
+
 (define-egg-buffer stash "*%s-stash@%s*"
   (egg-file-log-buffer-mode)
   (use-local-map egg-stash-buffer-mode-map)
@@ -6639,29 +6662,6 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (interactive "sshort description of this work-in-progress: ")
   (egg-do-stash-wip msg)
   (egg-stash))
-
-(defconst egg-stash-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:StashBuffer")))
-    (set-keymap-parent map egg-buffer-mode-map)
-    (define-key map "n" 'egg-stash-buffer-next-stash)
-    (define-key map "s" 'egg-status)
-    (define-key map "p" 'egg-stash-buffer-prev-stash)
-    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
-    (define-key map "o" 'egg-stash-buffer-pop)
-    (define-key map "l" 'egg-log)
-    map))
-
-(defconst egg-stash-map
-  (let ((map (make-sparse-keymap "Egg:Stash")))
-    (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "SPC") 'egg-stash-buffer-show)
-    (define-key map (kbd "RET") 'egg-stash-buffer-apply)
-    (define-key map "a" 'egg-stash-buffer-apply)
-    (define-key map (kbd "DEL") 'egg-stash-buffer-drop)
-    (define-key map "x" 'egg-stash-buffer-drop)
-    (define-key map "X" 'egg-stash-buffer-clear)
-    (define-key map "o" 'egg-stash-buffer-pop)
-    map))
 
 (defun egg-stash-buffer-next-stash ()
   "Move to the next stash."
