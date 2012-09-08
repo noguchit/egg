@@ -2659,7 +2659,7 @@ adding the contents."
     (if no-stage
 	(setq args (cons "-N" args)))
     
-    (when (apply 'egg-sync-0 "add" args)
+    (when (apply 'egg--git-add-cmd (current-buffer) args)
       (message "%s %s to git." (if no-stage "registered" "added") files-string))))
 
 (defconst egg-untracked-file-map
@@ -3734,7 +3734,7 @@ See also `with-temp-file' and `with-output-to-string'."
       (list :line matched-line))))
 
 (defsubst egg--git-pp-grab-1st-line-matching (regex-list)
-  (apply 'or (mapcar 'egg--git-pp-grab-line-matching regex-list)))
+  (car (delq nil (mapcar 'egg--git-pp-grab-line-matching regex-list))))
 
 
 (defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex &optional line-no)
@@ -3959,9 +3959,10 @@ See also `with-temp-file' and `with-output-to-string'."
 		(egg--git-pp-grab-line-matching "nothing added")
 		(when (re-search-forward "^add '\\(.+\\)'$" nil t)
 		  (list :next-action 'status)))
-       (or (egg--git-pp-grab-line-matching 
-	    "Could not\\|did not match\\|Aborted\\|ignored by\\|failed\\|incompatible\\|corrupt\\|Unable\\|is beyond")
-	   (egg--git-pp-grab-line-no -1))))
+       (nconc (list :success nil)
+	      (or (egg--git-pp-grab-line-matching 
+		   "Could not\\|did not match\\|Aborted\\|ignored by\\|failed\\|incompatible\\|corrupt\\|Unable\\|is beyond")
+		  (egg--git-pp-grab-line-no -1)))))
    args))
 
 (defun egg--git-rm-cmd (buffer-to-update &rest args)
@@ -3976,9 +3977,11 @@ See also `with-temp-file' and `with-output-to-string'."
 		    (add-to-list 'files (match-string-no-properties 1)))
 		  (when (consp files)
 		    (list :files files :next-action 'status))))
-       (or (egg--git-pp-grab-line-matching 
-	    "\\<\\(corrupt\\|did not match\\|not removing\\|[Uu]nable to\\)\\>")
-	   (egg--git-pp-grab-line-no -1))))
+       (nconc (list :success nil)
+	      (or (egg--git-pp-grab-1st-line-matching 
+		   '("has staged content different from both"
+		     "\\<\\(corrupt\\|did not match\\|not removing\\|[Uu]nable to\\)\\>"))
+		  (egg--git-pp-grab-line-no -1)))))
    args))
 
 (defconst egg-branch-error-128-regex
