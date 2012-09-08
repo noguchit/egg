@@ -2389,6 +2389,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
     (define-key map (kbd "o") 'egg-checkout-ref)
     (define-key map (kbd "l") 'egg-log)
     (define-key map (kbd "w") 'egg-buffer-stash-wip)
+    (define-key map (kbd "W") 'egg-stash)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
     (define-key map (kbd "U") 'egg-unstage-all-files)
@@ -3732,14 +3733,21 @@ See also `with-temp-file' and `with-output-to-string'."
     (when (stringp matched-line)
       (list :line matched-line))))
 
+(defsubst egg--git-pp-grab-1st-line-matching (regex-list)
+  (apply 'or (mapcar 'egg--git-pp-grab-line-matching regex-list)))
+
 
 (defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex &optional line-no)
   (if (memq ret-code accepted-codes)
       (nconc (list :success t )
-	     (or (egg--git-pp-grab-line-matching ok-regex)
+	     (or (if (consp ok-regex)
+		     (egg--git-pp-grab-1st-line-matching ok-regex)
+		   (egg--git-pp-grab-line-matching ok-regex))
 		 (egg--git-pp-grab-line-no (or line-no -1))))
     (nconc (list :success nil )
-	   (or (egg--git-pp-grab-line-matching bad-regex)
+	   (or (if (consp bad-regex) 
+		   (egg--git-pp-grab-1st-line-matching bad-regex)
+		 (egg--git-pp-grab-line-matching bad-regex))
 	       (egg--git-pp-grab-line-no (or line-no -1))))))
 
 (defsubst egg--git-failed-to-parse-output (cmd)
@@ -3750,7 +3758,7 @@ See also `with-temp-file' and `with-output-to-string'."
    "push" buffer-to-update
    (lambda (ret-code)
      (egg--git-pp-generic ret-code '(0) " -> \\|Everything up-to-date"
-			  "rejected\\|\\<not\\>"))
+			  '("rejected" "\\<not\\>")))
    args))
 
 (defun egg--git-push-cmd-test (from to repo)
@@ -3816,7 +3824,6 @@ See also `with-temp-file' and `with-output-to-string'."
 			(list :line "there are unstaged changes after reset"
 			      :next-action 'status))))))
    (nconc (list (or rev "HEAD") "--") files)))
-
 
 (defconst egg--git-co-failed-regex 
   "\\<\\([uU]nable\\|failed\\|internal error\\|yet to be born\\|invalid\\|is not\\|[Cc]annot\\|incompatible\\|needs a\\|mutually exclusive\\|does not\\)\\>")
@@ -4357,23 +4364,6 @@ See also `with-temp-file' and `with-output-to-string'."
       (list :success cmd-res
             :message feed-back
             :files modified-files))))
-
-(defun egg-rm-ref (&optional force name prompt default)
-  (let* ((refs-alist (egg-ref-type-alist))
-         (name (or name (completing-read (or prompt "remove ref: ")
-                                         refs-alist nil t
-                                         default)))
-         (type (cdr (assoc name refs-alist))))
-    (unless (and name type)
-      (error "Cannot find reference %s!" name))
-    (egg-show-git-output
-     (cond ((eq :tag type)
-            (egg-sync-0 "tag" "-d" name))
-           ((eq :head type)
-            (egg-sync-0 "branch" (if force "-vD" "-vd") name))
-           ((eq :remote type)
-            (egg-sync-0 "branch" (if force "-vrD" "-vrd") name)))
-     -1)))
 
 ;;;========================================================
 ;;; log message
