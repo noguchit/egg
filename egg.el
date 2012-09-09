@@ -5740,7 +5740,12 @@ would be a pull (by default --ff-only)."
 		 (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
 	(prompt-dst (> level 3))
 	(non-ff (> level 15))
-	(dst "HEAD"))
+	dst mark base)
+    
+    (setq mark (egg-log-buffer-find-first-mark ?*))
+    (setq base (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+    (setq dst (or base "HEAD"))
+
     (unless src
       (error "Nothing to push here!"))
     (if prompt-dst
