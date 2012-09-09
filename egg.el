@@ -644,6 +644,9 @@ is used as input to GIT."
   (egg-git-ok nil "diff" "--quiet" "--cached" "--" file))
 (defsubst egg-index-empty () (egg-git-ok nil "diff" "--cached" "--quiet"))
 
+(defsubst egg-has-stashed-wip ()
+  (egg-git-ok nil "rev-parse" "--verify" "-q" "stash@{0}"))
+
 
 (defsubst egg-git-to-lines (&rest args)
   "run GIT with ARGS.
@@ -899,6 +902,12 @@ The string is built based on the current state STATE."
                                ((plist-get state :branch)
                                 (plist-get state :branch))
                                (t "(detached)")))))
+
+(defsubst egg-call-next-action (action)
+  (when (symbolp action)
+    (let ((name (concat "egg-" (symbol-name action))))
+      (call-interactively (intern name)))))
+
 
 (defun egg-all-refs ()
   "Get a list of all refs."
@@ -3598,9 +3607,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defsubst egg-sync-0 (&rest args)
   (egg-sync-do egg-git-command nil nil args))
 
-(defsubst egg-sync-0-args (args)
-  (egg-sync-do egg-git-command nil nil args))
-
 (defsubst egg-sync-do-region (program beg end &rest args)
   (egg-sync-do program (cons beg end) nil args))
 
@@ -3720,7 +3726,7 @@ See also `with-temp-file' and `with-output-to-string'."
     (when (stringp line)
       (list :line line))))
 
-(defun egg--git-pp-grab-line-matching (regex)
+(defun egg--git-pp-grab-line-matching (regex &optional replacement)
   (let ((matched-line 
 	 (when (stringp regex)
 	   (save-match-data
@@ -3731,9 +3737,9 @@ See also `with-temp-file' and `with-output-to-string'."
 		(line-beginning-position)
 		(line-end-position)))))))
     (when (stringp matched-line)
-      (list :line matched-line))))
+      (list :line (if (stringp replacement) replacement matched-line)))))
 
-(defsubst egg--git-pp-grab-1st-line-matching (regex-list)
+(defsubst egg--git-pp-grab-1st-line-matching (regex-list &optional replacement)
   (car (delq nil (mapcar 'egg--git-pp-grab-line-matching regex-list))))
 
 
@@ -4003,6 +4009,56 @@ See also `with-temp-file' and `with-output-to-string'."
 		     (egg--git-pp-grab-line-matching egg-branch-error-128-regex)))))
    args))
 
+(defconst egg--git-stash-error-regex
+  "unimplemented\\|\\([dD]o \\|[Cc]ould \\|[Cc]an\\)not\\|No \\(changes\\|stash found\\)\\|Too many\\|is not\\|unable\\|Conflicts in index\\|No branch name\\|^fatal")
+
+(defun egg--git-stash-save-cmd (buffer-to-update &rest args)
+  (let ((files (egg-git-to-lines "diff" "--name-only" "HEAD"))
+	res)
+    (setq res
+	  (egg--do-git-action
+	   "stash" buffer-to-update
+	   (lambda (ret-code)
+	     (if (= ret-code 0)
+		 (nconc (list :success t)
+			(or (egg--git-pp-grab-1st-line-matching
+			     '("Saved working directory" "HEAD is now at"))
+			    (egg--git-pp-grab-line-no -1)))
+	       (nconc (list :success nil)
+		      (or (egg--git-pp-grab-line-matching egg--git-stash-error-regex)
+			  (egg--git-pp-grab-line-no -1)))))
+	   (cons "save" args)))
+    (when (plist-get res :success)
+      (setq res (nconc res (list :next-action 'stash :files files))))
+    res))
+
+(defun egg--git-stash-unstash-cmd (buffer-to-update cmd &optional args)
+  (unless (egg-has-stashed-wip)
+    (error "no WIP was stashed!"))
+  (let ((files (egg-git-to-lines "diff" "--name-only" "stash@{0}"))
+	(cmd (or cmd "pop"))
+	res)
+    (setq res
+	  (egg--do-git-action
+	   "stash" buffer-to-update
+	   (lambda (ret-code)
+	     (if (= ret-code 0)
+		 (nconc (list :success t)
+			(or (egg--git-pp-grab-line-matching "Dropped refs/stash")
+			    (egg--git-pp-grab-line-no -1)))
+	       (if (egg--git-pp-grab-line-matching "^CONFLICT")
+		   (nconc (list :success t) (egg--git-pp-grab-line-matching "^CONFLICT"))
+		 (nconc (list :success nil)
+			(or (egg--git-pp-grab-line-matching 
+			     "following files would be overwritten"
+			     "stashed wip conflicts with local modifications, please commit first")
+			    (egg--git-pp-grab-line-matching egg--git-stash-error-regex)
+			    (egg--git-pp-grab-line-no -1))))))
+	   (cons cmd args)))
+    (when (plist-get res :success)
+      (setq res (nconc res (list :next-action 'status :files files))))
+    res))
+
 (defsubst egg--log-buffer-post-cmd (res &optional take-next-action ignored-action)
   (when (and (plist-get res :success) 
 	     take-next-action 
@@ -4052,9 +4108,6 @@ See also `with-temp-file' and `with-output-to-string'."
     (when (stringp output)
       (message "%s> %s" prefix output)
       t)))
-
-(defsubst egg-show-sync-0-args (prefix line-or-regex &rest args)
-  (egg-show-git-output (egg-sync-0-args args) -1 prefix))
 
 (defun egg-hunk-section-patch-cmd (pos program &rest args)
   (let ((patch (egg-hunk-section-patch-string pos (find "--reverse" args)))
@@ -4214,16 +4267,47 @@ See also `with-temp-file' and `with-output-to-string'."
     (when (egg--git-add-cmd t "-v" ".")
       (message "staged all untracked files"))))
 
-(defun egg-do-stash-wip (msg)
-  (let ((default-directory (egg-work-tree-dir)))
+(defun egg-do-stash-wip (msg include-untracked &optional take-next-action ignored-action)
+  (let ((default-directory (egg-work-tree-dir))
+	res files action)
     (if (egg-repo-clean)
         (error "No WIP to stash")
-      (when (egg-show-git-output
-             (if (and msg (stringp msg))
-                 (egg-sync-0 "stash" "save" msg)
-               (egg-sync-0 "stash" "save"))
-             1 "GIT-STASH")
-        (egg-revert-all-visited-files)))))
+      (setq res (if include-untracked
+		    (egg--git-stash-save-cmd t "save" "-u" msg)
+		  (egg--git-stash-save-cmd t "save" msg)))
+      (when (setq files (plist-get res :files))
+	(egg-revert-visited-files files))
+      (when (setq action (plist-get res :next-action))
+	(when (and take-next-action (not (eq ignored-action action)))
+	  (egg-call-next-action action))))))
+
+(defun egg-do-unstash-wip (cmd &optional take-next-action ignored-action &rest args)
+  (let ((default-directory (egg-work-tree-dir))
+	(cmd (or cmd "pop"))
+	res files action)
+    (unless (egg-has-stashed-wip)
+      (error "No WIP was stashed!"))
+    (unless (egg-repo-clean)
+      (unless (y-or-n-p (format "repo is NOT clean, still want to %s stash? " cmd))
+	(error "stash %s cancelled!" cmd)))
+    
+    (setq res (egg--git-stash-unstash-cmd t cmd args))
+      (when (setq files (plist-get res :files))
+	(egg-revert-visited-files files))
+      (when (setq action (plist-get res :next-action))
+	(when (and take-next-action (not (eq ignored-action action)))
+	  (egg-call-next-action action)))))
+
+;; (defun egg-do-stash-wip (msg)
+;;   (let ((default-directory (egg-work-tree-dir)))
+;;     (if (egg-repo-clean)
+;;         (error "No WIP to stash")
+;;       (when (egg-show-git-output
+;;              (if (and msg (stringp msg))
+;;                  (egg-sync-0 "stash" "save" msg)
+;;                (egg-sync-0 "stash" "save"))
+;;              1 "GIT-STASH")
+;;         (egg-revert-all-visited-files)))))
 
 (defun egg-do-tag (&optional rev prompt force)
   (let ((all-refs (egg-all-refs))
@@ -4249,25 +4333,25 @@ See also `with-temp-file' and `with-output-to-string'."
 ;;           (egg-sync-0 "checkout" "-b" "-f" name rev)
 ;;         (egg-sync-0 "checkout" "-b" name rev)))))
 
-(defun egg-do-apply-stash (stash)
-  (let ((state (egg-repo-state))
-        output)
-    (setq output (egg-sync-0 "stash" "apply" "--index" stash))
-    (if output
-        (egg-revert-all-visited-files)
-      (message "GIT-STASH> failed to apply %s" stash)
-      (egg-status nil :sentinel))
-    output))
+;; (defun egg-do-apply-stash (stash)
+;;   (let ((state (egg-repo-state))
+;;         output)
+;;     (setq output (egg-sync-0 "stash" "apply" "--index" stash))
+;;     (if output
+;;         (egg-revert-all-visited-files)
+;;       (message "GIT-STASH> failed to apply %s" stash)
+;;       (egg-status nil :sentinel))
+;;     output))
 
-(defun egg-do-pop-stash ()
-  (let ((state (egg-repo-state))
-        output)
-    (setq output (egg-sync-0 "stash" "pop" "--index"))
-    (if output
-        (egg-revert-all-visited-files)
-      (message "GIT-STASH> failed to pop WIP")
-      (egg-status nil :sentinel))
-    output))
+;; (defun egg-do-pop-stash ()
+;;   (let ((state (egg-repo-state))
+;;         output)
+;;     (setq output (egg-sync-0 "stash" "pop" "--index"))
+;;     (if output
+;;         (egg-revert-all-visited-files)
+;;       (message "GIT-STASH> failed to pop WIP")
+;;       (egg-status nil :sentinel))
+;;     output))
 
 (defun egg-do-move-head (reset-mode rev &optional take-next-action next-action-ignore)
   (let (files res next-action)
@@ -6627,34 +6711,71 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (unless (equal (get-text-property pos :stash) stash)
       (egg-stash-buffer-do-insert-stash pos))))
 
+;; (defun egg-stash-buffer-pop (&optional no-confirm)
+;;   (interactive "P")
+;;   (unless (egg-wdir-clean)
+;;     (egg-status)
+;;     (error "Cannot aplly stash on dirty work-dir"))
+;;   (when (or no-confirm
+;;             (y-or-n-p "pop and apply last WIP to repo? "))
+;;     (when (egg-do-pop-stash)
+;;       (message "GIT-STASH> successfully popped and applied last WIP")
+;;       (egg-status))))
+
+(defun egg-stash-buffer-do-unstash (cmd &rest args)
+  (let ((default-directory (egg-work-tree-dir))
+	(cmd (or cmd "pop"))
+	res files action)
+    (unless (egg-has-stashed-wip)
+      (error "No WIP was stashed!"))
+    (unless (egg-repo-clean)
+      (unless (y-or-n-p (format "repo is NOT clean, still want to apply stash? "))
+	(error "stash %s cancelled!" cmd)))
+    
+    (setq res (egg--git-stash-unstash-cmd t cmd args))
+    (when (setq files (plist-get res :files))
+      (egg-revert-visited-files files))
+    (when (setq action (plist-get res :next-action))
+      (unless (eq 'stash action)
+	(egg-call-next-action action)))
+    res))
+
 (defun egg-stash-buffer-pop (&optional no-confirm)
   (interactive "P")
-  (unless (egg-wdir-clean)
-    (egg-status)
-    (error "Cannot aplly stash on dirty work-dir"))
   (when (or no-confirm
             (y-or-n-p "pop and apply last WIP to repo? "))
-    (when (egg-do-pop-stash)
-      (message "GIT-STASH> successfully popped and applied last WIP")
-      (egg-status))))
+    (egg-stash-buffer-do-unstash "pop" "--index")))
+
+;; (defun egg-stash-buffer-apply (pos &optional no-confirm)
+;;   (interactive "dP")
+;;   (unless (egg-wdir-clean)
+;;     (egg-status)
+;;     (error "Cannot aplly stash on dirty work-dir"))
+;;   (let ((stash (get-text-property pos :stash)))
+;;     (when (and stash (stringp stash)
+;;                (or no-confirm
+;;                    (y-or-n-p (format "apply WIP %s to repo? " stash))))
+;;       (when (egg-do-apply-stash stash)
+;;         (message "GIT-STASH> successfully applied %s" stash)
+;;         (egg-status)))))
 
 (defun egg-stash-buffer-apply (pos &optional no-confirm)
   (interactive "dP")
-  (unless (egg-wdir-clean)
-    (egg-status)
-    (error "Cannot aplly stash on dirty work-dir"))
-  (let ((stash (get-text-property pos :stash)))
+ (let ((stash (get-text-property pos :stash)))
     (when (and stash (stringp stash)
                (or no-confirm
                    (y-or-n-p (format "apply WIP %s to repo? " stash))))
-      (when (egg-do-apply-stash stash)
-        (message "GIT-STASH> successfully applied %s" stash)
-        (egg-status)))))
+      (egg-stash-buffer-do-unstash "apply" "--index" stash))))
 
-(defun egg-buffer-stash-wip (msg)
-  (interactive "sshort description of this work-in-progress: ")
-  (egg-do-stash-wip msg)
-  (egg-stash))
+
+;; (defun egg-buffer-stash-wip (msg)
+;;   (interactive "sshort description of this work-in-progress: ")
+;;   (egg-do-stash-wip msg)
+;;   (egg-stash))
+
+(defun egg-buffer-stash-wip (msg &optional include-untracked)
+  (interactive "sshort description of this work-in-progress: \nP")
+  (egg-do-stash-wip msg include-untracked t 'status))
 
 (defun egg-stash-buffer-next-stash ()
   "Move to the next stash."
