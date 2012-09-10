@@ -4429,26 +4429,21 @@ the source revision."
 	       (call-interactively 'egg-log)))))
     (plist-get res :success)))
 
-(defun egg-do-merge-to-head (rev &optional merge-mode-flag msg)
+(defun egg-buffer-do-merge-to-head (rev &optional merge-mode-flag msg ignored-action)
   (let ((msg (or msg (concat "merging in " rev)))
 	(merge-mode-flag (or merge-mode-flag "-v"))
         merge-cmd-ok res modified-files next-action)
+    
+    (setq modified-files (egg-git-to-lines "diff" "--name-only" rev))
 
-    (setq res (if (eq msg t)		;; no msg
-		  (egg--git-merge-cmd 'all merge-mode-flag "--log" rev)
-		(egg--git-merge-cmd 'all merge-mode-flag "--log" "-m" msg rev)))
-    (setq modified-files (plist-get res :files)
-	  next-action (plist-get res :next-action))
+    (setq res (nconc (if (eq msg t)		;; no msg
+			 (egg--git-merge-cmd 'all merge-mode-flag "--log" rev)
+		       (egg--git-merge-cmd 'all merge-mode-flag "--log" "-m" msg rev))
+		     (list :files modified-files)))
+    (egg--buffer-handle-result res t ignored-action)))
 
-    (when (consp modified-files)
-      (egg-revert-visited-files modified-files))
-
-    (when (symbolp next-action)
-      (cond ((eq next-action 'commit)
-	     (call-interactively 'egg-commit-log-edit))
-	    ((eq next-action 'status)
-	     (call-interactively 'egg-status))))
-    res))
+(defsubst egg-log-buffer-do-merge-to-head (rev &optional merge-mode-flag msg)
+  (egg-buffer-do-merge-to-head rev merge-mode-flag msg))
 
 (defun egg-do-rebase-head (upstream-or-action
                            &optional old-base prompt)
@@ -5528,23 +5523,23 @@ the source revision."
 		    (read-string "merge commit message: " 
 				 (concat "merging in " rev))
 		  t))
-      (egg-do-merge-to-head rev (nth 3 option)))))
+      (egg-log-buffer-do-merge-to-head rev (nth 3 option)))))
 
 (defun egg-log-buffer-ff-pull (pos)
   (interactive "d")
   (unless (egg-repo-clean)
     (egg-status)
     (error "Repo is not clean!"))
-  (egg-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
-			"--ff-only" t))
+  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
+				   "--ff-only" t))
 
 (defun egg-log-buffer-merge-n-squash (pos)
   (interactive "d")
   (unless (egg-repo-clean)
     (egg-status)
     (error "Repo is not clean!"))
-  (egg-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
-			"--squash" t))
+  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
+				   "--squash" t))
 
 (defun egg-log-buffer-rebase (pos &optional move)
   (interactive "d\nP")
@@ -5830,7 +5825,7 @@ would be a pull (by default --ff-only)."
 		(if (egg-repo-clean)
 		    (egg-log-buffer-do-move-head "--hard" src (invoked-interactively-p))
 		  (error "Can't push on dirty repo"))
-	      (egg-do-merge-to-head src "--ff-only" t))
+	      (egg-log-buffer-do-merge-to-head src "--ff-only" t))
 	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
 			     "." (concat src ":" dst)))
       (message "local push cancelled!"))))
