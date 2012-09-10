@@ -1503,7 +1503,7 @@ See also `with-temp-file' and `with-output-to-string'."
 	  (t nil))
     (if (memq :success pp-results)
 	pp-results
-      (list :success (= ret 0))		;; default result
+      (nconc (list :success (= ret 0)) pp-results)		;; default result
       )))
 
 (defvar egg--do-git-quiet nil)		;; don't show git's output
@@ -1732,7 +1732,9 @@ See also `with-temp-file' and `with-output-to-string'."
 	     nil))
 	  
 	  ((= ret-code 1)
-	   (if (re-search-forward  "fix conflicts and then commit the result" nil t)
+	   (if (re-search-forward 
+		"fix conflicts and then commit the result\\|commit your changes or stash them before you can merge"
+		nil t)
 	       ;; conflicts, auto-merge failed
 	       (list :next-action 'status)
 	     ;; unexpected!!!
@@ -1756,19 +1758,23 @@ See also `with-temp-file' and `with-output-to-string'."
   (egg--do-git-action 
    "merge" buffer-to-update
    (lambda (ret-code)
-     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
-	    (cond ((= ret-code 0)
-		   (or (egg--git-pp-grab-line-matching
-			"merge went well\\|Already up-to-date\\|as requested\\|files? changed\\|insertions\\|deletions")
-		       (egg--git-pp-grab-line-no -1)))
-		  ((= ret-code 1)
-		   (egg--git-pp-grab-line-matching "fix conflicts and then commit"))
-		  ((= ret-code 128)
-		   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
-		  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
-	    (egg--git-pp-merge-next-action ret-code "merge")
-	    ;;(egg--git-pp-change-stat ret-code)
-	    ))
+     (nconc 
+      (cond ((= ret-code 0)
+	     (nconc (list :success t)
+		    (or (egg--git-pp-grab-line-matching
+			 "merge went well\\|Already up-to-date\\|as requested\\|files? changed\\|insertions\\|deletions")
+			(egg--git-pp-grab-line-no -1))))
+	    ((= ret-code 1)
+	     (let ((conflict-line 
+		    (egg--git-pp-grab-1st-line-matching "fix conflicts and then commit")))
+	       (if conflict-line
+		   (nconc (list :success t) conflict-line)
+		 (egg--git-pp-grab-line-matching
+		  "commit your changes or stash them before you can merge"))))
+	    ((= ret-code 128)
+	     (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
+	    (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
+      (egg--git-pp-merge-next-action ret-code "merge")))
    args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
