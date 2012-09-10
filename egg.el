@@ -667,6 +667,21 @@ Return the output lines as a list of strings."
             (setq lines (cons (match-string-no-properties idx) lines)))
           lines)))))
 
+(defun egg-git-lines-matching-stdin (stdin re idx &rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
+  (with-temp-buffer
+    (let (lines pos)
+      (insert stdin)
+      (setq pos (point-max))
+      (when (= (apply 'call-process-region (point-min) (point-max)
+		      egg-git-command nil t nil args) 0)
+        (save-match-data
+          (goto-char pos)
+          (while (re-search-forward re nil t)
+            (setq lines (cons (match-string-no-properties idx) lines)))
+          lines)))))
+
 (defun egg-git-lines-matching-multi (re indices &rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
@@ -1450,19 +1465,18 @@ See also `with-temp-file' and `with-output-to-string'."
     (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
 		 (if stdin " <REGION\n" "\n"))
     (with-clean-egg--do-buffer
-     (setq ret (cond ((stringp stdin)
-		      (with-temp-buffer
-			(insert stdin)
-			(apply 'call-process-region (point-min) (point-max)
-			       program nil t nil args)))
-		     ((consp stdin)
-		      (apply 'call-process-region (car stdin) (cdr stdin)
-			     program nil t nil args))
-		     ((null stdin)
-		      (apply 'call-process program nil t nil args))))
-     (egg-cmd-log-whole-buffer (current-buffer))
-     (egg-cmd-log (format "RET:%d\n" ret))
-     (cons ret (current-buffer)))))
+      (setq ret (cond ((stringp stdin)
+		       (insert stdin)
+		       (apply 'call-process-region (point-min) (point-max)
+			      program t t nil args))
+		      ((consp stdin)
+		       (apply 'call-process-region (car stdin) (cdr stdin)
+			      program nil t nil args))
+		      ((null stdin)
+		       (apply 'call-process program nil t nil args))))
+      (egg-cmd-log-whole-buffer (current-buffer))
+      (egg-cmd-log (format "RET:%d\n" ret))
+      (cons ret (current-buffer)))))
 
 (defun egg--do-git (stdin cmd args)
   (egg--do stdin "git" (cons cmd args)))
@@ -1505,6 +1519,11 @@ See also `with-temp-file' and `with-output-to-string'."
 (defun egg--do-git-action (cmd buffer-to-update post-proc-func args)
   (egg--do-show-output (concat "GIT-" (upcase cmd))
 		       (egg--do-handle-exit (egg--do-git nil cmd args)
+					    post-proc-func buffer-to-update)))
+
+(defun egg--do-git-action-stdin (cmd stdin buffer-to-update post-proc-func args)
+  (egg--do-show-output (concat "GIT-" (upcase cmd))
+		       (egg--do-handle-exit (egg--do-git stdin cmd args)
 					    post-proc-func buffer-to-update)))
 
 (defun egg--git-pp-grok-exit-code (ret-code &rest accepted-codes)
@@ -1745,7 +1764,8 @@ See also `with-temp-file' and `with-output-to-string'."
 		   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
 		  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
 	    (egg--git-pp-merge-next-action ret-code "merge")
-	    (egg--git-pp-change-stat ret-code)))
+	    ;;(egg--git-pp-change-stat ret-code)
+	    ))
    args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
@@ -1856,6 +1876,70 @@ See also `with-temp-file' and `with-output-to-string'."
     (when (plist-get res :success)
       (setq res (nconc res (list :next-action 'status :files files))))
     res))
+
+(defun egg--git-cherry-pick-cmd (buffer-to-update rev &optional args)
+  (let ((files (egg-git-to-lines "diff" "--name-only" rev))
+	res)
+    (setq res 
+	  (egg--do-git-action
+	   "cherry-pick"
+	   buffer-to-update
+	   (lambda (ret-code)
+	     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
+		    (cond ((= ret-code 0)
+			   (or (egg--git-pp-grab-line-matching
+				"merge went well\\|Already up-to-date\\|as requested\\|files? changed\\|insertions\\|deletions")
+			       (egg--git-pp-grab-line-no -1)))
+			  ((= ret-code 1)
+			   (egg--git-pp-grab-line-matching "fix conflicts and then commit"))
+			  ((= ret-code 128)
+			   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
+			  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
+		    (egg--git-pp-merge-next-action ret-code "merge")
+		    ;;(egg--git-pp-change-stat ret-code)
+		    ))
+	   (nconc args (list rev))))
+    (when (plist-get res :success)
+      (nconc res (list :files files)))
+    res))
+
+(defun egg--git-apply-cmd (buffer-to-update patch &optional args)
+  (let ((files (egg-git-lines-matching-stdin patch "^[0-9]+\t[0-9]+\t\\(.+\\)$" 1
+					     "apply" "--num-stat" "-"))
+	res)
+    (setq res 
+	  (egg--do-git-action-stdin
+	   "apply" patch
+	   buffer-to-update
+	   (lambda (ret-code)
+	     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
+		    (cond ((= ret-code 0)
+			   (nconc (egg--git-pp-grab-line-matching "Applied patch.+cleanly" 
+								  "patch applied cleanly")
+				  (list :next-action 'commit)))
+			  ((= ret-code 1) 
+			   (nconc (egg--git-pp-grab-1st-line-matching 
+				   '("Apply patch to.+with conflicts"
+				     "error:.+patch does not apply"
+				     "patch failed:"))
+				  (save-match-data
+				    (goto-char (point-min))
+				    (when (re-search-forward "Fall back to three-way merge" nil t)
+				      (list :next-action 'status)))))
+			  ((= ret-code 128)
+			   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
+			  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))))
+	   (append args (list "-v" "-"))))
+    (when (plist-get res :success)
+      (nconc res (list :files files)))
+    res))
+
+(defun egg--git-apply-cmd-test (file)
+  (interactive "fpatch file: ")
+  (with-temp-buffer
+    (insert-file-contents-literally file)
+    (egg--git-apply-cmd nil (buffer-string) '("-3"))
+    (egg-status)))
 
 (defun egg--buffer-handle-result (result &optional take-next-action ignored-action)
   (let ((ok (plist-get result :success))
@@ -4796,6 +4880,17 @@ the source revision."
          (buf (egg-do-diff (egg-build-diff-info src nil))))
     (pop-to-buffer buf t)))
 
+(defun egg-buffer-pop-to-file (file sha1 &optional other-win use-wdir-file line)
+  (pop-to-buffer (if (or (equal (egg-current-sha1) sha1)
+			 use-wdir-file)
+		     (progn
+		       (message "file:%s dir:%s" file default-directory)
+		       (find-file-noselect file))
+		   (egg-file-get-other-version file sha1 nil t))
+		 other-win)
+  (when (numberp line)
+    (goto-char (point-min))
+    (forward-line (1- line))))
 
 ;;;========================================================
 ;;; log browsing
@@ -5096,17 +5191,19 @@ the source revision."
                       egg-log-remote-ref-map
                       egg-log-remote-site-map)))
 
-(defun egg-log-pop-to-file (file sha1 &optional other-win use-wdir-file line)
-  (pop-to-buffer (if (or (equal (egg-current-sha1) sha1)
-			 use-wdir-file)
-		     (progn
-		       (message "file:%s dir:%s" file default-directory)
-		       (find-file-noselect file))
-		   (egg-file-get-other-version file sha1 nil t))
-		 other-win)
-  (when (numberp line)
-    (goto-char (point-min))
-    (forward-line (1- line))))
+;; (defun egg-log-pop-to-file (file sha1 &optional other-win use-wdir-file line)
+;;   (pop-to-buffer (if (or (equal (egg-current-sha1) sha1)
+;; 			 use-wdir-file)
+;; 		     (progn
+;; 		       (message "file:%s dir:%s" file default-directory)
+;; 		       (find-file-noselect file))
+;; 		   (egg-file-get-other-version file sha1 nil t))
+;; 		 other-win)
+;;   (when (numberp line)
+;;     (goto-char (point-min))
+;;     (forward-line (1- line))))
+
+(defalias 'egg-log-pop-to-file 'egg-buffer-pop-to-file)
 
 (defun egg-log-diff-cmd-visit-file (file sha1 &optional use-wdir-file)
   (interactive (list (car (get-text-property (point) :diff))
