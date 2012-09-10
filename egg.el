@@ -4207,36 +4207,31 @@ If INIT was not nil, then perform 1st-time initializations as well."
       (message "%s> %s" prefix output)
       t)))
 
-(defun egg-hunk-section-patch-cmd (pos program &rest args)
-  (let ((patch (egg-hunk-section-patch-string pos (find "--reverse" args)))
-        (file (car (get-text-property pos :diff))))
+(defun egg-hunk-section-apply-cmd (pos &rest args)
+  (let ((patch (egg-hunk-section-patch-string pos (member "--reverse" args)))
+        (file (car (get-text-property pos :diff)))
+	res)
     (unless (stringp file)
       (error "No diff with file-name here!"))
-    (egg-sync-do-file file program patch nil args)))
+    (setq res (egg--git-apply-cmd t patch args))
+    (unless (member "--cached" args)
+      (egg-revert-visited-files (plist-get res :files)))
+    (plist-get res :success)))
 
 (defun egg-hunk-section-cmd-stage (pos)
   (interactive "d")		;; why not "d" ?
-  (egg-show-git-output
-   (egg-hunk-section-patch-cmd pos egg-git-command "apply" "--cached")
-   -1 "GIT-APPLY"))
+  (egg-hunk-section-apply-cmd pos "--cached"))
 
 (defun egg-hunk-section-cmd-unstage (pos)
   (interactive "d")
-  (egg-show-git-output
-   (egg-hunk-section-patch-cmd pos egg-git-command "apply"
-                               "--cached" "--reverse")
-   -1 "GIT-APPLY"))
+  (egg-hunk-section-apply-cmd pos "--cached" "--reverse"))
 
 (defun egg-hunk-section-cmd-undo (pos)
   (interactive "d")
   (unless (or (not egg-confirm-undo)
               (y-or-n-p "irreversibly remove the hunk under cursor? "))
     (error "Too chicken to proceed with undo operation!"))
-  (let ((file (egg-hunk-section-patch-cmd pos egg-git-command "apply"
-                                          "-p1" "--reverse")))
-    (if (consp file) (setq file (car file)))
-    (when (stringp file)
-      (egg-revert-visited-files file))))
+  (egg-hunk-section-apply-cmd pos "-p1" "--reverse"))
 
 (defun egg-diff-section-cmd-stage (pos)
   "Update the index with the file at POS.
