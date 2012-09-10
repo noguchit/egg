@@ -919,11 +919,14 @@ The string is built based on the current state STATE."
                                (t "(detached)")))))
 
 (defsubst egg-call-next-action (action &optional ignored-action)
-  (when (symbolp action)
-    (let* ((name (and action (concat "egg-" (symbol-name action))))
-	   (command (and name (intern name))))
-      (unless (or (null action) (eq action ignored-action))
-	(call-interactively command)))))
+  (when (and (symbolp action) (not (eq action ignored-action)))
+    (let ((cmd (plist-get '(log egg-log
+				status egg-status
+				stash egg-stash
+				commit egg-commit-log-edit)
+			  action)))
+      (when (commandp cmd t)
+	(call-interactively cmd)))))
 
 
 (defun egg-all-refs ()
@@ -1887,21 +1890,34 @@ See also `with-temp-file' and `with-output-to-string'."
 	   (lambda (ret-code)
 	     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
 		    (cond ((= ret-code 0)
-			   (or (egg--git-pp-grab-line-matching
-				"merge went well\\|Already up-to-date\\|as requested\\|files? changed\\|insertions\\|deletions")
-			       (egg--git-pp-grab-line-no -1)))
+			   (list :line (format "'%s' applied cleanly" (egg-sha1 rev))))
 			  ((= ret-code 1)
-			   (egg--git-pp-grab-line-matching "fix conflicts and then commit"))
+			   (or (let ((conflict-line
+				      (egg--git-pp-grab-line-matching "after resolving the conflicts"
+								      "please resolve conflicts")))
+				 (when conflict-line
+				   (nconc (list :conflicts t) conflict-line)))
+			       (egg--git-pp-grab-line-matching "error: could not apply")))
 			  ((= ret-code 128)
 			   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
-			  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
-		    (egg--git-pp-merge-next-action ret-code "merge")
-		    ;;(egg--git-pp-change-stat ret-code)
-		    ))
+			  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))))
 	   (nconc args (list rev))))
     (when (plist-get res :success)
-      (nconc res (list :files files)))
+      (nconc res (list :files files)
+	     (cond ((plist-get res :conflicts) (list :next-action 'status))
+		   ((member "--no-commit" args) (list :next-action 'commit))
+		   (t nil))))
     res))
+
+
+(defun egg--git-cherry-pick-cmd-test (rev option)
+  (interactive
+   (list (egg-read-rev "cherry pick rev: " 
+		       (or (car (get-text-property (point) :ref))
+			   (get-text-property (point) :commit)
+			   (egg-string-at-point)))
+	 (read-string "cherry pick option: " "--no-commit")))
+  (egg--buffer-handle-result (egg--git-cherry-pick-cmd t rev (list option)) t))
 
 (defun egg--git-apply-cmd (buffer-to-update patch &optional args)
   (let ((files (egg-git-lines-matching-stdin patch "^[0-9]+\t[0-9]+\t\\(.+\\)$" 1
