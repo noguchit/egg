@@ -918,14 +918,25 @@ The string is built based on the current state STATE."
                                 (plist-get state :branch))
                                (t "(detached)")))))
 
-(defsubst egg-call-next-action (action &optional ignored-action)
-  (when (and (symbolp action) (not (eq action ignored-action)))
+
+(defun egg-call-next-action (action &optional ignored-action only-action)
+  (when (and action (symbolp action))
     (let ((cmd (plist-get '(log egg-log
 				status egg-status
 				stash egg-stash
-				commit egg-commit-log-edit)
+				commit egg-commit-log-edit
+				reflog egg-reflog)
 			  action)))
-      (when (commandp cmd t)
+      (when (and (commandp cmd)		;; cmd is a valid command
+		 ;; if only-action is specified, then only take
+		 ;; action if it's the same as only-action
+		 (or (and only-action (eq only-action action))
+		     ;; if only-action is not specified, then
+		     ;; take the action if it's not ignored.
+		     (and (null only-action)
+			  (not (if (symbolp ignored-action) 
+				   (eq action ignored-action)
+				 (memq action ignored-action))))))
 	(call-interactively cmd)))))
 
 
@@ -1468,19 +1479,20 @@ See also `with-temp-file' and `with-output-to-string'."
 (defun egg--do (stdin program args)
   "Run PROGRAM with ARGS synchronously using STDIN as starndard input.
 ARGS should be a list of arguments for PROGRAM."
-  (let (ret)
+  (let ((buf (current-buffer)) ret)
     (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
 		 (if stdin " <REGION\n" "\n"))
     (with-clean-egg--do-buffer
-      (setq ret (cond ((stringp stdin)
-		       (insert stdin)
-		       (apply 'call-process-region (point-min) (point-max)
-			      program t t nil args))
-		      ((consp stdin)
-		       (apply 'call-process-region (car stdin) (cdr stdin)
-			      program nil t nil args))
-		      ((null stdin)
-		       (apply 'call-process program nil t nil args))))
+      (cond ((stringp stdin)
+	     (insert stdin))
+	    ((consp stdin)
+	     (insert-buffer-substring buf (car stdin) (cdr stdin)))
+	    (t nil))
+
+      (setq ret (if stdin
+		    (apply 'call-process-region (point-min) (point-max)
+			   program t t nil args)
+		  (apply 'call-process program nil t nil args)))
       (egg-cmd-log-whole-buffer (current-buffer))
       (egg-cmd-log (format "RET:%d\n" ret))
       (cons ret (current-buffer)))))
@@ -1519,6 +1531,7 @@ EXIT-INFO should be the return value of `egg--do-git' or `egg--do'."
       )))
 
 (defvar egg--do-git-quiet nil)		;; don't show git's output
+(defvar egg--do-no-output-message nil)
 
 (defun egg--do-show-output (cmd-name output-info)
   "Show the output of a synchronous git command as feed-back for the emacs command.
@@ -1527,11 +1540,14 @@ generally the returned value of `egg--do-handle-exit'. OUTPUT-INFO will also be
 used as the returned value of this function."
   (let ((ok (plist-get output-info :success))
 	(line (plist-get output-info :line))
+	(no-output-message (or egg--do-no-output-message "*no output*"))
 	prefix)
     (setq prefix (concat (if (stringp cmd-name) cmd-name "GIT")
 			 (if ok "> " ":ERROR> ")))
     (unless (and egg--do-git-quiet ok)
-      (message (concat prefix (if (stringp line) line "*no output*"))))
+      (message (if (stringp line) 
+		   (concat prefix line)
+		 (concat "EGG: " no-output-message))))
     (unless ok (ding))
     output-info))
 
@@ -2092,17 +2108,46 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
     (egg--git-apply-cmd nil (buffer-string) '("-3"))
     (egg-status)))
 
-(defun egg--buffer-handle-result (result &optional take-next-action ignored-action)
+(defun egg--git-commit-with-region-cmd (buffer-to-update beg end &rest args)
+  (egg--do-git-action-stdin
+   "commit" (cons beg end) buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (nconc (list :success t :next-action 'status)
+		   (or (egg--git-pp-grab-line-matching "files? changed")
+		       (egg--git-pp-grab-line-no -1))))
+	   ((= ret-code 1)
+	    (nconc (list :success t :next-action 'status)
+		   (or (egg--git-pp-grab-line-matching "^nothing")
+		       (egg--git-pp-grab-line-no -1))))
+	   (t
+	    (or (egg--git-pp-grab-1st-line-matching 
+		 '("unresolved" "[Ff]ailed" "[Cc]orrupt" "[Uu]nable" "[Cc]annot" "[Ii]nvalid"
+		   "[Mm]alformed" "[Cc]ould not" "empty message" "No .+ found"
+		   "does not make sense" "nothing to amend" "[Oo]nly one.+ can be used"
+		   "only with" "[Cc]ouldn't" "^fatal:"))
+		(egg--git-pp-grab-line-no -1)))))
+   (append args (list "-v" "-F" "-"))))
+
+(defsubst egg-do-commit-with-region (beg end)
+  (egg--git-commit-with-region-cmd t beg end))
+
+(defsubst egg-do-amend-with-region (beg end)
+  (egg--git-commit-with-region-cmd t beg end "--amend"))
+
+(defun egg--buffer-handle-result (result &optional take-next-action ignored-action only-action)
   "Handle the structure returned by the egg--git-xxxxx-cmd functions.
 RESULT is the returned value of those functions. Proceed to the next logical action
 if TAKE-NEXT-ACTION is non-nil unless the next action is IGNORED-ACTION.
+if ONLY-ACTION is non-nil then only perform the next action if it's the same
+as ONLY-ACTION.
 
 See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
   (let ((ok (plist-get result :success))
 	(next-action (plist-get result :next-action)))
     (egg-revert-visited-files (plist-get result :files))
     (when (and ok take-next-action)
-      (egg-call-next-action next-action ignored-action))
+      (egg-call-next-action next-action ignored-action only-action))
     ok))
 
 (defsubst egg-log-buffer-handle-result (result)
@@ -2125,6 +2170,15 @@ This function should be used in the stash buffer only.
 
 See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
   (egg--buffer-handle-result result t 'stash))
+
+(defsubst egg-file-buffer-handle-result (result)
+  "Handle the RESULT returned by egg--git-xxxxx-cmd functions.
+This function should be used in a file visiting buffer only.
+
+See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
+
+  ;; for file buffer, we only take commit action
+  (egg--buffer-handle-result result t nil 'commit))
 
 (defsubst egg-buffer-do-create-branch (name rev force track ignored-action)
   "Create a new branch synchronously when inside an egg special buffer.
@@ -4344,27 +4398,8 @@ Each string should be a file name relative to the work tree."
                  (apply 'call-process program nil (car logger) nil args))))
     (egg-sync-handle-exit-code ret accepted-codes logger)))
 
-(defsubst egg-sync-do-region-0 (program beg end args)
-  (egg-sync-do program (cons beg end) nil args))
-
-(defsubst egg-sync-0 (&rest args)
-  (egg-sync-do egg-git-command nil nil args))
-
-(defsubst egg-sync-do-region (program beg end &rest args)
-  (egg-sync-do program (cons beg end) nil args))
-
 (defsubst egg-sync-git-region (beg end &rest args)
   (egg-sync-do egg-git-command (cons beg end) nil args))
-
-(defun egg-sync-do-file (file program stdin accepted-codes args)
-  (let ((default-directory (egg-work-tree-dir))
-        output)
-    (setq file (expand-file-name file))
-    ;; (setq args (mapcar (lambda (word)
-    ;;                      (if (string= word file) file word))
-    ;;                    args))
-    (when (setq output (egg-sync-do program stdin accepted-codes args))
-      (cons file output))))
 
 (defun egg-show-git-output (output line-no &optional prefix)
   (unless (stringp prefix) (setq prefix "GIT"))
@@ -4486,18 +4521,15 @@ the source revision."
 
 (defun egg-file-stage-current-file ()
   (interactive)
-  (let ((git-dir (egg-git-dir))
-        (file (buffer-file-name)))
-    (when (egg-sync-do-file file egg-git-command nil nil
-                            (list "add" "--" file))
-      (message "staged %s modifications" file))))
+  (let* ((short-file (file-name-nondirectory (buffer-file-name)))
+	 (egg--do-no-output-message (format "staged %s's modifications" short-file)))
+    (egg-file-buffer-handle-result (egg--git-add-cmd (egg-get-status-buffer) "-v" short-file))))
 
 (defun egg-stage-all-files ()
   (interactive)
   (let ((default-directory (egg-work-tree-dir))
-	(egg--do-git-quiet t))
-    (when (egg--git-add-cmd t "-v" "-u")
-      (message "staged all tracked files's modifications"))))
+	(egg--do-no-output-message "staged all tracked files's modifications"))
+    (egg-file-buffer-handle-result (egg--git-add-cmd (egg-get-status-buffer) "-v" "-u"))))
 
 (defsubst egg-log-buffer-do-move-head (reset-mode rev &optional interactively-used)
   (egg-do-move-head reset-mode rev interactively-used 'log))
@@ -4554,23 +4586,6 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
     (when (egg--git-add-cmd t "-v" ".")
       (message "staged all untracked files"))))
 
-(defun egg-do-unstash-wip (cmd &optional take-next-action ignored-action &rest args)
-  (let ((default-directory (egg-work-tree-dir))
-	(cmd (or cmd "pop"))
-	res files action)
-    (unless (egg-has-stashed-wip)
-      (error "No WIP was stashed!"))
-    (unless (egg-repo-clean)
-      (unless (y-or-n-p (format "repo is NOT clean, still want to %s stash? " cmd))
-	(error "stash %s cancelled!" cmd)))
-    
-    (setq res (egg--git-stash-unstash-cmd t cmd args))
-      (when (setq files (plist-get res :files))
-	(egg-revert-visited-files files))
-      (when (setq action (plist-get res :next-action))
-	(when (and take-next-action (not (eq ignored-action action)))
-	  (egg-call-next-action action)))))
-
 (defun egg-do-tag (&optional rev prompt force)
   (let ((all-refs (egg-all-refs))
         (name (read-string (or prompt "new tag name: ")))
@@ -4609,7 +4624,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
     (egg--buffer-handle-result res t ignored-action)))
 
 (defsubst egg-log-buffer-do-merge-to-head (rev &optional merge-mode-flag msg)
-  (egg-buffer-do-merge-to-head rev merge-mode-flag msg))
+  (egg-buffer-do-merge-to-head rev merge-mode-flag msg 'log))
 
 (defun egg-do-rebase-head (upstream-or-action
                            &optional old-base prompt)
@@ -4690,23 +4705,29 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
 
+;; (defun egg-log-msg-commit ()
+;;   (let (output)
+;;     (setq output
+;;           (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
+;;                                "commit" "-F" "-"))
+;;     (when output
+;;       (egg-show-git-output output -1 "GIT-COMMIT")
+;;       (egg-run-buffers-update-hook))))
+
+;; (defun egg-log-msg-amend-commit ()
+;;   (let (output)
+;;     (setq output
+;;           (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
+;;                                "commit" "--amend" "-F" "-"))
+;;     (when output
+;;       (egg-show-git-output output -1 "GIT-COMMIT-AMEND")
+;;       (egg-run-buffers-update-hook))))
+
 (defun egg-log-msg-commit ()
-  (let (output)
-    (setq output
-          (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
-                               "commit" "-F" "-"))
-    (when output
-      (egg-show-git-output output -1 "GIT-COMMIT")
-      (egg-run-buffers-update-hook))))
+  (egg-do-commit-with-region egg-log-msg-text-beg egg-log-msg-text-end))
 
 (defun egg-log-msg-amend-commit ()
-  (let (output)
-    (setq output
-          (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
-                               "commit" "--amend" "-F" "-"))
-    (when output
-      (egg-show-git-output output -1 "GIT-COMMIT-AMEND")
-      (egg-run-buffers-update-hook))))
+  (egg-do-amend-with-region egg-log-msg-text-beg egg-log-msg-text-end))
 
 (defun egg-log-msg-done ()
   (interactive)
@@ -6886,8 +6907,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((map (make-sparse-keymap "Egg:StashBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
     (define-key map "n" 'egg-stash-buffer-next-stash)
-    (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-stash-buffer-prev-stash)
+    (define-key map "s" 'egg-status)
+    (define-key map "/" 'egg-stash-pickaxe)
     (define-key map (kbd "RET") 'egg-stash-buffer-pop)
     (define-key map "o" 'egg-stash-buffer-pop)
     (define-key map "l" 'egg-log)
@@ -7174,16 +7196,17 @@ current file contains unstaged changes."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
-  (let* ((file (buffer-file-name))
+  (let* ((file (file-name-nondirectory (buffer-file-name)))
          (file-modified (not (egg-file-committed (buffer-file-name))))
+	 (egg--do-no-output-message egg--do-no-output-message)
          rev)
     (when file-modified
       (unless (y-or-n-p (format "ignored uncommitted changes in %s? " file))
         (error "File %s contains uncommitted changes!" file)))
     (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
-    (when (egg-sync-do-file file egg-git-command nil nil
-                            (list "checkout" rev "--" file))
-      (revert-buffer t t t))))
+    (setq egg--do-no-output-message (format "checked out %s's contents from %s" file rev))
+    (egg-file-buffer-handle-result
+     (egg--git-co-files-cmd (egg-get-stash-buffer) file rev))))
 
 (defun egg-file-cancel-modifications (&optional no-confirm)
   "Checkout INDEX's version of the current file.
@@ -7192,15 +7215,16 @@ current file contains unstaged changes."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
-  (let* ((file (buffer-file-name))
+  (let* ((file (file-name-nondirectory (buffer-file-name)))
          (file-modified (not (egg-file-updated (buffer-file-name))))
+	 (egg--do-no-output-message egg--do-no-output-message)
          rev)
     (when (and file-modified (not no-confirm))
       (unless (y-or-n-p (format "ignored unstaged changes in %s? " file))
         (error "File %s contains unstaged changes!" file)))
-    (when (egg-sync-do-file file egg-git-command nil nil
-                            (list "checkout" "--" file))
-      (revert-buffer t t t))))
+    (setq egg--do-no-output-message (format "checked out %s's contents from index" file))
+    (egg-file-buffer-handle-result
+     (egg--git-co-files-cmd (egg-get-stash-buffer) file))))
 
 (defun egg-start-new-branch (&optional force)
   (interactive "P")
