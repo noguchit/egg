@@ -3136,7 +3136,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
     (define-key map (kbd "c") 'egg-commit-log-edit)
     (define-key map (kbd "o") 'egg-status-buffer-checkout-ref)
     (define-key map (kbd "l") 'egg-log)
-    (define-key map (kbd "w") 'egg-buffer-stash-wip)
+    (define-key map (kbd "w") 'egg-status-buffer-stash-wip)
     (define-key map (kbd "W") 'egg-stash)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
@@ -4553,21 +4553,6 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	(egg--do-git-quiet t))
     (when (egg--git-add-cmd t "-v" ".")
       (message "staged all untracked files"))))
-
-(defun egg-do-stash-wip (msg include-untracked &optional take-next-action ignored-action)
-  ""
-  (let ((default-directory (egg-work-tree-dir))
-	res files action)
-    (if (egg-repo-clean)
-        (error "No WIP to stash")
-      (setq res (if include-untracked
-		    (egg--git-stash-save-cmd t "save" "-u" msg)
-		  (egg--git-stash-save-cmd t "save" msg)))
-      (when (setq files (plist-get res :files))
-	(egg-revert-visited-files files))
-      (when (setq action (plist-get res :next-action))
-	(when (and take-next-action (not (eq ignored-action action)))
-	  (egg-call-next-action action))))))
 
 (defun egg-do-unstash-wip (cmd &optional take-next-action ignored-action &rest args)
   (let ((default-directory (egg-work-tree-dir))
@@ -6964,52 +6949,21 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (unless (equal (get-text-property pos :stash) stash)
       (egg-stash-buffer-do-insert-stash pos))))
 
-;; (defun egg-stash-buffer-pop (&optional no-confirm)
-;;   (interactive "P")
-;;   (unless (egg-wdir-clean)
-;;     (egg-status)
-;;     (error "Cannot aplly stash on dirty work-dir"))
-;;   (when (or no-confirm
-;;             (y-or-n-p "pop and apply last WIP to repo? "))
-;;     (when (egg-do-pop-stash)
-;;       (message "GIT-STASH> successfully popped and applied last WIP")
-;;       (egg-status))))
-
 (defun egg-stash-buffer-do-unstash (cmd &rest args)
   (let ((default-directory (egg-work-tree-dir))
-	(cmd (or cmd "pop"))
-	res files action)
+	(cmd (or cmd "pop")))
     (unless (egg-has-stashed-wip)
       (error "No WIP was stashed!"))
     (unless (egg-repo-clean)
       (unless (y-or-n-p (format "repo is NOT clean, still want to apply stash? "))
 	(error "stash %s cancelled!" cmd)))
-    
-    (setq res (egg--git-stash-unstash-cmd t cmd args))
-    (egg-revert-visited-files (plist-get res :files))
-    (when (setq action (plist-get res :next-action))
-      (unless (eq 'stash action)
-	(egg-call-next-action action)))
-    res))
+    (egg-stash-buffer-handle-result (egg--git-stash-unstash-cmd t cmd args))))
 
 (defun egg-stash-buffer-pop (&optional no-confirm)
   (interactive "P")
   (when (or no-confirm
             (y-or-n-p "pop and apply last WIP to repo? "))
     (egg-stash-buffer-do-unstash "pop" "--index")))
-
-;; (defun egg-stash-buffer-apply (pos &optional no-confirm)
-;;   (interactive "dP")
-;;   (unless (egg-wdir-clean)
-;;     (egg-status)
-;;     (error "Cannot aplly stash on dirty work-dir"))
-;;   (let ((stash (get-text-property pos :stash)))
-;;     (when (and stash (stringp stash)
-;;                (or no-confirm
-;;                    (y-or-n-p (format "apply WIP %s to repo? " stash))))
-;;       (when (egg-do-apply-stash stash)
-;;         (message "GIT-STASH> successfully applied %s" stash)
-;;         (egg-status)))))
 
 (defun egg-stash-buffer-apply (pos &optional no-confirm)
   (interactive "d\nP")
@@ -7019,15 +6973,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                    (y-or-n-p (format "apply WIP %s to repo? " stash))))
       (egg-stash-buffer-do-unstash "apply" "--index" stash))))
 
-
-;; (defun egg-buffer-stash-wip (msg)
-;;   (interactive "sshort description of this work-in-progress: ")
-;;   (egg-do-stash-wip msg)
-;;   (egg-stash))
-
-(defun egg-buffer-stash-wip (msg &optional include-untracked)
+(defun egg-status-buffer-stash-wip (msg &optional include-untracked)
   (interactive "sshort description of this work-in-progress: \nP")
-  (egg-do-stash-wip msg include-untracked t 'status))
+  (let ((default-directory (egg-work-tree-dir))
+	(include-untracked (and include-untracked
+				(y-or-n-p "stash untracked files too? ")))
+	res files action)
+    (if (egg-repo-clean)
+        (error "No WIP to stash")
+      (setq res (if include-untracked
+		    (egg--git-stash-save-cmd t "-u" msg)
+		  (egg--git-stash-save-cmd t msg)))
+      (egg-status-buffer-handle-result res))))
 
 (defun egg-stash-buffer-next-stash ()
   "Move to the next stash."
