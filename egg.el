@@ -1437,6 +1437,8 @@ success."
 ;;; New: internal command
 ;;;========================================================
 (defsubst egg--do-output (&optional erase)
+  "Get the output buffer for synchronous commands.
+erase the buffer's contents if ERASE was non-nil."
   (let ((buffer (get-buffer-create (concat " *egg-output:" (egg-git-dir) "*"))))
     (with-current-buffer buffer
       (widen)
@@ -1464,6 +1466,8 @@ See also `with-temp-file' and `with-output-to-string'."
        )))
 
 (defun egg--do (stdin program args)
+  "Run PROGRAM with ARGS synchronously using STDIN as starndard input.
+ARGS should be a list of arguments for PROGRAM."
   (let (ret)
     (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
 		 (if stdin " <REGION\n" "\n"))
@@ -1482,9 +1486,17 @@ See also `with-temp-file' and `with-output-to-string'."
       (cons ret (current-buffer)))))
 
 (defun egg--do-git (stdin cmd args)
+  "Run git command CMD with ARGS synchronously, using STDIN as starndard input.
+ARGS should be a list of arguments for the git command CMD."
   (egg--do stdin "git" (cons cmd args)))
 
 (defun egg--do-handle-exit (exit-info post-proc-func &optional buffer-to-update)
+  "Handle the exit code and the output of a synchronous action.
+EXIT-INFO is the results of the action in form of a pair (return-code . output-buffer).
+POST-PROC-FUNC shall be a function which will be call with 1 argument: the return-code
+of the action. It shall be called in the output buffer of the action.
+This function returns the returned value of POST-PROC-FUNC.
+EXIT-INFO should be the return value of `egg--do-git' or `egg--do'."
   (let ((ret (car exit-info))
 	(buf (cdr exit-info))
 	beg end pp-results)
@@ -1509,6 +1521,10 @@ See also `with-temp-file' and `with-output-to-string'."
 (defvar egg--do-git-quiet nil)		;; don't show git's output
 
 (defun egg--do-show-output (cmd-name output-info)
+  "Show the output of a synchronous git command as feed-back for the emacs command.
+CMD-NAME is the name of the git command such as: merge or checkout. OUTPUT-INFO is
+generally the returned value of `egg--do-handle-exit'. OUTPUT-INFO will also be
+used as the returned value of this function."
   (let ((ok (plist-get output-info :success))
 	(line (plist-get output-info :line))
 	prefix)
@@ -1520,21 +1536,27 @@ See also `with-temp-file' and `with-output-to-string'."
     output-info))
 
 (defun egg--do-git-action (cmd buffer-to-update post-proc-func args)
+  "Run git command CMD with arguments list ARGS.
+Show the output of CMD as feedback of the emacs command.
+Update the buffer BUFFER-TO-UPDATE and use POST-PROC-FUNC as the
+output processing function for `egg--do-handle-exit'."
   (egg--do-show-output (concat "GIT-" (upcase cmd))
 		       (egg--do-handle-exit (egg--do-git nil cmd args)
 					    post-proc-func buffer-to-update)))
 
 (defun egg--do-git-action-stdin (cmd stdin buffer-to-update post-proc-func args)
+  "Run git command CMD with arguments list ARGS and STDIN as standard input.
+Show the output of CMD as feedback of the emacs command.
+Update the buffer BUFFER-TO-UPDATE and use POST-PROC-FUNC as the
+output processing function for `egg--do-handle-exit'."
   (egg--do-show-output (concat "GIT-" (upcase cmd))
 		       (egg--do-handle-exit (egg--do-git stdin cmd args)
 					    post-proc-func buffer-to-update)))
 
-(defun egg--git-pp-grok-exit-code (ret-code &rest accepted-codes)
-  (let ((codes (or accepted-codes (list 0))))
-    (when (memq ret-code accepted-codes)
-      (list :success t))))
 
 (defun egg--git-pp-grab-line-no (line-no)
+  "Grab the line LINE-NO in the current buffer.
+Return it in a form usable for `egg--do-show-output'."
   (let* ((lines (delete "" (save-match-data
 			     (split-string (buffer-string) "\n"))))
 	 (line (cond ((< line-no 0) (nth (- -1 line-no) (nreverse lines)))
@@ -1544,6 +1566,9 @@ See also `with-temp-file' and `with-output-to-string'."
       (list :line line))))
 
 (defun egg--git-pp-grab-line-matching (regex &optional replacement)
+  "If REGEX matched a line in the current buffer, return it in a form suitable
+for `egg--do-show-output'. If REPLACEMENT was provided, use it in the returned
+structure instead of the matching line."
   (let ((matched-line 
 	 (when (stringp regex)
 	   (save-match-data
@@ -1557,10 +1582,25 @@ See also `with-temp-file' and `with-output-to-string'."
       (list :line (if (stringp replacement) replacement matched-line)))))
 
 (defsubst egg--git-pp-grab-1st-line-matching (regex-list &optional replacement)
+  "Try maching the lines in the current buffer against each regex in REGEX-LIST
+until one matched. Return the line in a form suitable for `egg--do-show-output'.
+If REPLACEMENT was provided, use it in the returned structure instead of
+the matching line."
   (car (delq nil (mapcar 'egg--git-pp-grab-line-matching regex-list))))
 
 
-(defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex &optional line-no)
+(defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex
+				     &optional line-no)
+  "Simple post-processing function for synchronous git actions.
+return a suitable structure for `egg--do-show-output'. if RET-CODE was 0
+then the action is considered a success. The line matching OK-REGEX would
+be also return in the structure. OK-REGEX can also be a list of regexes.
+If no line matched OK-REGEX and LINE-NO was provided, then return the line
+LINE-NO in the result structure. If RET-CODE wasn't 0, then use BAD-REGEX
+instead of OK-REGEX.
+
+This simple function might be use as the POST-PROC-FUNC argument of the
+`egg--do-handle-exit' function."
   (if (memq ret-code accepted-codes)
       (nconc (list :success t )
 	     (or (if (consp ok-regex)
@@ -1574,9 +1614,29 @@ See also `with-temp-file' and `with-output-to-string'."
 	       (egg--git-pp-grab-line-no (or line-no -1))))))
 
 (defsubst egg--git-failed-to-parse-output (cmd)
+  "Signal an error that we don't know how to parse the output of the git
+command CMD in the current buffer."
   (error "Don't know now to parse %s's ouput:[%s]" cmd (buffer-string)))
 
+
+(defconst egg--git-action-cmd-doc nil
+  "The `egg--git-xxxxx-cmd' functions perform git command synchronously.
+The returned value is a plist where the results of the action are indexed
+by the :aaaaa symbols
+
+:success (t or nil) the success of the action from egg's p-o-v.
+:line the selected line from the git command's output to display
+      to the user as the feedback of the emacs command. Sometimes
+      egg fabricates this line.
+:files the files in the worktree which might be changed by the
+       git command and their buffers should be reverted.
+:next-action (a symbol) the next logical action for egg to do.")
+
 (defun egg--git-push-cmd (buffer-to-update &rest args)
+  "Peform a synchronous action using the git push command using ARGS as arguments.
+Update BUFFER-TO-UPDATE if needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action 
    "push" buffer-to-update
    (lambda (ret-code)
@@ -1589,6 +1649,10 @@ See also `with-temp-file' and `with-output-to-string'."
   (egg--git-push-cmd nil repo (concat from ":" to)))
 
 (defun egg--git-pp-reset-output (ret-code reset-mode)
+  "Post-processing function for the output the git reset command in the current buffer.
+RET-CODE is the return code of the git process and RESET-MODE would be one
+of: --hard, --keep, --soft, --mixed. --merge is currently not supported.
+Return a structure suitable for `egg--do-show-output'."
   (if (= ret-code 0)
       (nconc (list :success t)
 	     (cond ((string-equal "--hard" reset-mode)
@@ -1611,6 +1675,13 @@ See also `with-temp-file' and `with-output-to-string'."
 	       (egg--git-pp-grab-line-no -1)))))
 
 (defun egg--git-reset-cmd (buffer-to-update reset-mode rev)
+  "Peform a synchronous action using the git reset command.
+Update BUFFER-TO-UPDATE if needed. RESET mode is a one of: --hard, --keep, --mixed
+and --soft (--merge is currently unsupported.). HEAD will be resetted to REV.
+The relevent line from the output of the underlying git command will be display
+as feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let ((pre-reset (egg-get-current-sha1))
 	;; will be changed, if "--keep"
 	(rev-vs-head (egg-git-to-lines "diff" "--name-only" "HEAD" rev))
@@ -1635,6 +1706,12 @@ See also `with-temp-file' and `with-output-to-string'."
   (egg--git-reset-cmd t mode rev))
 
 (defun egg--git-reset-files-cmd (buffer-to-update rev &rest files)
+  "Peform a synchronous action using the git reset command on paths FILES.
+Update BUFFER-TO-UPDATE if needed. FILES will be resetted to REV in the index.
+The relevent line from the output of the underlying git command will be displayed
+as feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action
    "reset" buffer-to-update
    (lambda (ret-code)
@@ -1652,6 +1729,13 @@ See also `with-temp-file' and `with-output-to-string'."
   "\\<\\([uU]nable\\|failed\\|internal error\\|yet to be born\\|invalid\\|is not\\|[Cc]annot\\|incompatible\\|needs a\\|mutually exclusive\\|does not\\)\\>")
 
 (defun egg--git-co-files-cmd (buffer-to-update file-or-files &rest args)
+  "Peform a synchronous action using the git checkout command on FILE-OR-FILES.
+Update BUFFER-TO-UPDATE if needed. ARGS will be passed to the git command as
+arguments. FILE-OR-FILES will be updated to REV in the index as well as the work
+tree. The relevent line from the output of the underlying git command will be
+displayed as feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let* ((files (if (consp file-or-files) file-or-files (list file-or-files)))
 	 (args (append args (cons "--" files)))
 	 (res (egg--do-git-action
@@ -1668,6 +1752,10 @@ See also `with-temp-file' and `with-output-to-string'."
       res)))
 
 (defun egg--git-co-rev-cmd-args (buffer-to-update rev args)
+  "Peform a synchronous action using git to checkout REV to the worktree.
+ARGS will be used as arguments. Update BUFFER-TO-UPDATE if
+needed. The relevent line from the output of the underlying git
+command will be displayed as feedback of emacs command."
   (let (files cmd res)
     (if (eq :0 rev)
 	(setq files ;; index vs wdir
@@ -1704,24 +1792,34 @@ See also `with-temp-file' and `with-output-to-string'."
       res)))
 
 (defsubst egg--git-co-rev-cmd (buffer-to-update rev &rest args)
+  "Peform a synchronous action using git to checkout REV to the worktree.
+ARGS will be used as arguments. Update BUFFER-TO-UPDATE if
+needed. The relevent line from the output of the underlying git
+command will be displayed as feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--git-co-rev-cmd-args buffer-to-update rev args))
 
 
-(defun egg--git-pp-change-stat (&optional ret-code)
-  (save-match-data
-    (let (num-changed files)
-      (goto-char (point-min))
-      (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
-	(setq num-changed (string-to-number (match-string-no-properties 1)))
-	(goto-char (point-min))
-	(while (re-search-forward "^ \\(\\S-+\\) +|.+$" nil t)
-	  (setq files (cons (match-string-no-properties 1) files)))
-	(unless (= (length files) num-changed)
-	  (error "num changed files mismatched! %d vs %d" (length files) num-changed)))
-      (when files 
-	(list :files files)))))
+;; (defun egg--git-pp-change-stat (&optional ret-code)
+;;   (save-match-data
+;;     (let (num-changed files)
+;;       (goto-char (point-min))
+;;       (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
+;; 	(setq num-changed (string-to-number (match-string-no-properties 1)))
+;; 	(goto-char (point-min))
+;; 	(while (re-search-forward "^ \\(\\S-+\\) +|.+$" nil t)
+;; 	  (setq files (cons (match-string-no-properties 1) files)))
+;; 	(unless (= (length files) num-changed)
+;; 	  (error "num changed files mismatched! %d vs %d" (length files) num-changed)))
+;;       (when files 
+;; 	(list :files files)))))
 
 (defun egg--git-pp-merge-next-action (ret-code cmd)
+  "Parse the output of the git merge command in the current buffer.
+Return a suitable structure describing the next action to be taken after
+the merge operation. RET-CODE is the exit code of the underlying git process.
+CMD is the git command (should be merge)."
   (save-match-data
     (goto-char (point-min))
     (cond ((= ret-code 0)
@@ -1744,17 +1842,23 @@ See also `with-temp-file' and `with-output-to-string'."
 	  ;; unknown return code
 	  (t (egg--git-failed-to-parse-output cmd)))))
 
-(defun egg--git-pp-merge-line (ret-code)
-  ;; if ret code wasn't 0, then :line is already correct
-  (when (= ret-code 0)
-    (save-match-data
-      (goto-char (point-min))
-      (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
-	(list :feed-back (buffer-substring-no-properties
-			  (line-beginning-position)
-			  (line-end-position)))))))
+;; (defun egg--git-pp-merge-line (ret-code)
+;;   ;; if ret code wasn't 0, then :line is already correct
+;;   (when (= ret-code 0)
+;;     (save-match-data
+;;       (goto-char (point-min))
+;;       (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
+;; 	(list :feed-back (buffer-substring-no-properties
+;; 			  (line-beginning-position)
+;; 			  (line-end-position)))))))
 
 (defun egg--git-merge-cmd (buffer-to-update &rest args)
+  "Peform the git merge command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE if needed. The relevant line from the
+output of the underlying git command will be displayed as
+feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action 
    "merge" buffer-to-update
    (lambda (ret-code)
@@ -1784,6 +1888,10 @@ See also `with-temp-file' and `with-output-to-string'."
     (egg--git-merge-cmd t "-v" from)))
 
 (defun egg--git-add-cmd (buffer-to-update &rest args)
+  "Run git add command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE as needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action
    "add" buffer-to-update
    (lambda (ret-code)
@@ -1799,6 +1907,10 @@ See also `with-temp-file' and `with-output-to-string'."
    args))
 
 (defun egg--git-rm-cmd (buffer-to-update &rest args)
+  "Run the git rm command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE as needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action
    "rm" buffer-to-update
    (lambda (ret-code)
@@ -1824,7 +1936,10 @@ See also `with-temp-file' and `with-output-to-string'."
   "[Cc]annot\\|not found\\|[Cc]ouldn\\|is not fully\\|Error\\|do\\(es\\)? not\\|[Cc]ould not\\|[Nn]o commit\\|[nN]o such")
 
 (defun egg--git-branch-cmd (buffer-to-update args)
-  (egg--do-git-action
+  "Run the git branch command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE as needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."  (egg--do-git-action
    "branch" buffer-to-update
    (lambda (ret-code)
      (cond ((= ret-code 0)
@@ -1840,6 +1955,10 @@ See also `with-temp-file' and `with-output-to-string'."
   "unimplemented\\|\\([dD]o \\|[Cc]ould \\|[Cc]an\\)not\\|No \\(changes\\|stash found\\)\\|Too many\\|is not\\|unable\\|Conflicts in index\\|No branch name\\|^fatal")
 
 (defun egg--git-stash-save-cmd (buffer-to-update &rest args)
+  "Run the git stash save command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE as needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let ((files (egg-git-to-lines "diff" "--name-only" "HEAD"))
 	res)
     (setq res
@@ -1860,7 +1979,9 @@ See also `with-temp-file' and `with-output-to-string'."
     res))
 
 (defun egg--git-stash-unstash-cmd (buffer-to-update cmd &optional args)
-  (unless (egg-has-stashed-wip)
+  "Run a git stash CMD command synchronously with ARGS as arguments.
+CMD should be pop, apply or branch.
+ See documentation of `egg--git-action-cmd-doc' for the return structure." (unless (egg-has-stashed-wip)
     (error "no WIP was stashed!"))
   (let ((files (egg-git-to-lines "diff" "--name-only" "stash@{0}"))
 	(cmd (or cmd "pop"))
@@ -1887,6 +2008,10 @@ See also `with-temp-file' and `with-output-to-string'."
     res))
 
 (defun egg--git-cherry-pick-cmd (buffer-to-update rev &optional args)
+  "Run the git cherry-pick command synchronously with ARGS as arguments.
+REV is the commit to be picked.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let ((files (egg-git-to-lines "diff" "--name-only" rev))
 	res)
     (setq res 
@@ -1926,6 +2051,10 @@ See also `with-temp-file' and `with-output-to-string'."
   (egg--buffer-handle-result (egg--git-cherry-pick-cmd t rev (list option)) t))
 
 (defun egg--git-apply-cmd (buffer-to-update patch &optional args)
+  "Run the git apply command with PATCH as input and ARGS as arguments.
+Update BUFFER-TO-UPDATE as needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let ((files (egg-git-lines-matching-stdin patch "^[0-9]+\t[0-9]+\t\\(.+\\)$" 1
 					     "apply" "--num-stat" "-"))
 	res)
@@ -1964,6 +2093,11 @@ See also `with-temp-file' and `with-output-to-string'."
     (egg-status)))
 
 (defun egg--buffer-handle-result (result &optional take-next-action ignored-action)
+  "Handle the structure returned by the egg--git-xxxxx-cmd functions.
+RESULT is the returned value of those functions. Proceed to the next logical action
+if TAKE-NEXT-ACTION is non-nil unless the next action is IGNORED-ACTION.
+
+See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
   (let ((ok (plist-get result :success))
 	(next-action (plist-get result :next-action)))
     (egg-revert-visited-files (plist-get result :files))
@@ -1972,15 +2106,33 @@ See also `with-temp-file' and `with-output-to-string'."
     ok))
 
 (defsubst egg-log-buffer-handle-result (result)
+  "Handle the RESULT returned by egg--git-xxxxx-cmd functions.
+This function should be used in the log buffer only.
+
+See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
   (egg--buffer-handle-result result t 'log))
 
 (defsubst egg-status-buffer-handle-result (result)
+  "Handle the RESULT returned by egg--git-xxxxx-cmd functions.
+This function should be used in the status buffer only.
+
+See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
   (egg--buffer-handle-result result t 'status))
 
 (defsubst egg-stash-buffer-handle-result (result)
+  "Handle the RESULT returned by egg--git-xxxxx-cmd functions.
+This function should be used in the stash buffer only.
+
+See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
   (egg--buffer-handle-result result t 'stash))
 
 (defsubst egg-buffer-do-create-branch (name rev force track ignored-action)
+  "Create a new branch synchronously when inside an egg special buffer.
+NAME is the name of the new branch. REV is the starting point of the branch.
+If force is non-nil, then force the creation of new branch even if a branch
+NAME already existed. Branch NAME will bet set up to track REV if REV was
+a branch and track was non-nil. Take the next logical action unless it's
+IGNORED-ACTION."
   (egg--buffer-handle-result
    (egg--git-branch-cmd (egg-get-log-buffer)
 			(nconc (if force (list "-f"))
@@ -1988,9 +2140,11 @@ See also `with-temp-file' and `with-output-to-string'."
 			       (list name rev))) t ignored-action))
 
 (defsubst egg-log-buffer-do-co-rev (rev &rest args)
+  "Checkout REV using ARGS as arguments when in the log buffer."
   (egg-log-buffer-handle-result (egg--git-co-rev-cmd-args t rev args)))
 
 (defsubst egg-status-buffer-do-co-rev (rev &rest args)
+  "Checkout REV using ARGS as arguments when in the status buffer."
   (egg-status-buffer-handle-result (egg--git-co-rev-cmd-args t rev args)))
 
 ;;;========================================================
@@ -2808,6 +2962,10 @@ not called"
      (insert string)))
 
 (defun egg-hunk-section-patch-region-string (pos diff-info reverse)
+  "Build a patch string usable as input for git apply.
+The patch is built based on the hunk enclosing POS. DIFF-INFO
+is the file-level diff information enclosing the hunk. Build a
+reversed patch if REVERSE was non-nil."
   (let* ((head-beg (nth 1 diff-info))
          (head-end (+ (nth 3 diff-info) head-beg))
          (hunk-info (get-text-property (or pos (point)) :hunk))
@@ -4065,7 +4223,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (define-key menu [next] '(menu-item "Goto Next Block" egg-buffer-cmd-navigate-next
                                       :enable (egg-navigation-at-point))))
 
-(defvar egg-switch-to-buffer nil "Set to nonnil for egg-status to switch to the status buffer in the same window.")
+(defvar egg-switch-to-buffer nil
+  "Set to nonnil for egg-status to switch to the status buffer in the same window.")
 
 (defun egg-status (&optional select caller)
   "Show the status of the current repo."
@@ -4086,6 +4245,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
 ;;;========================================================
 
 (defun egg-revert-visited-files (file-or-files)
+  "Revert the buffers of FILE-OR-FILES.
+FILE-OR-FILES can be a string or a list of strings.
+Each string should be a file name relative to the work tree."
   (let* ((git-dir (egg-git-dir))
          (default-directory (egg-work-tree-dir git-dir))
          (files (if (listp file-or-files)
@@ -4230,6 +4392,9 @@ If INIT was not nil, then perform 1st-time initializations as well."
       t)))
 
 (defun egg-hunk-section-apply-cmd (pos &rest args)
+  "Apply using git apply with ARGS as arguments.
+The patch (input to git apply) will be built based on the hunk enclosing
+POS."
   (let ((patch (egg-hunk-section-patch-string pos (member "--reverse" args)))
         (file (car (get-text-property pos :diff)))
 	res)
@@ -4241,14 +4406,17 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (plist-get res :success)))
 
 (defun egg-hunk-section-cmd-stage (pos)
-  (interactive "d")		;; why not "d" ?
+  "Add the hunk enclosing POS to the index."
+  (interactive "d")
   (egg-hunk-section-apply-cmd pos "--cached"))
 
 (defun egg-hunk-section-cmd-unstage (pos)
+  "Remove the hunk enclosing POS from the index."
   (interactive "d")
   (egg-hunk-section-apply-cmd pos "--cached" "--reverse"))
 
 (defun egg-hunk-section-cmd-undo (pos)
+  "Remove the file's modification described by the hunk enclosing POS."
   (interactive "d")
   (unless (or (not egg-confirm-undo)
               (y-or-n-p "irreversibly remove the hunk under cursor? "))
@@ -4306,6 +4474,7 @@ the source revision."
 		(egg--git-co-files-cmd t file)) :files))))
 
 (defun egg-diff-section-cmd-revert-to-head (pos)
+  "Revert the file and its slot in the index to its state in HEAD."
   (interactive "d")
   (let ((file (car (or (get-text-property pos :diff)
                        (error "No diff with file-name here!")))))
@@ -4343,6 +4512,10 @@ the source revision."
       (message "unstaged all modfications in INDEX"))))
 
 (defun egg-status-buffer-revert-to-index (really-do-it take-next-action ignored-action)
+  "When in the status buffer, reset the work-tree to the state in the index.
+When called interactively, do nothing unless REALLY-DO-IT is non-nil.
+Take the next logical action if TAKE-NEXT-ACTION is non-nil unless the
+next action is IGNORED-ACTION."
   (interactive (list (or current-prefix-arg
 			 (y-or-n-p "throw away all unstaged modifications? "))
 		     t nil))
@@ -4351,6 +4524,10 @@ the source revision."
       (egg-status-buffer-do-co-rev :0 "-f" "-a"))))
 
 (defun egg-status-buffer-revert-to-HEAD (really-do-it take-next-action ignored-action)
+  "When in the status buffer, reset the work-tree and the index to HEAD.
+When called interactively, do nothing unless REALLY-DO-IT is non-nil.
+Take the next logical action if TAKE-NEXT-ACTION is non-nil unless the
+next action is IGNORED-ACTION."
   (interactive (list (or current-prefix-arg
 			 (y-or-n-p "throw away all (staged and unstaged) modifications? "))
 		     t nil))
@@ -4359,6 +4536,9 @@ the source revision."
       (egg-do-move-head "--hard" "HEAD" take-next-action ignored-action))))
 
 (defun egg-status-buffer-revert (harder)
+  "When in the status buffer, throw away local modifications in the work-tree.
+if HARDER is non-nil (prefixed with C-u), reset the work-tree to its state
+in HEAD. Otherwise, reset the work-tree to its staged state in the index."
   (interactive "P")
   (funcall (if harder
 	       #'egg-status-buffer-revert-to-HEAD
@@ -4375,6 +4555,7 @@ the source revision."
       (message "staged all untracked files"))))
 
 (defun egg-do-stash-wip (msg include-untracked &optional take-next-action ignored-action)
+  ""
   (let ((default-directory (egg-work-tree-dir))
 	res files action)
     (if (egg-repo-clean)
