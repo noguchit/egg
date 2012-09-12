@@ -2149,66 +2149,70 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 (defsubst egg-do-amend-with-region (beg end)
   (egg--git-commit-with-region-cmd t beg end "--amend"))
 
-(defun egg--git-tag-command (buffer-to-update stdin &optional args)
-  (let ((pp (lambda (ret-code)
-		   (cond ((= ret-code 0)
-			  (nconc (list :success t :next-action 'log)
-				 (or (egg--git-pp-grab-1st-line-matching 
-				      '("Deleted tag" "Updated tag" "Good signature from"
-				      "^user: "))
-				     (egg--git-pp-grab-line-no -1))))
-			 ((= ret-code 1)
-			  (or (egg--git-pp-grab-1st-line-matching
-			       '("no signature found" "^error:"))
-			      (egg--git-pp-grab-line-no -1)))
-			 (t ;; 128
-			  (or (egg--git-pp-grab-1st-line-matching 
-			       '("gpg: skipped" "^gpg: "
-				 "[mM]alformed" "[Uu]nable" "empty.+object"
-				 "bad object" "too big" "[Cc]annot" "[Cc]ould\\(n't\\| not\\)"
-				 "[Nn]o tag" "[In]compatible" "only one" "only allowed"
-				 "too many" "[Ff]ailed" "[Ii]nvalid" "not a valid"
-				 "already exist"
-				 "^error: " "^fatal: "))
-			      (egg--git-pp-grab-line-no -1)))))))
-    (if stdin
-	(egg--do-git-action-stdin "tag" stdin buffer-to-update pp  args)
-      (egg--do-git-action "tag" buffer-to-update pp args))))
+(defun egg--git-tag-cmd-pp (ret-code)
+  (cond ((= ret-code 0)
+	 (nconc (list :success t :next-action 'log)
+		(or (egg--git-pp-grab-1st-line-matching 
+		     '("Deleted tag" "Updated tag" "Good signature from"
+		       "^user: "))
+		    (egg--git-pp-grab-line-no -1))))
+	((= ret-code 1)
+	 (or (egg--git-pp-grab-1st-line-matching
+	      '("no signature found" "^error:"))
+	     (egg--git-pp-grab-line-no -1)))
+	(t ;; 128
+	 (or (egg--git-pp-grab-1st-line-matching 
+	      '("gpg: skipped" "^gpg: "
+		"[mM]alformed" "[Uu]nable" "empty.+object"
+		"bad object" "too big" "[Cc]annot" "[Cc]ould\\(n't\\| not\\)"
+		"[Nn]o tag" "[In]compatible" "only one" "only allowed"
+		"too many" "[Ff]ailed" "[Ii]nvalid" "not a valid"
+		"already exist"
+		"^error: " "^fatal: "))
+	     (egg--git-pp-grab-line-no -1)))))
 
-(defun egg--buffer-do-create-tag (name rev &optional force ignored-action 
-				      annotated-type stdin gpg-uid)
-  (let (args)
-    (setq args (nconc 
-		(cond ((eq annotated-type 'gpg)
-		       (if stdin
-			   (if (stringp gpg-uid)
-			       (list "-u" gpg-uid "-F" "-")
-			     (list "-s" "-F" "-"))
-			 (error "Signed tag needs a composed message!")))
-		      ((or annotated-type stdin)
-		       (cond (stdin ;; stdin is the message
-			      (list "-a" "-F" "-"))
-			     ((stringp annotated-type) ;; annotated-type is the msg
-			      (list "-a" "-m" annotated-type))
-			     (t (error "Need a message to create tag %s!" name))))
-		      (t nil))		;; lightweight tag
-		(if force (list "-f" name rev)
-		    (list name rev))))
+(defun egg--git-tag-command (buffer-to-update stdin &optional args)
+  (if stdin
+      (egg--do-git-action-stdin "tag" stdin buffer-to-update #'egg--git-tag-cmd-pp args)
+    (egg--do-git-action "tag" buffer-to-update #'egg--git-tag-cmd-pp args)))
+
+(defun egg--buffer-do-create-tag (name rev stdin &optional short-msg force ignored-action)
+  (let ((args (list name rev))
+	(check-name (egg-git-to-string "name-rev" name)))
+
+    (cond (stdin (setq args (nconc (list "-F" "-") args)))
+	  (short-msg (setq args (nconc (list "-m" short-msg))))
+	  (t nil))
+
+    (setq check-name (save-match-data (split-string check-name " " t)))
+    (cond ((and (equal (nth 0 check-name) "Could")
+		(equal (nth 1 check-name) "not"))
+	   t)				;; ok, no collision
+	  ((and (equal (nth 0 check-name) name)
+		(not (equal (nth 1 check-name) name))
+		;; collision with existing tag
+		(unless force
+		  (setq force (y-or-n-p (format "a tag %s already exists, force move? " name))))))
+	  ((and (equal (nth 0 check-name) name)
+		(equal (nth 1 check-name) name)
+		;; collison with heads
+		(error "Refuse to introduce ambiguity: a branch head %s alread exist! bailed out!"
+		       name))))
+
+    (when force (setq args (cons "-f" args)))
+    (when (or stdin short-msg) (setq args (cons "-a" args)))
+
     (egg--buffer-handle-result (egg--git-tag-command (egg-get-log-buffer) stdin args)
 			       t ignored-action)))
 
 (defsubst egg-log-buffer-do-tag-commit (name rev force &optional msg)
-  (egg--buffer-do-create-tag name rev force 'log msg))
+  (egg--buffer-do-create-tag name rev nil msg force 'log))
 
 (defsubst egg-status-buffer-tag-HEAD (name rev force &optional msg)
-  (egg--buffer-do-create-tag name rev force 'status msg))
+  (egg--buffer-do-create-tag name rev nil msg force 'status))
 
-(defsubst egg-edit-buffer-do-create-tag (name rev beg end force &optional gpg-uid)
-  (egg--buffer-do-create-tag name rev force nil 
-			     (and gpg-uid 'gpg) ;; create signed tag
-			     (cons beg end) ;; stdin
-			     (and (stringp gpg-uid) gpg-uid) ;; uid
-			     ))
+(defsubst egg-edit-buffer-do-create-tag (name rev beg end force)
+  (egg--buffer-do-create-tag name rev (cons beg end) nil force))
 
 (defun egg--buffer-handle-result (result &optional take-next-action ignored-action only-action)
   "Handle the structure returned by the egg--git-xxxxx-cmd functions.
@@ -7190,7 +7194,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;; (getenv "GPG_TTY")
 ;; (getenv "GPG_AGENT_INFO")
 
-(defun egg-tag-msg-create-tag (&optional sign-tag use-gpg-default-uid &rest ignored)
+(defun egg-tag-msg-create-tag (&optional force &rest ignored)
   (let ((egg--do-no-output-message 
 	 (format "annotated %s with tag '%s'" 
 		 egg-internal-annotated-tag-target
@@ -7200,15 +7204,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
      egg-internal-annotated-tag-target
      egg-log-msg-text-beg
      egg-log-msg-text-end
-
-     nil				;; no force for annotated tags
-
-     (when (or sign-tag 
-	       (y-or-n-p (format "sign (using gpg) the tag '%s'?" 
-				 egg-internal-annotated-tag-name)))
-       (if use-gpg-default-uid
-	   t
-	 (read-string "signed %s using key uid: " (egg-user-name)))))))
+     force)))
 
 (define-egg-buffer tag:msg "*%s-tag:msg@%s*"
   (egg-log-msg-mode)
