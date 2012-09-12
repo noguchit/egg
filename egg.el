@@ -2092,7 +2092,7 @@ Update BUFFER-TO-UPDATE as needed.
 
 See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let ((files (egg-git-lines-matching-stdin patch "^[0-9]+\t[0-9]+\t\\(.+\\)$" 1
-					     "apply" "--num-stat" "-"))
+					     "apply" "--numstat" "-"))
 	res)
     (setq res 
 	  (egg--do-git-action-stdin
@@ -2256,8 +2256,8 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 (defsubst egg-log-buffer-do-tag-commit (name rev force &optional msg)
   (egg--buffer-do-create-tag name rev nil msg force 'log))
 
-(defsubst egg-status-buffer-tag-HEAD (name rev force &optional msg)
-  (egg--buffer-do-create-tag name rev nil msg force 'status))
+(defsubst egg-status-buffer-do-tag-HEAD (name force &optional msg)
+  (egg--buffer-do-create-tag name "HEAD" nil msg force 'status))
 
 (defsubst egg-edit-buffer-do-create-tag (name rev beg end force)
   (egg--buffer-do-create-tag name rev (cons beg end) nil force))
@@ -4866,7 +4866,8 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
         (ring-insert egg-log-msg-ring
                      (buffer-substring-no-properties egg-log-msg-text-beg
                                                      egg-log-msg-text-end))
-        (funcall egg-log-msg-action (> level 3) (> level 15) (> level 63))
+        (save-excursion
+	  (funcall egg-log-msg-action (> level 3) (> level 15) (> level 63)))
         (let ((inhibit-read-only t)
               (win (get-buffer-window (current-buffer))))
           (erase-buffer)
