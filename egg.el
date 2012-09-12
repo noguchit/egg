@@ -7226,21 +7226,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;;;========================================================
 (defvar egg-internal-annotated-tag-name nil)
 (defvar egg-internal-annotated-tag-target nil)
-
-;; (defun egg-tag-msg-create-tag ()
-;;   (let (output)
-;;     (setq output
-;;           (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
-;;                                "tag" "-a" "-F" "-"
-;;                                egg-internal-annotated-tag-name
-;;                                egg-internal-annotated-tag-target))
-;;     (when output
-;;       (egg-show-git-output output -1 "GIT-ANNOTATED-TAG")
-;;       (egg-run-buffers-update-hook))))
+(defconst egg-gpg-agent-info nil)
 
 ;; (setenv "GPG_AGENT_INFO" "/tmp/gpg-peL1m4/S.gpg-agent:16429:1")
-;; (setenv "GPG_TTY" nil)
-;; (getenv "GPG_TTY")
 ;; (getenv "GPG_AGENT_INFO")
 
 (defun egg-tag-msg-create-tag (&optional sign-tag use-gpg-default &rest ignored)
@@ -7251,11 +7239,16 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (let ((egg--do-no-output-message (format "signed %s with tag '%s'" 
 					       egg-internal-annotated-tag-target
 					       egg-internal-annotated-tag-name))
+	    (gpg-agent-info (or egg-gpg-agent-info (getenv "GPG_AGENT_INFO")))
 	    gpg-uid)
         (unless use-gpg-default
 	  (setq gpg-uid (read-string (format "gpg sign %s using key uid: "
 					     egg-internal-annotated-tag-name)
 				     (egg-user-name))))
+
+	(unless gpg-agent-info
+	  (error "gpg-agent's info is unavailable! please set GPG_AGENT_INFO environment!"))
+
 	(egg--async-create-signed-tag-cmd 
 	 (egg-get-log-buffer)
 	 (buffer-substring-no-properties egg-log-msg-text-beg egg-log-msg-text-end)
