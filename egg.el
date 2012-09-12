@@ -1425,6 +1425,12 @@ success."
 (defsubst egg-async-1 (func-args &rest args)
   (egg-async-do 1 func-args args))
 
+(defsubst egg-async-0-args (func-args args)
+  (egg-async-do 0 func-args args))
+
+(defsubst egg-async-1-args (func-args args)
+  (egg-async-do 1 func-args args))
+
 (defvar egg-async-process nil)
 (defvar egg-async-cmds nil)
 (defvar egg-async-exit-msg nil)
@@ -2171,39 +2177,81 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 		"^error: " "^fatal: "))
 	     (egg--git-pp-grab-line-no -1)))))
 
-(defun egg--git-tag-command (buffer-to-update stdin &optional args)
+(defun egg--git-tag-cmd (buffer-to-update stdin &optional args)
   (if stdin
       (egg--do-git-action-stdin "tag" stdin buffer-to-update #'egg--git-tag-cmd-pp args)
     (egg--do-git-action "tag" buffer-to-update #'egg--git-tag-cmd-pp args)))
 
+(defun egg--git-tag-check-name (name &optional force ambiguity-ok)
+  (let ((check-name (egg-git-to-string "name-rev" name)))
+    (setq check-name (save-match-data (split-string check-name " " t)))
+    (cond ((and (equal (nth 0 check-name) "Could")
+		(equal (nth 1 check-name) "not"))
+	   nil) ;; ok, no collision
+	  ((and (equal (nth 0 check-name) name)
+		(not (equal (nth 1 check-name) name))
+		;; collision with existing tag
+		(or force
+		    (y-or-n-p (format "a tag %s already exists, force move? " name)))))
+	  ((and (equal (nth 0 check-name) name)
+		(equal (nth 1 check-name) name)
+		;; collison with heads
+		(unless ambiguity-ok
+		  (error "Refuse to introduce ambiguity: a branch head %s alread exist! bailed out!"
+			 name))
+		nil)))))
+
 (defun egg--buffer-do-create-tag (name rev stdin &optional short-msg force ignored-action)
   (let ((args (list name rev))
-	(check-name (egg-git-to-string "name-rev" name)))
+	(check-name (egg-git-to-string "name-rev" name))
+	res)
 
     (cond (stdin (setq args (nconc (list "-F" "-") args)))
 	  (short-msg (setq args (nconc (list "-m" short-msg))))
 	  (t nil))
 
-    (setq check-name (save-match-data (split-string check-name " " t)))
-    (cond ((and (equal (nth 0 check-name) "Could")
-		(equal (nth 1 check-name) "not"))
-	   t)				;; ok, no collision
-	  ((and (equal (nth 0 check-name) name)
-		(not (equal (nth 1 check-name) name))
-		;; collision with existing tag
-		(unless force
-		  (setq force (y-or-n-p (format "a tag %s already exists, force move? " name))))))
-	  ((and (equal (nth 0 check-name) name)
-		(equal (nth 1 check-name) name)
-		;; collison with heads
-		(error "Refuse to introduce ambiguity: a branch head %s alread exist! bailed out!"
-		       name))))
-
+    (setq force (egg--git-tag-check-name name force))
     (when force (setq args (cons "-f" args)))
     (when (or stdin short-msg) (setq args (cons "-a" args)))
 
-    (egg--buffer-handle-result (egg--git-tag-command (egg-get-log-buffer) stdin args)
-			       t ignored-action)))
+    (setq res (egg--git-tag-cmd (egg-get-log-buffer) stdin args))
+    (when (plist-get res :success)
+      (setq res (nconc (list :next-action 'log) res)))
+
+    (egg--buffer-handle-result res t ignored-action)))
+
+;;(setenv "GPG_AGENT_INFO" "/tmp/gpg-SbJxGl/S.gpg-agent:28016:1")
+;;(getenv "GPG_AGENT_INFO")
+
+(defun egg--async-create-signed-tag-handler (buffer-to-update name rev)
+  (goto-char (point-min))
+  (re-search-forward "EGG-GIT-OUTPUT:\n" nil t)
+  (if (not (match-end 0))
+      (message "something wrong with git-tag -s output!")
+    (let* ((proc egg-async-process)
+	   (ret-code (process-exit-status proc))
+	   res)
+      (goto-char (match-end 0))
+      (save-restriction
+	(narrow-to-region (point) (point-max))
+	(setq res (egg--do-show-output 
+		   "GIT-TAG-GPG"
+		   (egg--do-handle-exit (cons ret-code (current-buffer)) 
+					#'egg--git-tag-cmd-pp
+					buffer-to-update)))
+	(when (plist-get res :success)
+	  (setq res (nconc (list :next-action 'log) res)))
+	(egg--buffer-handle-result res t)))))
+
+(defun egg--async-create-signed-tag-cmd (buffer-to-update msg name rev &optional gpg-uid force)
+  (let ((force (egg--git-tag-check-name name force))
+	(args (list "-m" msg name rev)))
+
+    (when force (setq args (cons "-f" args)))
+
+    (setq args (if (stringp gpg-uid) (nconc (list "-u" gpg-uid) args) (cons "-s" args)))
+    (egg-async-1-args (list #'egg--async-create-signed-tag-handler buffer-to-update name rev)
+		      (cons "tag" args))))
 
 (defsubst egg-log-buffer-do-tag-commit (name rev force &optional msg)
   (egg--buffer-do-create-tag name rev nil msg force 'log))
@@ -7194,17 +7242,33 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;; (getenv "GPG_TTY")
 ;; (getenv "GPG_AGENT_INFO")
 
-(defun egg-tag-msg-create-tag (&optional force &rest ignored)
-  (let ((egg--do-no-output-message 
-	 (format "annotated %s with tag '%s'" 
-		 egg-internal-annotated-tag-target
-		 egg-internal-annotated-tag-name)))
-    (egg-edit-buffer-do-create-tag 
-     egg-internal-annotated-tag-name
-     egg-internal-annotated-tag-target
-     egg-log-msg-text-beg
-     egg-log-msg-text-end
-     force)))
+(defun egg-tag-msg-create-tag (&optional sign-tag use-gpg-default &rest ignored)
+  (unless sign-tag
+    (setq sign-tag 
+	  (y-or-n-p (format "sign tag %s with GnuPG? " egg-internal-annotated-tag-name))))
+  (if sign-tag
+      (let ((egg--do-no-output-message (format "signed %s with tag '%s'" 
+					       egg-internal-annotated-tag-target
+					       egg-internal-annotated-tag-name))
+	    gpg-uid)
+        (unless use-gpg-default
+	  (setq gpg-uid (read-string (format "gpg sign %s using key uid: "
+					     egg-internal-annotated-tag-name)
+				     (egg-user-name))))
+	(egg--async-create-signed-tag-cmd 
+	 (egg-get-log-buffer)
+	 (buffer-substring-no-properties egg-log-msg-text-beg egg-log-msg-text-end)
+	 egg-internal-annotated-tag-name egg-internal-annotated-tag-target gpg-uid))
+    (let ((egg--do-no-output-message 
+	   (format "annotated %s with tag '%s'" 
+		   egg-internal-annotated-tag-target
+		   egg-internal-annotated-tag-name)))
+      (egg-edit-buffer-do-create-tag 
+       egg-internal-annotated-tag-name
+       egg-internal-annotated-tag-target
+       egg-log-msg-text-beg
+       egg-log-msg-text-end
+       nil))))
 
 (define-egg-buffer tag:msg "*%s-tag:msg@%s*"
   (egg-log-msg-mode)
