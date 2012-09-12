@@ -38,6 +38,12 @@
 ;;;
 ;;;    This is my fork of bogolisk egg . his work is at
 ;;     http://github.com/bogolisk/egg
+;;
+;;  ssh and github: please use key authentication since egg doesn't
+;;                  handle login/passwd prompt
+;;
+;;  gpg and tag : please add "use-agent" option in your gpg.conf
+;;                since egg doesn't handle passphrase prompt.
 ;;;
 
 ;; Options
@@ -1250,6 +1256,14 @@ was not nil then use it as repo state instead of re-read from disc."
 as repo state instead of re-read from disc."
   (plist-get (or state (egg-repo-state)) :sha1))
 
+(defsubst egg-user-name (&optional state)
+  "The configured user name."
+  (plist-get (or state (egg-repo-state :name)) :name))
+
+(defsubst egg-user-email (&optional state)
+  "The configured email."
+  (plist-get (or state (egg-repo-state :email)) :email))
+
 (defsubst egg-head (&optional state)
   "a cons cell (branch . sha1) of HEAD.  if STATE was not nil then use it
 as repo state instead of re-read from disc."
@@ -2134,6 +2148,67 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 
 (defsubst egg-do-amend-with-region (beg end)
   (egg--git-commit-with-region-cmd t beg end "--amend"))
+
+(defun egg--git-tag-command (buffer-to-update stdin &optional args)
+  (let ((pp (lambda (ret-code)
+		   (cond ((= ret-code 0)
+			  (nconc (list :success t :next-action 'log)
+				 (or (egg--git-pp-grab-1st-line-matching 
+				      '("Deleted tag" "Updated tag" "Good signature from"
+				      "^user: "))
+				     (egg--git-pp-grab-line-no -1))))
+			 ((= ret-code 1)
+			  (or (egg--git-pp-grab-1st-line-matching
+			       '("no signature found" "^error:"))
+			      (egg--git-pp-grab-line-no -1)))
+			 (t ;; 128
+			  (or (egg--git-pp-grab-1st-line-matching 
+			       '("gpg: skipped" "^gpg: "
+				 "[mM]alformed" "[Uu]nable" "empty.+object"
+				 "bad object" "too big" "[Cc]annot" "[Cc]ould\\(n't\\| not\\)"
+				 "[Nn]o tag" "[In]compatible" "only one" "only allowed"
+				 "too many" "[Ff]ailed" "[Ii]nvalid" "not a valid"
+				 "already exist"
+				 "^error: " "^fatal: "))
+			      (egg--git-pp-grab-line-no -1)))))))
+    (if stdin
+	(egg--do-git-action-stdin "tag" stdin buffer-to-update pp  args)
+      (egg--do-git-action "tag" buffer-to-update pp args))))
+
+(defun egg--buffer-do-create-tag (name rev &optional force ignored-action 
+				      annotated-type stdin gpg-uid)
+  (let (args)
+    (setq args (nconc 
+		(cond ((eq annotated-type 'gpg)
+		       (if stdin
+			   (if (stringp gpg-uid)
+			       (list "-u" gpg-uid "-F" "-")
+			     (list "-s" "-F" "-"))
+			 (error "Signed tag needs a composed message!")))
+		      ((or annotated-type stdin)
+		       (cond (stdin ;; stdin is the message
+			      (list "-a" "-F" "-"))
+			     ((stringp annotated-type) ;; annotated-type is the msg
+			      (list "-a" "-m" annotated-type))
+			     (t (error "Need a message to create tag %s!" name))))
+		      (t nil))		;; lightweight tag
+		(if force (list "-f" name rev)
+		    (list name rev))))
+    (egg--buffer-handle-result (egg--git-tag-command (egg-get-log-buffer) stdin args)
+			       t ignored-action)))
+
+(defsubst egg-log-buffer-do-tag-commit (name rev force &optional msg)
+  (egg--buffer-do-create-tag name rev force 'log msg))
+
+(defsubst egg-status-buffer-tag-HEAD (name rev force &optional msg)
+  (egg--buffer-do-create-tag name rev force 'status msg))
+
+(defsubst egg-edit-buffer-do-create-tag (name rev beg end force &optional gpg-uid)
+  (egg--buffer-do-create-tag name rev force nil 
+			     (and gpg-uid 'gpg) ;; create signed tag
+			     (cons beg end) ;; stdin
+			     (and (stringp gpg-uid) gpg-uid) ;; uid
+			     ))
 
 (defun egg--buffer-handle-result (result &optional take-next-action ignored-action only-action)
   "Handle the structure returned by the egg--git-xxxxx-cmd functions.
@@ -4723,14 +4798,14 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 ;;       (egg-show-git-output output -1 "GIT-COMMIT-AMEND")
 ;;       (egg-run-buffers-update-hook))))
 
-(defun egg-log-msg-commit ()
+(defun egg-log-msg-commit (&rest ignored)
   (egg-do-commit-with-region egg-log-msg-text-beg egg-log-msg-text-end))
 
-(defun egg-log-msg-amend-commit ()
+(defun egg-log-msg-amend-commit (&rest ignored)
   (egg-do-amend-with-region egg-log-msg-text-beg egg-log-msg-text-end))
 
-(defun egg-log-msg-done ()
-  (interactive)
+(defun egg-log-msg-done (level)
+  (interactive "p")
   (widen)
   (goto-char egg-log-msg-text-beg)
   (if (save-excursion (re-search-forward "\\sw\\|\\-"
@@ -4739,7 +4814,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
         (ring-insert egg-log-msg-ring
                      (buffer-substring-no-properties egg-log-msg-text-beg
                                                      egg-log-msg-text-end))
-        (funcall egg-log-msg-action)
+        (funcall egg-log-msg-action (> level 3) (> level 15) (> level 63))
         (let ((inhibit-read-only t)
               (win (get-buffer-window (current-buffer))))
           (erase-buffer)
@@ -5632,7 +5707,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                  ": "
                  (egg-text (concat "Commit " cherry-op "ed cherry")
                            'egg-text-3)))
-              `(lambda ()
+              `(lambda (&rest ignored)
                  (let ((process-environment process-environment))
                    (mapcar (lambda (env-lst)
                              (setenv (car env-lst) (cadr env-lst)))
@@ -5652,7 +5727,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                                 'egg-branch) ": "
                                 (egg-text "Re-edit cherry's commit log"
                                           'egg-text-3))
-              `(lambda ()
+              `(lambda (&rest ignored)
                  (let ((process-environment process-environment))
                    (mapcar (lambda (env-lst)
                              (setenv (car env-lst) (cadr env-lst)))
@@ -5771,17 +5846,18 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 
 (defun egg-log-buffer-tag-commit (pos &optional force)
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos)))
-    (when (egg-do-tag rev (format "tag %s with name: " rev) force)
-      (funcall egg-buffer-refresh-func (current-buffer)))))
+  (let* ((rev (egg-log-buffer-get-rev-at pos))
+	 (name (read-string (format "tag %s with name: " rev)))
+	 (egg--do-no-output-message 
+	  (format "new lightweight tag '%s' at %s" name rev)))
+    (egg-log-buffer-do-tag-commit name rev force)))
 
-(defun egg-log-buffer-atag-commit (pos &optional force)
-  (interactive "d\nP")
-  (let ((commit (get-text-property pos :commit)))
-    (egg-create-annotated-tag
-     (read-string (format "create annotated tag on %s with name: "
-                          (egg-describe-rev commit)))
-     commit)))
+(defun egg-log-buffer-atag-commit (pos)
+  (interactive "d")
+  (let* ((commit (get-text-property pos :commit))
+	 (name (read-string (format "create annotated tag on %s with name: "
+				    (egg-describe-rev commit)))))
+    (egg-create-annotated-tag name commit)))
 
 (defun egg-log-buffer-create-new-branch (pos &optional force)
   "Create a new branch, without checking it out."
@@ -7098,16 +7174,41 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defvar egg-internal-annotated-tag-name nil)
 (defvar egg-internal-annotated-tag-target nil)
 
-(defun egg-tag-msg-create-tag ()
-  (let (output)
-    (setq output
-          (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
-                               "tag" "-a" "-F" "-"
-                               egg-internal-annotated-tag-name
-                               egg-internal-annotated-tag-target))
-    (when output
-      (egg-show-git-output output -1 "GIT-ANNOTATED-TAG")
-      (egg-run-buffers-update-hook))))
+;; (defun egg-tag-msg-create-tag ()
+;;   (let (output)
+;;     (setq output
+;;           (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
+;;                                "tag" "-a" "-F" "-"
+;;                                egg-internal-annotated-tag-name
+;;                                egg-internal-annotated-tag-target))
+;;     (when output
+;;       (egg-show-git-output output -1 "GIT-ANNOTATED-TAG")
+;;       (egg-run-buffers-update-hook))))
+
+;; (setenv "GPG_AGENT_INFO" "/tmp/gpg-peL1m4/S.gpg-agent:16429:1")
+;; (setenv "GPG_TTY" nil)
+;; (getenv "GPG_TTY")
+;; (getenv "GPG_AGENT_INFO")
+
+(defun egg-tag-msg-create-tag (&optional sign-tag use-gpg-default-uid &rest ignored)
+  (let ((egg--do-no-output-message 
+	 (format "annotated %s with tag '%s'" 
+		 egg-internal-annotated-tag-target
+		 egg-internal-annotated-tag-name)))
+    (egg-edit-buffer-do-create-tag 
+     egg-internal-annotated-tag-name
+     egg-internal-annotated-tag-target
+     egg-log-msg-text-beg
+     egg-log-msg-text-end
+
+     nil				;; no force for annotated tags
+
+     (when (or sign-tag 
+	       (y-or-n-p (format "sign (using gpg) the tag '%s'?" 
+				 egg-internal-annotated-tag-name)))
+       (if use-gpg-default-uid
+	   t
+	 (read-string "signed %s using key uid: " (egg-user-name)))))))
 
 (define-egg-buffer tag:msg "*%s-tag:msg@%s*"
   (egg-log-msg-mode)
