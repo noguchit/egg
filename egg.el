@@ -2128,32 +2128,42 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
     (egg--git-apply-cmd nil (buffer-string) '("-3"))
     (egg-status)))
 
+(defun egg--git-pp-commit-output (ret-code)
+  (cond ((= ret-code 0)
+	 (nconc (list :success t :next-action 'status)
+		(or (egg--git-pp-grab-line-matching "files? changed")
+		    (egg--git-pp-grab-line-no -1))))
+	((= ret-code 1)
+	 (nconc (list :success t :next-action 'status)
+		(or (egg--git-pp-grab-line-matching "^nothing" "^Abort")
+		    (egg--git-pp-grab-line-no -1))))
+	(t
+	 (or (egg--git-pp-grab-1st-line-matching 
+	      '("unresolved" "[Ff]ailed" "[Cc]orrupt" "[Uu]nable" "[Cc]annot" "[Ii]nvalid"
+		"[Mm]alformed" "[Cc]ould not" "empty message" "No .+ found"
+		"does not make sense" "nothing to amend" "[Oo]nly one.+ can be used"
+		"only with" "[Cc]ouldn't" "^fatal:"))
+	     (egg--git-pp-grab-line-no -1)))))
+
 (defun egg--git-commit-with-region-cmd (buffer-to-update beg end &rest args)
-  (egg--do-git-action-stdin
-   "commit" (cons beg end) buffer-to-update
-   (lambda (ret-code)
-     (cond ((= ret-code 0)
-	    (nconc (list :success t :next-action 'status)
-		   (or (egg--git-pp-grab-line-matching "files? changed")
-		       (egg--git-pp-grab-line-no -1))))
-	   ((= ret-code 1)
-	    (nconc (list :success t :next-action 'status)
-		   (or (egg--git-pp-grab-line-matching "^nothing")
-		       (egg--git-pp-grab-line-no -1))))
-	   (t
-	    (or (egg--git-pp-grab-1st-line-matching 
-		 '("unresolved" "[Ff]ailed" "[Cc]orrupt" "[Uu]nable" "[Cc]annot" "[Ii]nvalid"
-		   "[Mm]alformed" "[Cc]ould not" "empty message" "No .+ found"
-		   "does not make sense" "nothing to amend" "[Oo]nly one.+ can be used"
-		   "only with" "[Cc]ouldn't" "^fatal:"))
-		(egg--git-pp-grab-line-no -1)))))
-   (append args (list "-v" "-F" "-"))))
+  (egg--do-git-action-stdin "commit"
+			    (cons beg end) buffer-to-update
+			    #'egg--git-pp-commit-output
+			    (append args (list "-v" "-F" "-"))))
 
 (defsubst egg-do-commit-with-region (beg end)
   (egg--git-commit-with-region-cmd t beg end))
 
 (defsubst egg-do-amend-with-region (beg end)
   (egg--git-commit-with-region-cmd t beg end "--amend"))
+
+(defun egg--git-amend-no-edit-cmd (buffer-to-update &rest args)
+  (egg--do-git-action
+   "commit" buffer-to-update #'egg--git-pp-commit-output
+   (nconc (list "--amend" "--no-edit") args)))
+
+(defsubst egg-buffer-do-amend-no-edit (&rest args)
+  (egg--buffer-handle-result (egg--git-amend-no-edit-cmd t) t))
 
 (defun egg--git-tag-cmd-pp (ret-code)
   (cond ((= ret-code 0)
@@ -4970,12 +4980,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 				#'egg-log-msg-commit
 				nil)))))
   (if amend-no-msg
-      (let (cmd-res feed-back)
-	(with-temp-buffer
-	  (setq cmd-res (egg-git-ok (current-buffer) "commit" "--amend" "--no-edit"))
-	  (setq feed-back (car (nreverse (split-string (buffer-string) "[\n]+" t))))
-	  (egg-run-buffers-update-hook))
-	(message "GIT-COMMIT> %s" feed-back))
+      (egg-buffer-do-amend-no-edit)
     (let* ((git-dir (egg-git-dir))
 	   (default-directory (egg-work-tree-dir git-dir))
 	   (buf (egg-get-commit-buffer 'create))
@@ -5760,12 +5765,12 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                  ": "
                  (egg-text (concat "Commit " cherry-op "ed cherry")
                            'egg-text-3)))
-              `(lambda (&rest ignored)
+              `(lambda (&rest passed-thru)
                  (let ((process-environment process-environment))
                    (mapcar (lambda (env-lst)
                              (setenv (car env-lst) (cadr env-lst)))
                            (egg-rebase-author-info ,rebase-dir))
-                   (egg-log-msg-commit))
+                   (apply #'egg-log-msg-commit passed-thru))
                  (with-current-buffer ,buffer
                    (egg-do-async-rebase-continue
                     #'egg-handle-rebase-interactive-exit
@@ -5780,12 +5785,12 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                                 'egg-branch) ": "
                                 (egg-text "Re-edit cherry's commit log"
                                           'egg-text-3))
-              `(lambda (&rest ignored)
+              `(lambda (&rest passed-thru)
                  (let ((process-environment process-environment))
                    (mapcar (lambda (env-lst)
                              (setenv (car env-lst) (cadr env-lst)))
                            (egg-rebase-author-info ,rebase-dir))
-                   (egg-log-msg-amend-commit))
+                   (apply #'egg-log-msg-amend-commit passed-thru))
                  (with-current-buffer ,buffer
                    (egg-do-async-rebase-continue
                     #'egg-handle-rebase-interactive-exit
