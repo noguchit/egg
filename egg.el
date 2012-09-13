@@ -1470,8 +1470,10 @@ success."
 (defsubst egg--do-output (&optional erase)
   "Get the output buffer for synchronous commands.
 erase the buffer's contents if ERASE was non-nil."
-  (let ((buffer (get-buffer-create (concat " *egg-output:" (egg-git-dir) "*"))))
+  (let ((buffer (get-buffer-create (concat " *egg-output:" (egg-git-dir) "*")))
+	(default-directory default-directory))
     (with-current-buffer buffer
+      (setq default-directory (egg-work-tree-dir))
       (widen)
       (if erase (erase-buffer)))
     buffer))
@@ -4660,7 +4662,8 @@ the source revision."
   (interactive)
   (let* ((short-file (file-name-nondirectory (buffer-file-name)))
 	 (egg--do-no-output-message (format "staged %s's modifications" short-file)))
-    (egg-file-buffer-handle-result (egg--git-add-cmd (egg-get-status-buffer) "-v" short-file))))
+    (egg-file-buffer-handle-result (egg--git-add-cmd (egg-get-status-buffer) "-v" 
+						     (buffer-file-name)))))
 
 (defun egg-stage-all-files ()
   (interactive)
@@ -4823,17 +4826,44 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 (defvar egg-log-msg-ring (make-ring 32))
 (defvar egg-log-msg-ring-idx nil)
 (defvar egg-log-msg-action nil)
-(defvar egg-log-msg-text-beg nil)
-(defvar egg-log-msg-text-end nil)
 (defvar egg-log-msg-diff-beg nil)
+
+(defvar egg-log-msg-closure nil 
+  "Closure for be called when done composing a message.
+It must be a local variable in the msg buffer. It's a list
+in the form (func arg1 arg2 arg3...).
+
+func should be a function expecting the following args:
+PREFIX-LEVEL the prefix argument converted to a number.
+BEG a marker for the beginning of the composed text.
+END a marker for the end of the composed text.
+NEXT-BEG is a marker for the beginnning the next section.
+ARG1 ARG2 ARG3... are the items composing the closure
+when the buffer was created.")
+
+(defsubst egg-log-msg-func () (car egg-log-msg-closure))
+(defsubst egg-log-msg-args () (cdr egg-log-msg-closure))
+(defsubst egg-log-msg-prefix () (nth 0 (egg-log-msg-args)))
+(defsubst egg-log-msg-text-beg () (nth 1 (egg-log-msg-args)))
+(defsubst egg-log-msg-text-end () (nth 2 (egg-log-msg-args)))
+(defsubst egg-log-msg-next-beg () (nth 3 (egg-log-msg-args)))
+(defsubst egg-log-msg-extras () (nthcdr 4 (egg-log-msg-args)))
+(defsubst egg-log-msg-set-prefix (prefix) (setcar (egg-log-msg-args) prefix))
+(defsubst egg-log-msg-mk-closure-input (func &rest args)
+  (cons func args))
+(defsubst egg-log-msg-mk-closure-from-input (input prefix beg end next)
+  (cons (car input) (nconc (list prefix beg end next) (cdr input))))
+(defsubst egg-log-msg-apply-closure (prefix) 
+  (egg-log-msg-set-prefix prefix)
+  (apply (egg-log-msg-func) (egg-log-msg-args)))
+
+
 (define-derived-mode egg-log-msg-mode text-mode "Egg-LogMsg"
   "Major mode for editing Git log message.\n\n
 \{egg-log-msg-mode-map}."
   (setq default-directory (egg-work-tree-dir))
   (make-local-variable 'egg-log-msg-action)
   (set (make-local-variable 'egg-log-msg-ring-idx) nil)
-  (set (make-local-variable 'egg-log-msg-text-beg) nil)
-  (set (make-local-variable 'egg-log-msg-text-end) nil)
   (set (make-local-variable 'egg-log-msg-diff-beg) nil))
 
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
@@ -4842,48 +4872,30 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
 
-;; (defun egg-log-msg-commit ()
-;;   (let (output)
-;;     (setq output
-;;           (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
-;;                                "commit" "-F" "-"))
-;;     (when output
-;;       (egg-show-git-output output -1 "GIT-COMMIT")
-;;       (egg-run-buffers-update-hook))))
+(defun egg-log-msg-commit (prefix text-beg text-end &rest ignored)
+  (egg-do-commit-with-region text-beg text-end))
 
-;; (defun egg-log-msg-amend-commit ()
-;;   (let (output)
-;;     (setq output
-;;           (egg-sync-git-region egg-log-msg-text-beg egg-log-msg-text-end
-;;                                "commit" "--amend" "-F" "-"))
-;;     (when output
-;;       (egg-show-git-output output -1 "GIT-COMMIT-AMEND")
-;;       (egg-run-buffers-update-hook))))
-
-(defun egg-log-msg-commit (&rest ignored)
-  (egg-do-commit-with-region egg-log-msg-text-beg egg-log-msg-text-end))
-
-(defun egg-log-msg-amend-commit (&rest ignored)
-  (egg-do-amend-with-region egg-log-msg-text-beg egg-log-msg-text-end))
+(defun egg-log-msg-amend-commit (prefix text-beg text-end &rest ignored)
+  (egg-do-amend-with-region text-beg text-end))
 
 (defun egg-log-msg-done (level)
   (interactive "p")
   (widen)
-  (goto-char egg-log-msg-text-beg)
-  (if (save-excursion (re-search-forward "\\sw\\|\\-"
-                                         egg-log-msg-text-end t))
-      (when (functionp egg-log-msg-action)
+  (let* ((text-beg (egg-log-msg-text-beg))
+	 (text-end (egg-log-msg-text-end))
+	 (diff-beg (egg-log-msg-next-beg)))
+  (goto-char text-beg)
+  (if (save-excursion (re-search-forward "\\sw\\|\\-" text-end t))
+      (when (functionp (egg-log-msg-func))
         (ring-insert egg-log-msg-ring
-                     (buffer-substring-no-properties egg-log-msg-text-beg
-                                                     egg-log-msg-text-end))
-        (save-excursion
-	  (funcall egg-log-msg-action (> level 3) (> level 15) (> level 63)))
+                     (buffer-substring-no-properties text-beg text-end))
+        (save-excursion (egg-log-msg-apply-closure level))
         (let ((inhibit-read-only t)
               (win (get-buffer-window (current-buffer))))
           (erase-buffer)
           (kill-buffer)))
     (message "Please enter a log message!")
-    (ding)))
+    (ding))))
 
 (defun egg-log-msg-cancel ()
   (interactive)
@@ -4891,17 +4903,20 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 
 (defun egg-log-msg-hist-cycle (&optional forward)
   "Cycle through message log history."
-  (let ((len (ring-length egg-log-msg-ring)))
+  (let* ((len (ring-length egg-log-msg-ring))
+	 (closure egg-log-msg-closure)
+	 (text-beg (nth 2 closure))
+	 (text-end (nth 3 closure)))
     (cond ((<= len 0)
            ;; no history
            (message "No previous log message.")
            (ding))
           ;; don't accidentally throw away unsaved text
           ((and  (null egg-log-msg-ring-idx)
-                 (> egg-log-msg-text-end egg-log-msg-text-beg)
+                 (> text-end text-beg)
                  (not (y-or-n-p "throw away current text? "))))
           ;; do it
-          (t (delete-region egg-log-msg-text-beg egg-log-msg-text-end)
+          (t (delete-region text-beg text-end)
              (setq egg-log-msg-ring-idx
                    (if (null egg-log-msg-ring-idx)
                        (if forward
@@ -4914,7 +4929,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                          (ring-minus1 egg-log-msg-ring-idx len)
                        ;; older
                        (ring-plus1 egg-log-msg-ring-idx len))))
-             (goto-char egg-log-msg-text-beg)
+             (goto-char text-beg)
              (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx))))))
 
 (defun egg-log-msg-older-text ()
@@ -4927,11 +4942,13 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
   (interactive)
   (egg-log-msg-hist-cycle t))
 
-(defun egg-commit-log-buffer-show-diffs (buf &optional init)
+(defun egg-commit-log-buffer-show-diffs (buf &optional init diff-beg)
   (with-current-buffer buf
-    (let ((inhibit-read-only t) beg)
+    (let* ((inhibit-read-only t)
+	   (diff-beg (or diff-beg (egg-log-msg-next-beg)))
+	   beg)
       (egg-save-section-visibility)
-      (goto-char egg-log-msg-diff-beg)
+      (goto-char diff-beg)
       (delete-region (point) (point-max))
       (setq beg (point))
 
@@ -4960,24 +4977,23 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
   (run-mode-hooks 'egg-commit-buffer-mode-hook))
 
 (defun egg-commit-log-edit (title-function
-                            action-function
+                            action-closure
                             insert-init-text-function &optional amend-no-msg)
-  (interactive (let ((prefix (car current-prefix-arg)))
-		 (setq prefix (if (numberp prefix)
-				  prefix
-				0))
-		 (cond ((> prefix 15)
+  (interactive (let ((prefix (prefix-numeric-value current-prefix-arg)))
+		 (cond ((> prefix 15)	;; C-u C-u
+			;; only set amend-no-msg
 			(list nil nil nil t))
-		       ((> prefix 3)
+		       ((> prefix 3)	;; C-u
 			(list (concat
 			       (egg-text "Amending  " 'egg-text-3)
 			       (egg-text (egg-pretty-head-name) 'egg-branch))
-			      #'egg-log-msg-amend-commit
+			      (egg-log-msg-mk-closure-input #'egg-log-msg-amend-commit)
 			      (egg-commit-message "HEAD")))
-		       (t (list (concat
+		       (t 		;; regular commit
+			(list (concat
 				 (egg-text "Committing into  " 'egg-text-3)
 				 (egg-text (egg-pretty-head-name) 'egg-branch))
-				#'egg-log-msg-commit
+				(egg-log-msg-mk-closure-input #'egg-log-msg-commit)
 				nil)))))
   (if amend-no-msg
       (egg-buffer-do-amend-no-edit)
@@ -4988,12 +5004,14 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	   (head-info (egg-head))
 	   (head (or (cdr head-info)
 		     (format "Detached HEAD! (%s)" (car head-info))))
-	   (inhibit-read-only inhibit-read-only))
+	   (inhibit-read-only inhibit-read-only)
+	   (action-function (car action-closure))
+	   (action-args (cdr action-closure))
+	   text-beg text-end diff-beg)
       (with-current-buffer buf
 	(setq inhibit-read-only t)
 	(erase-buffer)
-	(set (make-local-variable 'egg-log-msg-action)
-	     action-function)
+
 	(insert (cond ((functionp title-function)
 		       (funcall title-function state))
 		      ((stringp title-function) title-function)
@@ -5007,23 +5025,31 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	(put-text-property (point-min) (point) 'read-only t)
 	(put-text-property (point-min) (point) 'rear-sticky nil)
 	(insert "\n")
-	(set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
-	(set-marker-insertion-type egg-log-msg-text-beg nil)
-	(put-text-property (1- egg-log-msg-text-beg) egg-log-msg-text-beg
-			   :navigation 'commit-log-text)
+
+	(setq text-beg (point-marker))
+	(set-marker-insertion-type text-beg nil)
+	(put-text-property (1- text-beg) text-beg :navigation 'commit-log-text)
+	
 	(insert (egg-prop "\n------------------------ End of Commit Message ------------------------"
 			  'read-only t 'front-sticky nil
 			  'face 'font-lock-comment-face))
-	(set (make-local-variable 'egg-log-msg-diff-beg) (point-marker))
-	(set-marker-insertion-type egg-log-msg-diff-beg nil)
-	(egg-commit-log-buffer-show-diffs buf 'init)
-	(goto-char egg-log-msg-text-beg)
+	
+	(setq diff-beg (point-marker))
+	(set-marker-insertion-type diff-beg nil)
+	(egg-commit-log-buffer-show-diffs buf 'init diff-beg)
+
+	(goto-char text-beg)
 	(cond ((functionp insert-init-text-function)
 	       (funcall insert-init-text-function))
 	      ((stringp insert-init-text-function)
 	       (insert insert-init-text-function)))
-	(set (make-local-variable 'egg-log-msg-text-end) (point-marker))
-	(set-marker-insertion-type egg-log-msg-text-end t))
+
+	(setq text-end (point-marker))
+	(set-marker-insertion-type text-end t)
+
+	(set (make-local-variable 'egg-log-msg-closure)
+	     (egg-log-msg-mk-closure-from-input action-closure 
+						nil text-beg text-end diff-beg)))
       (pop-to-buffer buf t))))
 
 ;;;========================================================
@@ -5723,6 +5749,18 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
       (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
                                     orig-head-sha1))))
 
+(defun egg-sentinel-commit-n-continue-rebase (prefix text-beg text-end next-beg
+						     rebase-dir orig-buffer orig-sha1 commit-func)
+  (let ((process-environment process-environment))
+    (mapc (lambda (env-lst)
+	    (setenv (car env-lst) (cadr env-lst)))
+	  (egg-rebase-author-info rebase-dir))
+    (apply commit-func prefix text-beg text-end next-beg nil))
+  (with-current-buffer orig-buffer
+    (egg-do-async-rebase-continue
+     #'egg-handle-rebase-interactive-exit
+     orig-sha1)))
+
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
         (proc egg-async-process)
@@ -5765,16 +5803,8 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                  ": "
                  (egg-text (concat "Commit " cherry-op "ed cherry")
                            'egg-text-3)))
-              `(lambda (&rest passed-thru)
-                 (let ((process-environment process-environment))
-                   (mapcar (lambda (env-lst)
-                             (setenv (car env-lst) (cadr env-lst)))
-                           (egg-rebase-author-info ,rebase-dir))
-                   (apply #'egg-log-msg-commit passed-thru))
-                 (with-current-buffer ,buffer
-                   (egg-do-async-rebase-continue
-                    #'egg-handle-rebase-interactive-exit
-                    ,orig-sha1)))
+              (egg-log-msg-mk-closure-input #'egg-sentinel-commit-n-continue-rebase
+					    rebase-dir buffer orig-sha1 #'egg-log-msg-commit)
               (egg-file-as-string (concat rebase-dir "message"))))
 
 
@@ -5785,16 +5815,8 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                                 'egg-branch) ": "
                                 (egg-text "Re-edit cherry's commit log"
                                           'egg-text-3))
-              `(lambda (&rest passed-thru)
-                 (let ((process-environment process-environment))
-                   (mapcar (lambda (env-lst)
-                             (setenv (car env-lst) (cadr env-lst)))
-                           (egg-rebase-author-info ,rebase-dir))
-                   (apply #'egg-log-msg-amend-commit passed-thru))
-                 (with-current-buffer ,buffer
-                   (egg-do-async-rebase-continue
-                    #'egg-handle-rebase-interactive-exit
-                    ,orig-sha1)))
+	      (egg-log-msg-mk-closure-input #'egg-sentinel-commit-n-continue-rebase
+					    rebase-dir buffer orig-sha1 #'egg-log-msg-amend-commit)
               (egg-commit-message "HEAD")))
 
             ((eq res :rebase-conflict)
@@ -5910,12 +5932,20 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	  (format "new lightweight tag '%s' at %s" name rev)))
     (egg-log-buffer-do-tag-commit name rev force)))
 
-(defun egg-log-buffer-atag-commit (pos)
-  (interactive "d")
+(defun egg-log-buffer-atag-commit (pos &optional sign-tag)
+  (interactive "d\np")
   (let* ((commit (get-text-property pos :commit))
 	 (name (read-string (format "create annotated tag on %s with name: "
-				    (egg-describe-rev commit)))))
-    (egg-create-annotated-tag name commit)))
+				    (egg-describe-rev commit))))
+	 (gpg-uid (cond ((> sign-tag 15) t) ;; use default gpg uid
+			((> sign-tag 3)	    ;; sign the tag
+			 (read-string (format "sign tag '%s' with gpg key uid: " name)
+				      (egg-user-name)))
+			(t nil)))
+	 (gpg-agent-info (or egg-gpg-agent-info (getenv "GPG_AGENT_INFO"))))
+    (when (and gpg-uid (not gpg-agent-info))
+      (error "gpg-agent's info is unavailable! please set GPG_AGENT_INFO environment!"))
+    (egg-create-annotated-tag name commit gpg-uid)))
 
 (defun egg-log-buffer-create-new-branch (pos &optional force)
   "Create a new branch, without checking it out."
@@ -6036,7 +6066,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	(egg-commit-log-edit (concat
 			      (egg-text "Newly Picked Cherry:  " 'egg-text-3)
 			      (egg-text rev 'egg-branch))
-			     #'egg-log-msg-commit
+			     (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
 			     old-msg)))))
 
 (defun egg-do-revert-rev (rev &optional use-default-commit-msg)
@@ -6076,7 +6106,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	     (egg-commit-log-edit (concat
 				   (egg-text "Undo Changes Introduced by:  " 'egg-text-3)
 				   (egg-text rev 'egg-branch)) 
-				  #'egg-log-msg-commit
+				  (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
 				  (format "Revert \"%s\"\n\nThis reverts commit %s\n"
 					  old-subject sha1)))))))
 
@@ -7236,38 +7266,21 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;; (setenv "GPG_AGENT_INFO" "/tmp/gpg-peL1m4/S.gpg-agent:16429:1")
 ;; (getenv "GPG_AGENT_INFO")
 
-(defun egg-tag-msg-create-tag (&optional sign-tag use-gpg-default &rest ignored)
-  (unless sign-tag
-    (setq sign-tag 
-	  (y-or-n-p (format "sign tag %s with GnuPG? " egg-internal-annotated-tag-name))))
-  (if sign-tag
-      (let ((egg--do-no-output-message (format "signed %s with tag '%s'" 
-					       egg-internal-annotated-tag-target
-					       egg-internal-annotated-tag-name))
+(defun egg-tag-msg-create-tag (prefix text-beg text-end ignored name commit gpg-uid)
+  (if gpg-uid				;; sign the tag
+      (let ((egg--do-no-output-message (format "signed %s with tag '%s'" commit name))
 	    (gpg-agent-info (or egg-gpg-agent-info (getenv "GPG_AGENT_INFO")))
-	    gpg-uid)
-        (unless use-gpg-default
-	  (setq gpg-uid (read-string (format "gpg sign %s using key uid: "
-					     egg-internal-annotated-tag-name)
-				     (egg-user-name))))
+	    (force (> prefix 3)))
 
 	(unless gpg-agent-info
 	  (error "gpg-agent's info is unavailable! please set GPG_AGENT_INFO environment!"))
 
-	(egg--async-create-signed-tag-cmd 
-	 (egg-get-log-buffer)
-	 (buffer-substring-no-properties egg-log-msg-text-beg egg-log-msg-text-end)
-	 egg-internal-annotated-tag-name egg-internal-annotated-tag-target gpg-uid))
-    (let ((egg--do-no-output-message 
-	   (format "annotated %s with tag '%s'" 
-		   egg-internal-annotated-tag-target
-		   egg-internal-annotated-tag-name)))
-      (egg-edit-buffer-do-create-tag 
-       egg-internal-annotated-tag-name
-       egg-internal-annotated-tag-target
-       egg-log-msg-text-beg
-       egg-log-msg-text-end
-       nil))))
+	(egg--async-create-signed-tag-cmd (egg-get-log-buffer)
+					  (buffer-substring-no-properties text-beg text-end)
+					  name commit gpg-uid force))
+    (let ((egg--do-no-output-message (format "annotated %s with tag '%s'" commit name))
+	  (force (> prefix 3)))
+      (egg-edit-buffer-do-create-tag name commit text-beg text-end force))))
 
 (define-egg-buffer tag:msg "*%s-tag:msg@%s*"
   (egg-log-msg-mode)
@@ -7279,26 +7292,32 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (run-mode-hooks 'egg-tag:msg-mode-hook))
 
 
-(defun egg-create-annotated-tag (name commit-1)
+(defun egg-create-annotated-tag (name commit-1 &optional gpg-uid)
   (let* ((git-dir (egg-git-dir))
          (default-directory (egg-work-tree-dir git-dir))
          (buf (egg-get-tag:msg-buffer 'create))
          (commit (egg-git-to-string "rev-parse" "--verify" commit-1))
          (pretty (egg-describe-rev commit))
-         (inhibit-read-only inhibit-read-only))
+         (inhibit-read-only inhibit-read-only)
+	 text-beg text-end)
     (or commit (error "Bad commit: %s" commit-1))
     (pop-to-buffer buf t)
     (setq inhibit-read-only t)
     (erase-buffer)
-    (set (make-local-variable 'egg-log-msg-action)
-         'egg-tag-msg-create-tag)
-    (set (make-local-variable 'egg-internal-annotated-tag-name) name)
-    (set (make-local-variable 'egg-internal-annotated-tag-target) commit)
-    (insert (egg-text "Create Annotated Tag" 'egg-text-2) " "
+    
+    (insert (if gpg-uid 
+		(egg-text "Create GPG Signed " 'egg-text-2)
+	      (egg-text "Create Annotated Tag" 'egg-text-2))
+	    (if (stringp gpg-uid)
+		(concat (egg-text "(by " 'egg-text-2)
+			(egg-text gpg-uid 'egg-text-2)
+			(egg-text ") Tag" 'egg-text-2))
+	      "")
+	    "  "
             (egg-text name 'egg-branch) "\n\n"
             (egg-text "on commit:" 'egg-text-2) " "
             (egg-text commit 'font-lock-string-face) "\n"
-            (egg-text "aka:" 'egg-text-2) " "
+            (egg-text "a.k.a.:" 'egg-text-2) " "
             (egg-text pretty 'font-lock-string-face) "\n"
             (egg-text "Repository: " 'egg-text-2)
             (egg-text git-dir 'font-lock-constant-face) "\n"
@@ -7307,10 +7326,17 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
     (insert "\n")
-    (set (make-local-variable 'egg-log-msg-text-beg) (point-marker))
-    (set-marker-insertion-type egg-log-msg-text-beg nil)
-    (set (make-local-variable 'egg-log-msg-text-end) (point-marker))
-    (set-marker-insertion-type egg-log-msg-text-end t)))
+    (setq text-beg (point-marker))
+    (set-marker-insertion-type text-beg nil)
+    (setq text-end (point-marker))
+    (set-marker-insertion-type text-end t)
+
+    (set (make-local-variable 'egg-log-msg-closure)
+	 (egg-log-msg-mk-closure-from-input
+	  (egg-log-msg-mk-closure-input #'egg-tag-msg-create-tag
+					name commit-1 gpg-uid)
+	  nil text-beg text-end nil))
+    nil))
 ;;;========================================================
 ;;; minor-mode
 ;;;========================================================
