@@ -1592,7 +1592,27 @@ output processing function for `egg--do-handle-exit'."
 					    post-proc-func buffer-to-update)))
 
 
-(defun egg--git-pp-grab-line-no (line-no)
+
+(defconst egg--bad-git-output-regex
+  (concat (regexp-opt '("Cannot" "cannot" "Couldn't" "couldn't" "Could not" "could not" 
+			"Failed" "failed" "incompatible" "Incompatible" "invalid" "Invalid"
+			"not allowed" "rejected" "Unable" "unable" "internal error" 
+			"mutually exclusive" "does not" "do not" "did not" "is not" "needs a"
+			"No such" "no such" "No changes" "Too many" "too many"
+			"Nothing" "nothing" "Abort" "abort" "Malformed" "malformed"
+			"unresolved" "Unresolved" "Corrupt" "corrupt" "empty" 
+			"does not make sense" "only with" "only one" "only allowed"
+			"skipped" "Skipped" "bad" "Bad" "doesn't"
+			"too big" "Too big" "too many" "Too many"
+			"not a valid" "Not a valid" "already exist" "ignored by" "is beyond"
+
+			"Not"
+			) t)
+	  "\\|\\(?:No.+found\\)\\|\\(?:[On]nly.+can be used\\)"))
+
+(defconst egg--fatal-git-output-regex "^fatal")
+
+(defun egg--git-pp-grab-line-no (line-no &rest extras)
   "Grab the line LINE-NO in the current buffer.
 Return it in a form usable for `egg--do-show-output'."
   (let* ((lines (delete "" (save-match-data
@@ -1601,9 +1621,9 @@ Return it in a form usable for `egg--do-show-output'."
 		     ((> line-no 0) (nth (1- line-no) lines))
 		     (t nil))))
     (when (stringp line)
-      (list :line line))))
+      (nconc (list :line line) extras))))
 
-(defun egg--git-pp-grab-line-matching (regex &optional replacement)
+(defun egg--git-pp-grab-line-matching (regex &optional replacement &rest extras)
   "If REGEX matched a line in the current buffer, return it in a form suitable
 for `egg--do-show-output'. If REPLACEMENT was provided, use it in the returned
 structure instead of the matching line."
@@ -1617,15 +1637,33 @@ structure instead of the matching line."
 		(line-beginning-position)
 		(line-end-position)))))))
     (when (stringp matched-line)
-      (list :line (if (stringp replacement) replacement matched-line)))))
+      (nconc (list :line (if (stringp replacement) replacement matched-line))
+	     extras))))
 
-(defsubst egg--git-pp-grab-1st-line-matching (regex-list &optional replacement)
+(defsubst egg--git-pp-grab-1st-line-matching (regex-list &optional replacement &rest extras)
   "Try maching the lines in the current buffer against each regex in REGEX-LIST
 until one matched. Return the line in a form suitable for `egg--do-show-output'.
 If REPLACEMENT was provided, use it in the returned structure instead of
 the matching line."
-  (car (delq nil (mapcar 'egg--git-pp-grab-line-matching regex-list))))
+  (let ((r-list regex-list)
+	re found)
+    (while (and (not found) r-list)
+      (setq re (car r-list)
+	    r-list (cdr r-list))
+      (setq found (apply 'egg--git-pp-grab-line-matching re replacement extras)))
+    found))
 
+(defun egg--git-pp-fatal-output (&optional pre-regexes post-regexes)
+  (or
+   (egg--git-pp-grab-1st-line-matching
+    (nconc (if (stringp pre-regexes) (list pre-regexes) pre-regexes)
+	   (list egg--bad-git-output-regex egg--fatal-git-output-regex)
+	   (if (stringp post-regexes) (list post-regexes) post-regexes)))
+   (egg--git-pp-grab-line-no -1)))
+
+(defsubst egg--git-pp-fatal-result (&optional pre-regexes post-regexes)
+  (nconc (list :success nil)
+	 (egg--git-pp-fatal-output pre-regexes post-regexes)))
 
 (defun egg--git-pp-generic (ret-code accepted-codes ok-regex bad-regex
 				     &optional line-no)
@@ -1640,22 +1678,13 @@ instead of OK-REGEX.
 This simple function might be use as the POST-PROC-FUNC argument of the
 `egg--do-handle-exit' function."
   (if (memq ret-code accepted-codes)
-      (nconc (list :success t )
-	     (or (if (consp ok-regex)
-		     (egg--git-pp-grab-1st-line-matching ok-regex)
-		   (egg--git-pp-grab-line-matching ok-regex))
-		 (egg--git-pp-grab-line-no (or line-no -1))))
-    (nconc (list :success nil )
-	   (or (if (consp bad-regex) 
-		   (egg--git-pp-grab-1st-line-matching bad-regex)
-		 (egg--git-pp-grab-line-matching bad-regex))
-	       (egg--git-pp-grab-line-no (or line-no -1))))))
-
-(defsubst egg--git-failed-to-parse-output (cmd)
-  "Signal an error that we don't know how to parse the output of the git
-command CMD in the current buffer."
-  (error "Don't know now to parse %s's ouput:[%s]" cmd (buffer-string)))
-
+      (if (consp ok-regex)
+	  (egg--git-pp-grab-1st-line-matching ok-regex nil :success t)
+	(egg--git-pp-grab-line-matching ok-regex nil :success t))
+    (or (if (consp bad-regex)
+	    (egg--git-pp-grab-1st-line-matching bad-regex)
+	  (egg--git-pp-grab-line-matching bad-regex))
+	(egg--git-pp-grab-line-no (or line-no -1)))))
 
 (defconst egg--git-action-cmd-doc nil
   "The `egg--git-xxxxx-cmd' functions perform git command synchronously.
@@ -1678,7 +1707,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action 
    "push" buffer-to-update
    (lambda (ret-code)
-     (egg--git-pp-generic ret-code '(0) " -> \\|Everything up-to-date"
+     (egg--git-pp-generic ret-code '(0) " -> \\|Everything up-to-date\\|deleted"
 			  '("rejected" "\\<not\\>")))
    args))
 
@@ -1691,26 +1720,19 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 RET-CODE is the return code of the git process and RESET-MODE would be one
 of: --hard, --keep, --soft, --mixed. --merge is currently not supported.
 Return a structure suitable for `egg--do-show-output'."
-  (if (= ret-code 0)
-      (nconc (list :success t)
-	     (cond ((string-equal "--hard" reset-mode)
-		    (nconc (list :next-action 'log)
-			   (egg--git-pp-grab-line-matching "^HEAD is now at")))
-		   ((string-equal "--keep" reset-mode)
-		    (nconc (list :next-action 'status)
-			   (egg--git-pp-grab-line-no -1)))
-		   ((string-equal "--soft" reset-mode)
-		    (nconc (list :next-action 'status)
-			   (egg--git-pp-grab-line-no -1)))
-		   ((string-equal "--mixed" reset-mode)
-		    (nconc (list :next-action 'status)
-			   (if (egg--git-pp-grab-line-matching "Unstaged changes after reset")
-			       (list :line "there are unstaged changes after reset"))))))
-    (nconc (list :success nil)
-	   (or (egg--git-pp-grab-line-matching "Entry.+not uptodate")
-	       (egg--git-pp-grab-line-matching "Cannot\\|Could not\\|Failed to\\|not allowed\\|incompatible")
-	       (egg--git-pp-grab-line-matching "^fatal")
-	       (egg--git-pp-grab-line-no -1)))))
+  (if (/= ret-code 0)
+      (egg--git-pp-fatal-output "Entry.not uptodate")
+    (cond ((string-equal "--hard" reset-mode)
+	   (egg--git-pp-grab-line-matching "^HEAD is now at" nil
+					   :next-action 'log :success t))
+	  ((string-equal "--keep" reset-mode)
+	   (egg--git-pp-grab-line-no -1 :next-action 'status :success t))
+	  ((string-equal "--soft" reset-mode)
+	   (egg--git-pp-grab-line-no -1 :next-action 'status :success t))
+	  ((string-equal "--mixed" reset-mode)
+	   (egg--git-pp-grab-line-matching "Unstaged changes after reset"
+					   "there are unstaged changes after reset"
+					   :next-action 'status :success t)))))
 
 (defun egg--git-reset-cmd (buffer-to-update reset-mode rev)
   "Peform a synchronous action using the git reset command.
@@ -1754,17 +1776,13 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
    "reset" buffer-to-update
    (lambda (ret-code)
      (cond ((= ret-code 0) (list :success t :next-action 'status))
-	   ((> ret-code 1) 
-	    (nconc (list :success nil) (egg--git-pp-grab-line-matching "^fatal")))
 	   ((= ret-code 1)
-	    (nconc (list :success t)
-		   (and (egg--git-pp-grab-line-matching "Unstaged changes after reset:")
-			(list :line "there are unstaged changes after reset"
-			      :next-action 'status))))))
+	    (egg--git-pp-grab-line-matching "Unstaged changes after reset:"
+					    "there are unstaged changes after reset"
+					    :next-action 'status :success t))
+	   ((> ret-code 1) (egg--git-pp-fatal-result))))
    (nconc (list (or rev "HEAD") "--") files)))
 
-(defconst egg--git-co-failed-regex 
-  "\\<\\([uU]nable\\|failed\\|internal error\\|yet to be born\\|invalid\\|is not\\|[Cc]annot\\|incompatible\\|needs a\\|mutually exclusive\\|does not\\)\\>")
 
 (defun egg--git-co-files-cmd (buffer-to-update file-or-files &rest args)
   "Peform a synchronous action using the git checkout command on FILE-OR-FILES.
@@ -1781,9 +1799,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 	       (lambda (ret-code)
 		 (if (= ret-code 0)
 		     (list :success t :next-action 'status)
-		   (nconc (list :success nil)
-			  (or (egg--git-pp-grab-line-matching egg--git-co-failed-regex)
-			      (egg--git-pp-grab-line-matching "^fatal")))))
+		   (egg--git-pp-fatal-result "yet to be born")))
 	       args)))
     (if (plist-get res :success)
 	(nconc res (list :files files))
@@ -1807,22 +1823,14 @@ command will be displayed as feedback of emacs command."
 	  (egg--do-git-action 
 	   cmd buffer-to-update 
 	   (lambda (ret-code)
-	     (cond ((= ret-code 0)
-		    (nconc 
-		     (list :success t :next-action 'status)
-		     (or (egg--git-pp-grab-line-matching 
-			  "Already on\\|HEAD is now at\\|Switched to \\(a new \\)?branch\\|Reset branch")
-			 (egg--git-pp-grab-line-no -1))))
-		   ((= ret-code 1)
-		    (nconc (list :success nil)
-			   (or (egg--git-pp-grab-line-matching 
-				"Please, commit your changes")
-			       (egg--git-pp-grab-line-no -1))))
-		   (t
-		    (nconc 
-		     (list :success nil)
-		     (or (egg--git-pp-grab-line-matching egg--git-co-failed-regex)
-			 (egg--git-pp-grab-line-matching "^fatal"))))))
+	     (if (= ret-code 0)
+		 (or (egg--git-pp-grab-line-matching 
+		      (regexp-opt '("Already on" "HEAD is now at"
+				    "Switched to branch" "Switched to a new branch"
+				    "Reset branch")) nil
+		      :next-action 'status :success t)
+		     (egg--git-pp-grab-line-no -1 :next-action 'status :success t))
+	       (egg--git-pp-fatal-result "Please, commit your changes")))
 	   args))
     
     (if (plist-get res :success)
@@ -1838,58 +1846,6 @@ command will be displayed as feedback of emacs command.
 See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--git-co-rev-cmd-args buffer-to-update rev args))
 
-
-;; (defun egg--git-pp-change-stat (&optional ret-code)
-;;   (save-match-data
-;;     (let (num-changed files)
-;;       (goto-char (point-min))
-;;       (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
-;; 	(setq num-changed (string-to-number (match-string-no-properties 1)))
-;; 	(goto-char (point-min))
-;; 	(while (re-search-forward "^ \\(\\S-+\\) +|.+$" nil t)
-;; 	  (setq files (cons (match-string-no-properties 1) files)))
-;; 	(unless (= (length files) num-changed)
-;; 	  (error "num changed files mismatched! %d vs %d" (length files) num-changed)))
-;;       (when files 
-;; 	(list :files files)))))
-
-(defun egg--git-pp-merge-next-action (ret-code cmd)
-  "Parse the output of the git merge command in the current buffer.
-Return a suitable structure describing the next action to be taken after
-the merge operation. RET-CODE is the exit code of the underlying git process.
-CMD is the git command (should be merge)."
-  (save-match-data
-    (goto-char (point-min))
-    (cond ((= ret-code 0)
-	   (if (re-search-forward "stopped before committing as requested" nil t)
-	       ;; --squash or --no-edit
-	       (list :next-action 'commit)
-	     ;; nothing to do for "Already up-to-date" 
-	     nil))
-	  
-	  ((= ret-code 1)
-	   (if (re-search-forward 
-		"fix conflicts and then commit the result\\|commit your changes or stash them before you can merge"
-		nil t)
-	       ;; conflicts, auto-merge failed
-	       (list :next-action 'status)
-	     ;; unexpected!!!
-	     (egg--git-failed-to-parse-output cmd)))
-	  ((= ret-code 128) ;; "fatal", nothing to do
-	   nil)
-	  ;; unknown return code
-	  (t (egg--git-failed-to-parse-output cmd)))))
-
-;; (defun egg--git-pp-merge-line (ret-code)
-;;   ;; if ret code wasn't 0, then :line is already correct
-;;   (when (= ret-code 0)
-;;     (save-match-data
-;;       (goto-char (point-min))
-;;       (when (re-search-forward "^ \\([0-9]+\\) files? changed," nil t)
-;; 	(list :feed-back (buffer-substring-no-properties
-;; 			  (line-beginning-position)
-;; 			  (line-end-position)))))))
-
 (defun egg--git-merge-cmd (buffer-to-update &rest args)
   "Peform the git merge command synchronously with ARGS as arguments.
 Update BUFFER-TO-UPDATE if needed. The relevant line from the
@@ -1900,23 +1856,23 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action 
    "merge" buffer-to-update
    (lambda (ret-code)
-     (nconc 
-      (cond ((= ret-code 0)
-	     (nconc (list :success t)
-		    (or (egg--git-pp-grab-line-matching
-			 "merge went well\\|Already up-to-date\\|as requested\\|files? changed\\|insertions\\|deletions")
-			(egg--git-pp-grab-line-no -1))))
-	    ((= ret-code 1)
-	     (let ((conflict-line 
-		    (egg--git-pp-grab-1st-line-matching "fix conflicts and then commit")))
-	       (if conflict-line
-		   (nconc (list :success t) conflict-line)
-		 (egg--git-pp-grab-line-matching
-		  "commit your changes or stash them before you can merge"))))
-	    ((= ret-code 128)
-	     (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
-	    (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))
-      (egg--git-pp-merge-next-action ret-code "merge")))
+     (cond ((= ret-code 0)
+	    (or (egg--git-pp-grab-line-matching "stopped before committing as requested"
+						nil :next-action 'commit :success t)
+		(egg--git-pp-grab-line-matching
+		 (regexp-opt '("merge went well" "Already up-to-date" 
+			       "file changed" "files changed"
+			       "insertions" "deletions"))
+		 nil :success t :next-action 'log)
+		(egg--git-pp-grab-line-no -1 :success t :next-action 'status)))
+	   ((= ret-code 1)
+	    (or (egg--git-pp-grab-line-matching "fix conflicts and then commit"
+						nil :next-action 'status :success t)
+		(egg--git-pp-grab-line-matching
+		 "commit your changes or stash them before you can merge"
+		 nil :next-action 'status)
+		(egg--git-pp-grab-line-no -1)))
+	   (t (egg--git-pp-fatal-result))))
    args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
@@ -1934,14 +1890,11 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
    "add" buffer-to-update
    (lambda (ret-code)
      (if (= ret-code 0)
-	 (nconc (list :success t)
-		(egg--git-pp-grab-line-matching "nothing added")
-		(when (re-search-forward "^add '\\(.+\\)'$" nil t)
-		  (list :next-action 'status)))
-       (nconc (list :success nil)
-	      (or (egg--git-pp-grab-line-matching 
-		   "Could not\\|did not match\\|Aborted\\|ignored by\\|failed\\|incompatible\\|corrupt\\|Unable\\|is beyond")
-		  (egg--git-pp-grab-line-no -1)))))
+	 (or (egg--git-pp-grab-line-matching "nothing added" nil :success t)
+	     (egg--git-pp-grab-line-matching "^add " "index updated" 
+					     :next-action 'status :success t)
+	     (egg--git-pp-grab-line-no -1 :success t))
+       (egg--git-pp-fatal-result)))
    args))
 
 (defun egg--git-rm-cmd (buffer-to-update &rest args)
@@ -1960,18 +1913,10 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 		    (add-to-list 'files (match-string-no-properties 1)))
 		  (when (consp files)
 		    (list :files files :next-action 'status))))
-       (nconc (list :success nil)
-	      (or (egg--git-pp-grab-1st-line-matching 
-		   '("has staged content different from both"
-		     "\\<\\(corrupt\\|did not match\\|not removing\\|[Uu]nable to\\)\\>"))
-		  (egg--git-pp-grab-line-no -1)))))
+       (egg--git-pp-fatal-result "has staged content different from both"
+				 (regexp-opt '("did not match" "not removing")))))
    args))
 
-(defconst egg-branch-error-128-regex
-  "[Cc]annot\\|[Cc]ouldn\\|[iI]nvalid\\|[Ff]ailed\\|\\(is\\|do\\|does\\) not\\|malformed\\|not found\\|incompatible")
-
-(defconst egg-branch-error-1-regex
-  "[Cc]annot\\|not found\\|[Cc]ouldn\\|is not fully\\|Error\\|do\\(es\\)? not\\|[Cc]ould not\\|[Nn]o commit\\|[nN]o such")
 
 (defun egg--git-branch-cmd (buffer-to-update args)
   "Run the git branch command synchronously with ARGS as arguments.
@@ -1980,13 +1925,10 @@ Update BUFFER-TO-UPDATE as needed.
 See documentation of `egg--git-action-cmd-doc' for the return structure."  (egg--do-git-action
    "branch" buffer-to-update
    (lambda (ret-code)
-     (cond ((= ret-code 0)
-	    (nconc (list :success t) (egg--git-pp-grab-line-no -1)))
-	   ((= ret-code 1)
-	    (nconc (list :success nil)
-		     (egg--git-pp-grab-line-matching egg-branch-error-1-regex)))
-	   (t (nconc (list :success nil)
-		     (egg--git-pp-grab-line-matching egg-branch-error-128-regex)))))
+     (if (= ret-code 0)
+	  (egg--git-pp-grab-line-no -1 :success t)
+       (egg--git-pp-fatal-result (regexp-opt '("No commit" "no commit" 
+					       "No such" "no such" "is not fully")))))
    args))
 
 (defconst egg--git-stash-error-regex
@@ -2004,22 +1946,21 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 	   "stash" buffer-to-update
 	   (lambda (ret-code)
 	     (if (= ret-code 0)
-		 (nconc (list :success t)
-			(or (egg--git-pp-grab-1st-line-matching
-			     '("Saved working directory" "HEAD is now at"))
-			    (egg--git-pp-grab-line-no -1)))
-	       (nconc (list :success nil)
-		      (or (egg--git-pp-grab-line-matching egg--git-stash-error-regex)
-			  (egg--git-pp-grab-line-no -1)))))
+		 (or (egg--git-pp-grab-1st-line-matching
+		      '("Saved working directory" "HEAD is now at") nil
+		      :next-action 'stash :success t)
+		     (egg--git-pp-grab-line-no -1 :next-action 'stash :success t))
+	       (egg--git-pp-fatal-result)))
 	   (cons "save" args)))
     (when (plist-get res :success)
-      (setq res (nconc res (list :next-action 'stash :files files))))
+      (setq res (nconc res (list :files files))))
     res))
 
 (defun egg--git-stash-unstash-cmd (buffer-to-update cmd &optional args)
   "Run a git stash CMD command synchronously with ARGS as arguments.
 CMD should be pop, apply or branch.
- See documentation of `egg--git-action-cmd-doc' for the return structure." (unless (egg-has-stashed-wip)
+ See documentation of `egg--git-action-cmd-doc' for the return structure."
+  (unless (egg-has-stashed-wip)
     (error "no WIP was stashed!"))
   (let ((files (egg-git-to-lines "diff" "--name-only" "stash@{0}"))
 	(cmd (or cmd "pop"))
@@ -2029,21 +1970,32 @@ CMD should be pop, apply or branch.
 	   "stash" buffer-to-update
 	   (lambda (ret-code)
 	     (if (= ret-code 0)
-		 (nconc (list :success t)
-			(or (egg--git-pp-grab-line-matching "Dropped refs/stash")
-			    (egg--git-pp-grab-line-no -1)))
-	       (if (egg--git-pp-grab-line-matching "^CONFLICT")
-		   (nconc (list :success t) (egg--git-pp-grab-line-matching "^CONFLICT"))
-		 (nconc (list :success nil)
-			(or (egg--git-pp-grab-line-matching 
-			     "following files would be overwritten"
-			     "stashed wip conflicts with local modifications, please commit first")
-			    (egg--git-pp-grab-line-matching egg--git-stash-error-regex)
-			    (egg--git-pp-grab-line-no -1))))))
+		 (or (egg--git-pp-grab-line-matching "Dropped refs/stash" nil
+						     :next-action 'status :success t)
+		     (egg--git-pp-grab-line-no -1 :next-action 'status :success t))
+	       (or (egg--git-pp-grab-line-matching "^CONFLICT" nil 
+						   :next-action 'status :success t)
+		   (egg--git-pp-grab-line-matching 
+		    "following files would be overwritten"
+		    "stashed wip conflicts with local modifications, please commit first"
+		    :next-action 'status)
+		   (egg--git-pp-fatal-result))))
 	   (cons cmd args)))
     (when (plist-get res :success)
-      (setq res (nconc res (list :next-action 'status :files files))))
+      (setq res (nconc res (list :files files))))
     res))
+
+(defun egg--git-cherry-pick-pp (ret-code rev no-commit)
+  (cond ((= ret-code 0)
+	 (list :success t :line (format "'%s' applied cleanly" (egg-sha1 rev))
+	       :next-action (if no-commit 'commit 'log)))
+	((= ret-code 1)
+	 (egg--git-pp-grab-line-matching "after resolving the conflicts"
+					 "please resolve conflicts"
+					 :next-action 'status :success t)
+	 (egg--git-pp-grab-line-matching "error: could not apply" nil
+					 :next-action 'status))
+	(t (egg--git-pp-fatal-result))))
 
 (defun egg--git-cherry-pick-cmd (buffer-to-update rev &optional args)
   "Run the git cherry-pick command synchronously with ARGS as arguments.
@@ -2051,33 +2003,18 @@ REV is the commit to be picked.
 
 See documentation of `egg--git-action-cmd-doc' for the return structure."
   (let ((files (egg-git-to-lines "diff" "--name-only" rev))
+	(no-commit (and (member "--no-commit" args) t))
 	res)
     (setq res 
 	  (egg--do-git-action
 	   "cherry-pick"
 	   buffer-to-update
-	   (lambda (ret-code)
-	     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
-		    (cond ((= ret-code 0)
-			   (list :line (format "'%s' applied cleanly" (egg-sha1 rev))))
-			  ((= ret-code 1)
-			   (or (let ((conflict-line
-				      (egg--git-pp-grab-line-matching "after resolving the conflicts"
-								      "please resolve conflicts")))
-				 (when conflict-line
-				   (nconc (list :conflicts t) conflict-line)))
-			       (egg--git-pp-grab-line-matching "error: could not apply")))
-			  ((= ret-code 128)
-			   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
-			  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))))
+	   `(lambda (ret-code)
+	      (egg--git-cherry-pick-pp ret-code ,rev ,no-commit))
 	   (nconc args (list rev))))
     (when (plist-get res :success)
-      (nconc res (list :files files)
-	     (cond ((plist-get res :conflicts) (list :next-action 'status))
-		   ((member "--no-commit" args) (list :next-action 'commit))
-		   (t nil))))
+      (nconc res (list :files files)))
     res))
-
 
 (defun egg--git-cherry-pick-cmd-test (rev option)
   (interactive
@@ -2101,23 +2038,21 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 	   "apply" patch
 	   buffer-to-update
 	   (lambda (ret-code)
-	     (nconc (list :success (if (memq ret-code '(0 1)) t nil))
-		    (cond ((= ret-code 0)
-			   (nconc (egg--git-pp-grab-line-matching "Applied patch.+cleanly" 
-								  "patch applied cleanly")
-				  (list :next-action 'commit)))
-			  ((= ret-code 1) 
-			   (nconc (egg--git-pp-grab-1st-line-matching 
-				   '("Apply patch to.+with conflicts"
-				     "error:.+patch does not apply"
-				     "patch failed:"))
-				  (save-match-data
-				    (goto-char (point-min))
-				    (when (re-search-forward "Fall back to three-way merge" nil t)
-				      (list :next-action 'status)))))
-			  ((= ret-code 128)
-			   (egg--git-pp-grab-line-matching "\\<[Nn]ot\\>\\|fatal"))
-			  (t (error "Don't know how to parse merge's output: [%s]" (buffer-string))))))
+	     (cond ((= ret-code 0)
+		    (or (egg--git-pp-grab-line-matching "Applied patch.+cleanly" 
+							"patch applied cleanly"
+							:success t :next-action 'commit)
+			(egg--git-pp-grab-line-no -1 :success t :next-action 'status)))
+		   ((= ret-code 1) 
+		    (or (egg--git-pp-grab-line-matching "Fall back to three-way merge"
+							"Patch produced conflicts"
+							:success t :next-action 'status)
+			(egg--git-pp-grab-1st-line-matching 
+			 '("Apply patch to.+with conflicts"
+			   "error:.+patch does not apply"
+			   "patch failed:"))
+			(egg--git-pp-grab-line-no -1)))
+		   (t (egg--git-pp-fatal-result))))
 	   (append args (list "-v" "-"))))
     (when (plist-get res :success)
       (nconc res (list :files files)))
@@ -2132,20 +2067,15 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 
 (defun egg--git-pp-commit-output (ret-code)
   (cond ((= ret-code 0)
-	 (nconc (list :success t :next-action 'status)
-		(or (egg--git-pp-grab-line-matching "files? changed")
-		    (egg--git-pp-grab-line-no -1))))
+	 (or (egg--git-pp-grab-line-matching "files? changed" nil
+					     :success t :next-action 'status)
+	     (egg--git-pp-grab-line-no -1 :success t :next-action 'status)))
 	((= ret-code 1)
-	 (nconc (list :success t :next-action 'status)
-		(or (egg--git-pp-grab-line-matching "^nothing" "^Abort")
-		    (egg--git-pp-grab-line-no -1))))
-	(t
-	 (or (egg--git-pp-grab-1st-line-matching 
-	      '("unresolved" "[Ff]ailed" "[Cc]orrupt" "[Uu]nable" "[Cc]annot" "[Ii]nvalid"
-		"[Mm]alformed" "[Cc]ould not" "empty message" "No .+ found"
-		"does not make sense" "nothing to amend" "[Oo]nly one.+ can be used"
-		"only with" "[Cc]ouldn't" "^fatal:"))
-	     (egg--git-pp-grab-line-no -1)))))
+	 (or (egg--git-pp-grab-1st-line-matching '("^nothing" "^Abort") nil
+						 :success t)
+	     (egg--git-pp-grab-line-no -1)))
+	(t (egg--git-pp-fatal-result (regexp-opt '("empty message" "nothing to amend"))
+				     "[Oo]nly one.+ can be used"))))
 
 (defun egg--git-commit-with-region-cmd (buffer-to-update beg end &rest args)
   (egg--do-git-action-stdin "commit"
@@ -2169,25 +2099,16 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 
 (defun egg--git-tag-cmd-pp (ret-code)
   (cond ((= ret-code 0)
-	 (nconc (list :success t :next-action 'log)
-		(or (egg--git-pp-grab-1st-line-matching 
-		     '("Deleted tag" "Updated tag" "Good signature from"
-		       "^user: "))
-		    (egg--git-pp-grab-line-no -1))))
+	 (or (egg--git-pp-grab-1st-line-matching 
+	      '("Deleted tag" "Updated tag" "Good signature from"
+		"^user: ") :next-action 'log :success t)
+	     (egg--git-pp-grab-line-no -1 :next-action 'log :success t)))
 	((= ret-code 1)
-	 (or (egg--git-pp-grab-1st-line-matching
-	      '("no signature found" "^error:"))
+	 (or (egg--git-pp-grab-1st-line-matching '("no signature found" "^error:"))
 	     (egg--git-pp-grab-line-no -1)))
 	(t ;; 128
-	 (or (egg--git-pp-grab-1st-line-matching 
-	      '("gpg: skipped" "^gpg: "
-		"[mM]alformed" "[Uu]nable" "empty.+object"
-		"bad object" "too big" "[Cc]annot" "[Cc]ould\\(n't\\| not\\)"
-		"[Nn]o tag" "[In]compatible" "only one" "only allowed"
-		"too many" "[Ff]ailed" "[Ii]nvalid" "not a valid"
-		"already exist"
-		"^error: " "^fatal: "))
-	     (egg--git-pp-grab-line-no -1)))))
+	 (egg--git-pp-fatal-result 
+	  "gpg: skipped\\|^gpg: \\|empty.+object\\|bad object\\|[Nn]o tag"))))
 
 (defun egg--git-tag-cmd (buffer-to-update stdin &optional args)
   (if stdin
@@ -2227,6 +2148,8 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
     (when (or stdin short-msg) (setq args (cons "-a" args)))
 
     (setq res (egg--git-tag-cmd (egg-get-log-buffer) stdin args))
+
+    ;;; useless???
     (when (plist-get res :success)
       (setq res (nconc (list :next-action 'log) res)))
 
@@ -4671,11 +4594,11 @@ the source revision."
 	(egg--do-no-output-message "staged all tracked files's modifications"))
     (egg-file-buffer-handle-result (egg--git-add-cmd (egg-get-status-buffer) "-v" "-u"))))
 
-(defsubst egg-log-buffer-do-move-head (reset-mode rev &optional interactively-used)
-  (egg-do-move-head reset-mode rev interactively-used 'log))
+(defsubst egg-log-buffer-do-move-head (reset-mode rev)
+  (egg-buffer-do-move-head reset-mode rev 'log))
 
-(defsubst egg-status-buffer-do-move-head (reset-mode rev &optional interactively-used)
-  (egg-do-move-head reset-mode rev interactively-used 'status))
+(defsubst egg-status-buffer-do-move-head (reset-mode rev)
+  (egg-buffer-do-move-head reset-mode rev 'status))
 
 (defun egg-unstage-all-files ()
   (interactive)
@@ -4692,7 +4615,8 @@ next action is IGNORED-ACTION."
 			 (y-or-n-p "throw away all unstaged modifications? "))
 		     t nil))
   (when really-do-it
-    (let ((default-directory (egg-work-tree-dir)))
+    (let ((default-directory (egg-work-tree-dir))
+	  (egg--do-no-output-message "reverted work-dir to INDEX"))
       (egg-status-buffer-do-co-rev :0 "-f" "-a"))))
 
 (defun egg-status-buffer-revert-to-HEAD (really-do-it take-next-action ignored-action)
@@ -4700,12 +4624,10 @@ next action is IGNORED-ACTION."
 When called interactively, do nothing unless REALLY-DO-IT is non-nil.
 Take the next logical action if TAKE-NEXT-ACTION is non-nil unless the
 next action is IGNORED-ACTION."
-  (interactive (list (or current-prefix-arg
-			 (y-or-n-p "throw away all (staged and unstaged) modifications? "))
-		     t nil))
+  (interactive (list (y-or-n-p "throw away all (staged and unstaged) modifications? ")))
   (when really-do-it
     (let ((default-directory (egg-work-tree-dir)))
-      (egg-do-move-head "--hard" "HEAD" take-next-action ignored-action))))
+      (egg-status-buffer-do-move-head "--hard" "HEAD"))))
 
 (defun egg-status-buffer-revert (harder)
   "When in the status buffer, throw away local modifications in the work-tree.
@@ -4736,18 +4658,12 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
         (egg-git-ok nil "tag" "-f" name rev)
       (egg-git-ok nil "tag" name rev))))
 
-(defun egg-do-move-head (reset-mode rev &optional take-next-action next-action-ignore)
-  (let (files res next-action)
-    (setq res (egg--git-reset-cmd t reset-mode rev))
-    (setq files (plist-get res :files))
-    (setq next-action (plist-get res :next-action))
-    (when files (egg-revert-visited-files files))
-    (when (and next-action take-next-action)
-      (unless (eq next-action next-action-ignore)
-	(cond ((eq next-action 'status)
-	       (call-interactively 'egg-status))
-	      ((eq next-action 'log)
-	       (call-interactively 'egg-log)))))
+(defun egg-buffer-do-move-head (reset-mode rev &optional ignored-action)
+  (let* ((egg--do-no-output-message 
+	  (format "detached %s and re-attached on %s" 
+		  (or (egg-current-branch) "HEAD") rev))
+	 (res (egg--git-reset-cmd t reset-mode rev)))
+    (egg--buffer-handle-result res t ignored-action)
     (plist-get res :success)))
 
 (defun egg-buffer-do-merge-to-head (rev &optional merge-mode-flag msg ignored-action)
@@ -6003,7 +5919,7 @@ when the buffer was created.")
 	(setq reset-mode (cdr (assq mode-key key-mode-alist)))
 	(unless (stringp reset-mode)
 	  (error "Invalid choice: %c (must be of of s,h,x,k,m)" mode-key)))
-      (egg-log-buffer-do-move-head reset-mode rev (invoked-interactively-p)))))
+      (egg-log-buffer-do-move-head reset-mode rev))))
 
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
@@ -6174,7 +6090,7 @@ would be a pull (by default --ff-only)."
 	(if (string-equal dst "HEAD")
 	    (if non-ff
 		(if (egg-repo-clean)
-		    (egg-log-buffer-do-move-head "--hard" src (invoked-interactively-p))
+		    (egg-log-buffer-do-move-head "--hard" src)
 		  (error "Can't push on dirty repo"))
 	      (egg-log-buffer-do-merge-to-head src "--ff-only" t))
 	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
