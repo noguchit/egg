@@ -1537,10 +1537,11 @@ EXIT-INFO should be the return value of `egg--do-git' or `egg--do'."
     (with-current-buffer buf
       (setq beg (point-min))
       (setq end (point-max))
-      (when (> (- end beg) 0)
-	(when (functionp post-proc-func)
-	  (goto-char (point-min))
-	  (setq pp-results (funcall post-proc-func ret)))))
+      ;; even if the buffer is empty, post-proc-func must
+      ;; still be done to process the ret-code
+      (when (functionp post-proc-func)
+	(goto-char (point-min))
+	(setq pp-results (funcall post-proc-func ret))))
     (cond ((bufferp buffer-to-update)
 	   (with-current-buffer buffer-to-update
 	     (funcall egg-buffer-refresh-func buffer-to-update)))
@@ -1997,7 +1998,7 @@ CMD should be pop, apply or branch.
 					 :next-action 'status))
 	(t (egg--git-pp-fatal-result))))
 
-(defun egg--git-cherry-pick-cmd (buffer-to-update rev &optional args)
+(defun egg--git-cherry-pick-cmd (buffer-to-update rev &rest args)
   "Run the git cherry-pick command synchronously with ARGS as arguments.
 REV is the commit to be picked.
 
@@ -2023,7 +2024,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 			   (get-text-property (point) :commit)
 			   (egg-string-at-point)))
 	 (read-string "cherry pick option: " "--no-commit")))
-  (egg--buffer-handle-result (egg--git-cherry-pick-cmd t rev (list option)) t))
+  (egg--buffer-handle-result (egg--git-cherry-pick-cmd t rev option) t))
 
 (defun egg--git-apply-cmd (buffer-to-update patch &optional args)
   "Run the git apply command with PATCH as input and ARGS as arguments.
@@ -2226,7 +2227,7 @@ See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
 	(next-action (plist-get result :next-action)))
     (egg-revert-visited-files (plist-get result :files))
     (when (and ok take-next-action)
-      (if (eq action 'commit)
+      (if (eq next-action 'commit)
 	  (apply #'egg-commit-log-edit commit-args)
 	(egg-call-next-action next-action ignored-action only-action)))
     ok))
@@ -3276,7 +3277,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
     (define-key map (kbd "U") 'egg-unstage-all-files)
-    (define-key map (kbd "X") 'egg-status-buffer-revert)
+    (define-key map (kbd "X") 'egg-status-buffer-undo-wdir)
     (define-key map (kbd "d") 'egg-diff-ref)
     map)
   "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
@@ -4625,7 +4626,7 @@ the source revision."
     (when (egg-status-buffer-do-move-head "--mixed" "HEAD")
       (message "unstaged all modfications in INDEX"))))
 
-(defun egg-status-buffer-revert-to-index (really-do-it take-next-action ignored-action)
+(defun egg-sb-undo-wdir-back-to-index (really-do-it take-next-action ignored-action)
   "When in the status buffer, reset the work-tree to the state in the index.
 When called interactively, do nothing unless REALLY-DO-IT is non-nil.
 Take the next logical action if TAKE-NEXT-ACTION is non-nil unless the
@@ -4638,7 +4639,7 @@ next action is IGNORED-ACTION."
 	  (egg--do-no-output-message "reverted work-dir to INDEX"))
       (egg-status-buffer-do-co-rev :0 "-f" "-a"))))
 
-(defun egg-status-buffer-revert-to-HEAD (really-do-it take-next-action ignored-action)
+(defun egg-sb-undo-wdir-back-to-HEAD (really-do-it take-next-action ignored-action)
   "When in the status buffer, reset the work-tree and the index to HEAD.
 When called interactively, do nothing unless REALLY-DO-IT is non-nil.
 Take the next logical action if TAKE-NEXT-ACTION is non-nil unless the
@@ -4648,14 +4649,14 @@ next action is IGNORED-ACTION."
     (let ((default-directory (egg-work-tree-dir)))
       (egg-status-buffer-do-move-head "--hard" "HEAD"))))
 
-(defun egg-status-buffer-revert (harder)
+(defun egg-status-buffer-undo-wdir (harder)
   "When in the status buffer, throw away local modifications in the work-tree.
 if HARDER is non-nil (prefixed with C-u), reset the work-tree to its state
 in HEAD. Otherwise, reset the work-tree to its staged state in the index."
   (interactive "P")
   (funcall (if harder
-	       #'egg-status-buffer-revert-to-HEAD
-	     #'egg-status-buffer-revert-to-index) 
+	       #'egg-sb-undo-wdir-back-to-HEAD
+	     #'egg-sb-undo-wdir-back-to-index) 
 	   (y-or-n-p (format "throw away ALL %s modifications? " 
 			     (if harder "(staged AND unstaged)" "unstaged")))
 	   t 'status))
