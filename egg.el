@@ -2212,6 +2212,25 @@ See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
       (egg-call-next-action next-action ignored-action only-action))
     ok))
 
+(defun egg--buffer-handle-result-with-commit (result commit-args 
+						     &optional take-next-action
+						     ignored-action only-action)
+  "Handle the structure returned by the egg--git-xxxxx-cmd functions.
+RESULT is the returned value of those functions. Proceed to the next logical action
+if TAKE-NEXT-ACTION is non-nil unless the next action is IGNORED-ACTION.
+if ONLY-ACTION is non-nil then only perform the next action if it's the same
+as ONLY-ACTION.
+
+See documentation of `egg--git-action-cmd-doc' for structure of RESULT."
+  (let ((ok (plist-get result :success))
+	(next-action (plist-get result :next-action)))
+    (egg-revert-visited-files (plist-get result :files))
+    (when (and ok take-next-action)
+      (if (eq action 'commit)
+	  (apply #'egg-commit-log-edit commit-args)
+	(egg-call-next-action next-action ignored-action only-action)))
+    ok))
+
 (defsubst egg-log-buffer-handle-result (result)
   "Handle the RESULT returned by egg--git-xxxxx-cmd functions.
 This function should be used in the log buffer only.
@@ -5955,9 +5974,6 @@ when the buffer was created.")
             :files modified-files
             :message feed-back))))
 
-(defun egg-do-pick-1cherry (rev edit-commit-msg)
-  (egg-do-apply-rev rev "cherry-pick" (if edit-commit-msg "-n" "--ff")))
-
 (defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
   (interactive "d\nP")
   
@@ -5973,17 +5989,13 @@ when the buffer was created.")
 	(message "Nah! that cherry (%s) looks rotten!!!" rev)
       
       (setq old-msg (egg-commit-message rev))
-      (setq res (egg-do-pick-1cherry rev edit-commit-msg))
-      (setq modified-files (plist-get res :files) )
-      (if modified-files
-	  (egg-revert-visited-files modified-files))
-      (message "GIT-CHERRY_PICK> %s" (plist-get res :message))
-      (when (and (plist-get res :success) edit-commit-msg)
-	(egg-commit-log-edit (concat
-			      (egg-text "Newly Picked Cherry:  " 'egg-text-3)
-			      (egg-text rev 'egg-branch))
-			     (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
-			     old-msg)))))
+      (setq res (egg--git-cherry-pick-cmd t rev (if edit-commit-msg "--no-commit" "--ff")))
+      (egg--buffer-handle-result-with-commit
+       res (list (concat (egg-text "Newly Picked Cherry:  " 'egg-text-3)
+			 (egg-text rev 'egg-branch))
+		 (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
+		 old-msg)
+       t 'log))))
 
 (defun egg-do-revert-rev (rev &optional use-default-commit-msg)
   (if use-default-commit-msg
