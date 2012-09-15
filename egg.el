@@ -1986,16 +1986,36 @@ CMD should be pop, apply or branch.
       (setq res (nconc res (list :files files))))
     res))
 
-(defun egg--git-cherry-pick-pp (ret-code rev no-commit)
+(defun egg--git-cherry-pick-pp (ret-code rev not-commit-yet)
   (cond ((= ret-code 0)
-	 (list :success t :line (format "'%s' applied cleanly" (egg-sha1 rev))
-	       :next-action (if no-commit 'commit 'log)))
+	 (or (egg--git-pp-grab-line-matching
+	      (regexp-opt '("file changed" "files changed"
+			    "insertions" "deletions"))
+	      nil :success t :next-action (if not-commit-yet 'commit 'log))
+	     (if not-commit-yet
+		(if (egg-git-ok nil "diff" "--quiet" "--cached")
+		    ;; cherry pick produced empty index
+		    (list :success t
+			  :line (or (egg--git-pp-grab-line-no -1)
+				    (format "cherry '%s' evaporated!!!" (egg-sha1 rev))))
+		  (list :success t :next-action 'commit
+			:line (or (egg--git-pp-grab-line-no -1)
+				  (format "cherry '%s' picked, ready to be committed"
+					  (egg-sha1 rev)))))
+	       (list :success t :next-action 'log
+		     :line (or (egg--git-pp-grab-line-no -1)
+			       (format "'%s' applied cleanly" (egg-sha1 rev)))))))
 	((= ret-code 1)
-	 (egg--git-pp-grab-line-matching "after resolving the conflicts"
-					 "please resolve conflicts"
-					 :next-action 'status :success t)
-	 (egg--git-pp-grab-line-matching "error: could not apply" nil
-					 :next-action 'status))
+	 (or
+	  (egg--git-pp-grab-line-matching 
+	   (regexp-opt '("cherry-pick is now empty" "nothing to commit"))
+	   nil :success t)
+	  (egg--git-pp-grab-line-matching "after resolving the conflicts"
+					  "please resolve conflicts"
+					  :next-action 'status :success t)
+	  (egg--git-pp-grab-line-matching "error: could not apply" nil
+					  :next-action 'status)
+	  (egg--git-pp-grab-line-no -1)))
 	(t (egg--git-pp-fatal-result))))
 
 (defun egg--git-cherry-pick-cmd (buffer-to-update rev &rest args)
