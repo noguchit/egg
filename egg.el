@@ -2118,6 +2118,56 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 (defsubst egg-buffer-do-amend-no-edit (&rest args)
   (egg--buffer-handle-result (egg--git-amend-no-edit-cmd t) t))
 
+
+(defun egg--git-revert-pp (ret-code rev not-commit-yet)
+  (cond ((= ret-code 0)
+	 (or (egg--git-pp-grab-line-matching
+	      (regexp-opt '("file changed" "files changed"
+			    "insertions" "deletions"))
+	      nil :success t :next-action (if not-commit-yet 'commit 'log))
+	     (if not-commit-yet
+		(if (egg-git-ok nil "diff" "--quiet" "--cached")
+		    ;; revert produced empty index
+		    (list :success t
+			  :line (or (egg--git-pp-grab-line-no -1)
+				    (format "successfully reverted '%s', but resulted in no changes"
+					    (egg-sha1 rev))))
+		  (list :success t :next-action 'commit
+			:line (or (egg--git-pp-grab-line-no -1)
+				  (format "reverted '%s', ready to commit"
+					  (egg-sha1 rev)))))
+	       (list :success t :next-action 'log
+		     :line (or (egg--git-pp-grab-line-no -1)
+			       (format "rev '%s' reverted" (egg-sha1 rev)))))))
+	((= ret-code 1)
+	 (or
+	  (egg--git-pp-grab-line-matching "after resolving the conflicts"
+					  "revert produced conflicts, please resolve"
+					  :next-action 'status :success t)
+	  (egg--git-pp-grab-line-matching "error: could not revert" nil
+					  :next-action 'status)
+	  (egg--git-pp-grab-line-no -1)))
+	(t (egg--git-pp-fatal-result))))
+
+(defun egg--git-revert-cmd (buffer-to-update rev use-default-msg)
+  "Run the git revert command synchronously with ARGS as arguments.
+REV is the commit to be picked.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
+  (let ((files (egg-git-to-lines "diff" "--name-only" rev))
+	(not-commit-yet (null use-default-msg))
+	res)
+    (setq res 
+	  (egg--do-git-action
+	   "revert"
+	   buffer-to-update
+	   `(lambda (ret-code)
+	      (egg--git-revert-pp ret-code ,rev ,not-commit-yet))
+	   (list (if use-default-msg "--no-edit" "--no-commit") rev)))
+    (when (plist-get res :success)
+      (nconc res (list :files files)))
+    res))
+
 (defun egg--git-tag-cmd-pp (ret-code)
   (cond ((= ret-code 0)
 	 (or (egg--git-pp-grab-1st-line-matching 
@@ -3430,7 +3480,7 @@ rebase session."
     "\\[egg-stage-all-files]:stage all modifications  "
     "\\[egg-unstage-all-files]:unstage all modifications  "
     "\\[egg-diff-ref]:diff other revision\n"
-    "\\[egg-status-buffer-revert]: throw away ALL modifications  "
+    "\\[egg-status-buffer-undo-wdir]: throw away ALL modifications  "
     "\\<egg-unstaged-diff-section-map>"
     "\\[egg-diff-section-cmd-revert-to-head]:throw away file's modifications\n"
     "\\<egg-hide-show-map>"
@@ -4976,7 +5026,7 @@ when the buffer was created.")
 		"Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
 		"Committer: " (egg-text (plist-get state :name) 'egg-text-2) " "
 		(egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
-		(egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` when cancel) -"
+		(egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` to cancel) -"
 			  'font-lock-comment-face))
 	(put-text-property (point-min) (point) 'read-only t)
 	(put-text-property (point-min) (point) 'rear-sticky nil)
@@ -5978,23 +6028,6 @@ when the buffer was created.")
      (egg--git-push-cmd (current-buffer) (if force "-vf" "-v")
 			"." (concat ":" victim)))))
 
-(defun egg-do-apply-rev (rev cmd &rest cmd-args)
-  (let ((orig (egg-get-current-sha1))
-	(args (append cmd-args (list rev)))
-        cmd-res modified-files feed-back)
-    (with-temp-buffer
-      (setq cmd-res (egg-git-ok-args (current-buffer) (cons cmd args)))
-      (goto-char (point-min))
-      (setq modified-files
-            (egg-git-to-lines "diff" "--name-only" orig))
-      (setq feed-back
-            (save-match-data
-              (car (nreverse (split-string (buffer-string) "[\n]+" t)))))
-      (egg-run-buffers-update-hook)
-      (list :success cmd-res
-            :files modified-files
-            :message feed-back))))
-
 (defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
   (interactive "d\nP")
   
@@ -6018,11 +6051,6 @@ when the buffer was created.")
 		 old-msg)
        t 'log))))
 
-(defun egg-do-revert-rev (rev &optional use-default-commit-msg)
-  (if use-default-commit-msg
-      (egg-do-apply-rev rev "revert" "--no-edit")
-    (egg-do-apply-rev rev "revert" "--no-commit")))
-
 (defun egg-log-buffer-revert-rev (pos &optional use-default-commit-msg)
   (interactive "d\nP")
   (let ((sha1 (egg-log-buffer-get-rev-at pos :sha1))
@@ -6036,28 +6064,18 @@ when the buffer was created.")
     (setq old-subject (egg-commit-subject rev))
 
     (if (not (y-or-n-p (format "undo changes introduced by %s%s? " rev
-			       (if use-default-commit-msg " (with git's default commit message)" ""))))
+			       (if use-default-commit-msg
+				   " (with git's default commit message)" ""))))
 	(message "Nah! that lump (%s) looks benign!!!" old-subject)
       
-      (setq res (egg-do-revert-rev rev use-default-commit-msg))
-      (setq modified-files (plist-get res :files) )
-      (if modified-files
-	  (egg-revert-visited-files modified-files))
-      (message "GIT-REVERT> %s" (plist-get res :message))
-      (setq cmd-ok (plist-get res :success))
-      (cond ((and cmd-ok use-default-commit-msg)
-	     nil)			;; everything seems find and dandy
-
-	    ((not cmd-ok)		;; likely a failed merge
-	     (egg-status))
-	    
-	    (t				;; cmd ok, now edit the commit message
-	     (egg-commit-log-edit (concat
-				   (egg-text "Undo Changes Introduced by:  " 'egg-text-3)
-				   (egg-text rev 'egg-branch)) 
-				  (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
-				  (format "Revert \"%s\"\n\nThis reverts commit %s\n"
-					  old-subject sha1)))))))
+      (setq res (egg--git-revert-cmd t rev use-default-commit-msg))
+      (egg--buffer-handle-result-with-commit
+       res (list (concat
+		  (egg-text "Undo Changes Introduced by:  " 'egg-text-3)
+		  (egg-text rev 'egg-branch)) 
+		 (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
+		 (format "Revert \"%s\"\n\nThis reverts commit %s\n" old-subject sha1))
+       t 'log))))
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
   (interactive "d")
