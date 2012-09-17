@@ -1831,7 +1831,11 @@ command will be displayed as feedback of emacs command."
 				    "Reset branch")) nil
 		      :next-action 'status :success t)
 		     (egg--git-pp-grab-line-no -1 :next-action 'status :success t))
-	       (egg--git-pp-fatal-result "Please, commit your changes")))
+	       (or
+		(egg--git-pp-grab-line-matching "untracked working tree files would be overwritten"
+						"untracked file(s) would be overwritten"
+						:next-action 'status)
+		(egg--git-pp-fatal-result "Please, commit your changes"))))
 	   args))
     
     (if (plist-get res :success)
@@ -4147,12 +4151,15 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
                  (goto-char restore-pt)
                (goto-char (point-min)))))))
 
-(defun egg-status-buffer-checkout-ref (called-interactively &optional default)
-  "Prompt a revision to checkout. Default is DEFAULT."
-  (interactive (list (prefix-numeric-value current-prefix-arg)
-		(car (get-text-property (point) :ref))))
-  (egg-status-buffer-do-co-rev (completing-read "checkout: " (egg-all-refs)
-						nil nil (or default "HEAD"))))
+(defun egg-status-buffer-checkout-ref (&optional force name)
+  "Prompt a revision to checkout. Default is name."
+  (interactive (list current-prefix-arg
+		     (car (get-text-property (point) :ref))))
+  (setq name (completing-read "checkout: " (egg-all-refs)
+			      nil nil (or name "HEAD")))
+  (if force 
+      (egg-status-buffer-do-co-rev name "-f")
+      (egg-status-buffer-do-co-rev name)))
 
 (defsubst egg-buffer-show-all ()
   "UnHide all hidden sections in the current special egg buffer."
@@ -5924,11 +5931,13 @@ when the buffer was created.")
                                   state todo-alist)
     (egg-status)))
 
-(defun egg-log-buffer-checkout-commit (pos)
-  (interactive "d")
-  (egg-log-buffer-do-co-rev
-   (completing-read "checkout: " (egg-all-refs) nil nil
-                    (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
+(defun egg-log-buffer-checkout-commit (pos &optional force)
+  (interactive "d\nP")
+  (let ((ref (completing-read "checkout: " (egg-all-refs) nil nil
+			      (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
+    (if force 
+	(egg-log-buffer-do-co-rev ref "-f")
+      (egg-log-buffer-do-co-rev ref))))
 
 (defun egg-log-buffer-tag-commit (pos &optional force)
   (interactive "d\nP")
