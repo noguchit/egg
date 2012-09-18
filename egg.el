@@ -5552,7 +5552,7 @@ when the buffer was created.")
                         (1+ (line-end-position))))
         head-line))))
 
-(defsubst egg-log-buffer-insert-n-decorate-logs (log-insert-func)
+(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func)
   (let ((beg (point)))
     (funcall log-insert-func)
     (goto-char beg)
@@ -6262,7 +6262,7 @@ would be a pull (by default --ff-only)."
           (setq p-pos (1- p-pos))
           (egg-log-buffer-goto-pos p-pos))))))
 
-(defun egg-log-buffer-do-insert-commit (pos)
+(defun egg-log-buffer-do-insert-commit (pos &optional args highlight-regexp)
   (save-excursion
     (let ((sha1 (get-text-property pos :commit))
           (ref (get-text-property pos :references))
@@ -6270,17 +6270,26 @@ would be a pull (by default --ff-only)."
           (inhibit-read-only t)
           (indent-column egg-log-buffer-comment-column)
           (indent-spaces (make-string egg-log-buffer-comment-column ? ))
-          beg end)
+          beg end diff-beg diff-end)
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "show" "--no-color" (concat "--pretty=format:"
-							indent-spaces "%ai%n"
-							indent-spaces "%an%n%n"
-							"%b%n")
-                          sha1)
+      (unless (if args
+		  (egg-git-ok-args t (nconc (list "show" "--no-color")
+					    (copy-list args)
+					    (list (concat "--pretty=format:"
+							  indent-spaces "%ai%n"
+							  indent-spaces "%an%n%n"
+							  "%b%n")
+						  sha1)))
+		  (egg-git-ok t "show" "--no-color" (concat "--pretty=format:"
+							    indent-spaces "%ai%n"
+							    indent-spaces "%an%n%n"
+							    "%b%n")
+			      sha1))
         (error "error calling git log %s!" ref))
-      (setq end (point))
+      (setq end (point)
+	    diff-end end)
       (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
       (egg-decorate-diff-section :begin beg
@@ -6288,21 +6297,32 @@ would be a pull (by default --ff-only)."
                                  :diff-map egg-log-diff-map
                                  :hunk-map egg-log-hunk-map)
       (goto-char beg)
-      (setq end (or (next-single-property-change beg :diff) end))
+      (setq end (or (next-single-property-change beg :diff) end)
+	    diff-beg end)
       (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
       (put-text-property (+  indent-column beg) (line-end-position)
                          'face 'egg-text-2)
       (forward-line 1)
       (put-text-property (point) (+ indent-column (point)) 'face 'egg-diff-none)
       (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
+
+      (when (stringp highlight-regexp)
+	(goto-char diff-beg)
+	(while (re-search-forward highlight-regexp diff-end t)
+	  (put-text-property (match-beginning 0) (match-end 0) 'face 'highlight)))
+
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
   (interactive "d")
   (let* ((next (next-single-property-change pos :diff))
-         (sha1 (and next (get-text-property next :commit))))
+         (sha1 (and next (get-text-property next :commit)))
+	 (pickaxed (and egg-internal-log-buffer-closure 
+			(plist-get egg-internal-log-buffer-closure :pickaxed)))
+	 (highlight (and egg-internal-log-buffer-closure 
+			 (plist-get egg-internal-log-buffer-closure :highlight))))
     (unless (equal (get-text-property pos :commit) sha1)
-      (egg-log-buffer-do-insert-commit pos))))
+      (egg-log-buffer-do-insert-commit pos pickaxed highlight))))
 
 (defun egg-generic-display-logs (data &optional init)
   (buffer-disable-undo)
@@ -6905,12 +6925,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                          (egg-text " and " 'egg-text-2)
                          (egg-text sha1 'egg-term))
                  :closure
-                 (lambda ()
-                   (egg-log-buffer-insert-n-decorate-logs
-                    `(lambda ()
+                 `(lambda ()
+		    (egg-log-buffer-insert-n-decorate-logs
+		     (lambda ()
                        (egg-git-ok t "log" "--max-count=10000" "--graph"
                                    "--topo-order" "--pretty=oneline" "--no-color"
-                                   "--decorate" "HEAD" sha1))))))
+                                   "--decorate" "HEAD" ,sha1))))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
@@ -6943,27 +6963,44 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
 
-(defun egg-insert-n-decorate-pickaxed-logs (string)
+(defun egg-insert-n-decorate-pickaxed-logs (args)
   (let ((beg (point)))
-    (egg-git-ok t "log" "--pretty=oneline" "--decorate" "--no-color"
-                (concat "-S" string))
+    (egg-git-ok-args t 
+		     (nconc (list "log" "--pretty=oneline" "--decorate" "--no-color")
+			    args))
     (goto-char beg)
     (egg-decorate-log egg-query:commit-commit-map
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map)))
 
-(defun egg-search-changes (string)
-  (interactive "ssearch history for changes containing: ")
-  (let* ((default-directory (egg-work-tree-dir (egg-git-dir (invoked-interactively-p))))
+(defun egg-search-changes (level)
+  (interactive "p")
+  (let* ((term-is-regexp (> level 3))
+	 (search-lines-matching (> level 15))
+	 (term (read-string (cond (search-lines-matching
+				   "search history for line matching (posix regexp) : ")
+				  (term-is-regexp
+				   "search history for changes containing (posix regexp): ")
+				  (t "search history for changes containing: "))
+			    (egg-string-at-point)))
+	 (label (cond (search-lines-matching "Commits with lines matching: ")
+		      (term-is-regexp "Commits containing regexp: ")
+		      (t "Commits containing: ")))
+	 (args (cond (search-lines-matching (list "-G" term))
+		     (term-is-regexp (list "--pickaxe-regex" "-S" term))
+		     (t (list "-S" term))))
+	 (default-directory (egg-work-tree-dir (egg-git-dir (invoked-interactively-p))))
          (buf (egg-get-query:commit-buffer 'create))
-         (desc (concat (egg-text "Commits containing: " 'egg-text-2)
-                       (egg-text string 'egg-term)))
+         (desc (concat (egg-text label 'egg-text-2)
+                       (egg-text term 'egg-term)))
          (func `(lambda ()
-                  (egg-insert-n-decorate-pickaxed-logs ,string))))
+                  (egg-insert-n-decorate-pickaxed-logs (list ,@args)))))
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
-           (list :description desc :closure func))
+           (list :description desc :closure func
+		 :highlight (if term-is-regexp term (concat "\\<" term "\\>"))
+		 :pickaxed args))
       (egg-query:commit-buffer-rerun buf 'init))
     (pop-to-buffer buf t)))
 ;;;========================================================
