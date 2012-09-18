@@ -3366,8 +3366,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
   "Context keymap for the repo section of the status buffer when
   rebase is in progress.\\{egg-status-buffer-rebase-map}")
 
-(defun egg-buffer-do-rebase (upstream-or-action
-                             &optional old-base prompt)
+(defun egg-buffer-do-rebase (upstream-or-action &optional onto)
   "Perform rebase action from an egg special buffer.
 See `egg-do-rebase-head'."
   (let ((git-dir (egg-git-dir))
@@ -3379,7 +3378,7 @@ See `egg-do-rebase-head'."
       (unless (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
         (error "No rebase in progress in directory %s"
                (egg-work-tree-dir git-dir))))
-    (setq res (egg-do-rebase-head upstream-or-action old-base prompt))
+    (setq res (egg-do-rebase-head upstream-or-action onto))
     (egg-revert-visited-files (plist-get res :files))
     (message "GIT-REBASE> %s" (plist-get res :message))
     (plist-get res :success)))
@@ -4779,36 +4778,33 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 (defsubst egg-log-buffer-do-merge-to-head (rev &optional merge-mode-flag msg)
   (egg-buffer-do-merge-to-head rev merge-mode-flag msg 'log))
 
-(defun egg-do-rebase-head (upstream-or-action
-                           &optional old-base prompt)
+(defun egg-do-rebase-head (upstream-or-action &optional onto)
   (let ((pre-merge (egg-get-current-sha1))
         cmd-res modified-files feed-back old-choices)
-;;;     (with-temp-buffer
     (with-egg-debug-buffer
       (erase-buffer)
-      (when (and (stringp upstream-or-action) ;; start a rebase
-                 (eq old-base t))	      ;; ask for old-base
-        (unless (egg-git-ok (current-buffer) "rev-list"
-                            "--topo-order" "--reverse"
-                            (concat upstream-or-action "..HEAD^"))
-          (error "Failed to find rev between %s and HEAD^: %s"
-                 upstream-or-action (buffer-string)))
-        (unless (egg-git-region-ok (point-min) (point-max)
-                                   "name-rev" "--stdin")
-          (error "Failed to translate revisions: %s" (buffer-string)))
-        (save-match-data
-          (goto-char (point-min))
-          (while (re-search-forward "^.+(\\(.+\\))$" nil t)
-            (setq old-choices (cons (match-string-no-properties 1)
-                                    old-choices))))
-        (setq old-base
-              (completing-read (or prompt "old base: ") old-choices))
-        (erase-buffer))
-
+      ;; (when (and (stringp upstream-or-action) ;; start a rebase
+      ;;            (eq old-base t))	      ;; ask for old-base
+      ;;   (unless (egg-git-ok (current-buffer) "rev-list"
+      ;;                       "--topo-order" "--reverse"
+      ;;                       (concat upstream-or-action "..HEAD^"))
+      ;;     (error "Failed to find rev between %s and HEAD^: %s"
+      ;;            upstream-or-action (buffer-string)))
+      ;;   (unless (egg-git-region-ok (point-min) (point-max)
+      ;;                              "name-rev" "--stdin")
+      ;;     (error "Failed to translate revisions: %s" (buffer-string)))
+      ;;   (save-match-data
+      ;;     (goto-char (point-min))
+      ;;     (while (re-search-forward "^.+(\\(.+\\))$" nil t)
+      ;;       (setq old-choices (cons (match-string-no-properties 1)
+      ;;                               old-choices))))
+      ;;   (setq old-base
+      ;;         (completing-read (or prompt "old base: ") old-choices))
+      ;;   (erase-buffer))
+      
       (setq cmd-res
-            (cond ((and (stringp old-base) (stringp upstream-or-action))
-                   (egg-git-ok (current-buffer) "rebase" "-m" "--onto"
-                               upstream-or-action old-base))
+            (cond ((and (stringp onto) (stringp upstream-or-action))
+                   (egg-git-ok (current-buffer) "rebase" "-m" "--onto" onto upstream-or-action))
                   ((eq upstream-or-action :abort)
                    (egg-git-ok (current-buffer) "rebase" "--abort"))
                   ((eq upstream-or-action :skip)
@@ -4816,8 +4812,7 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
                   ((eq upstream-or-action :continue)
                    (egg-git-ok (current-buffer) "rebase" "--continue"))
                   ((stringp upstream-or-action)
-                   (egg-git-ok (current-buffer) "rebase" "-m"
-                               upstream-or-action))))
+                   (egg-git-ok (current-buffer) "rebase" "-m" upstream-or-action))))
       (goto-char (point-min))
       (setq feed-back
             (egg-safe-search-pickup
@@ -5896,18 +5891,27 @@ when the buffer was created.")
   (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
 				   "--squash" t))
 
-(defun egg-log-buffer-rebase (pos &optional move)
-  (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
-        res modified-files buf)
-    (if  (null (y-or-n-p (format "rebase HEAD to %s? " rev)))
-        (message "cancel rebase HEAD to %s!" rev)
-      (unless (egg-buffer-do-rebase
-               rev (if move t)
-               (if move
-                   (format "starting point to rebase HEAD onto %s: "
-                           rev)))
-        (egg-status)))))
+(defun egg-log-buffer-rebase (pos)
+  (interactive "d")
+  (let* ((mark (egg-log-buffer-find-first-mark ?*))
+         (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+	 (onto (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+	 res modified-files buf)
+
+    (unless upstream
+      (setq upstream onto)
+      (setq onto nil))
+
+    (unless upstream (error "No upstream to rebase on!"))
+
+    (if (null (y-or-n-p (if onto 
+			    (format "rebase %s..HEAD onto %s? " upstream onto)
+			  (format "rebase HEAD on %s? " upstream))))
+	(message (if onto
+		     (format "cancelled rebasing %s..HEAD onto %s!" upstream onto)
+		   (format "cancelled rebasing HEAD on %s!" upstream)) ))
+    (unless (egg-buffer-do-rebase upstream onto)
+      (egg-status t))))
 
 (defun egg-log-buffer-rebase-interactive (pos &optional move)
   (interactive "d\nP")
