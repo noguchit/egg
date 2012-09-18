@@ -1874,6 +1874,10 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 	    (or (egg--git-pp-grab-line-matching "fix conflicts and then commit"
 						nil :next-action 'status :success t)
 		(egg--git-pp-grab-line-matching
+		 "untracked working tree files would be overwritten by merge"
+		 "untracked files would be overwritten, please rename them before merging"
+		 :next-action 'status)
+		(egg--git-pp-grab-line-matching
 		 "commit your changes or stash them before you can merge"
 		 nil :next-action 'status)
 		(egg--git-pp-grab-line-no -1)))
