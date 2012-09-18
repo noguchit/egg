@@ -7015,16 +7015,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map)))
 
-(defun egg-search-changes (level)
+(defun egg-search-changes (level &optional term caller-level)
   (interactive "p")
-  (let* ((term-is-regexp (> level 3))
-	 (search-lines-matching (> level 15))
-	 (term (read-string (cond (search-lines-matching
-				   "search history for line matching (posix regexp) : ")
-				  (term-is-regexp
-				   "search history for changes containing (posix regexp): ")
-				  (t "search history for changes containing: "))
-			    (egg-string-at-point)))
+  (let* ((options (or caller-level level))
+	 (term-is-regexp (> options 3))
+	 (search-lines-matching (> options 15))
+	 (term (or term
+		   (read-string (cond (search-lines-matching
+				       "search history for line matching (posix regexp) : ")
+				      (term-is-regexp
+				       "search history for changes containing (posix regexp): ")
+				      (t "search history for changes containing: "))
+				(egg-string-at-point))))
 	 (label (cond (search-lines-matching "Commits with lines matching: ")
 		      (term-is-regexp "Commits containing regexp: ")
 		      (t "Commits containing: ")))
@@ -7852,10 +7854,10 @@ current file contains unstaged changes."
   (define-key egg-minor-mode-map (read-kbd-macro val) egg-file-cmd-map)
   (custom-set-default var val))
 
-(defun egg-file-log-pickaxe (string)
-  (interactive (list (read-string "search history for: "
-                                  (egg-string-at-point))))
-  (egg-search-changes string))
+(defun egg-file-log-pickaxe (level string)
+  (interactive (list (prefix-numeric-value current-prefix-arg) 
+		     (read-string "search history for: " (egg-string-at-point))))
+  (egg-search-changes nil string level))
 
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
