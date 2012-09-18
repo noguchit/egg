@@ -6963,6 +6963,43 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
 
+
+(defun egg-async-insert-n-decorate-pickaxed-logs (args)
+  (let* ((closure egg-internal-log-buffer-closure)
+	 (fetched-data (and closure (plist-get closure :fetched-data)))
+	 (beg (point)))
+    (cond ((null fetched-data)
+	   (insert "\t" (egg-text "Please be patient! Searching in background..." 'egg-text-2))
+	   (egg-async-0-args 
+	    (list (lambda (log-buffer closure)
+		    (plist-put closure :fetched-data 
+			       (save-match-data 
+				 (goto-char (point-min))
+				 (re-search-forward "EGG-GIT-OUTPUT:\n")
+				 (split-string (buffer-substring-no-properties (match-end 0)
+									       (point-max))
+					       "\n" t)))
+		    (with-current-buffer log-buffer
+		      (funcall egg-buffer-refresh-func log-buffer)))
+		  (current-buffer) closure)
+	    (nconc (list "--no-pager" "log" "--pretty=oneline" "--decorate" "--no-color")
+		   args)))
+
+	  ((stringp fetched-data)
+	   (insert fetched-data "\n"))
+
+	  ((consp fetched-data)
+	   (dolist (line fetched-data)
+	     (insert line "\n"))
+	   (goto-char beg)
+	   (egg-decorate-log egg-query:commit-commit-map
+			     egg-query:commit-commit-map
+			     egg-query:commit-commit-map
+			     egg-query:commit-commit-map))
+	  (t (error "fetched-data is: %s" fetched-data)))
+    beg))
+
+
 (defun egg-insert-n-decorate-pickaxed-logs (args)
   (let ((beg (point)))
     (egg-git-ok-args t 
@@ -6995,7 +7032,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
          (desc (concat (egg-text label 'egg-text-2)
                        (egg-text term 'egg-term)))
          (func `(lambda ()
-                  (egg-insert-n-decorate-pickaxed-logs (list ,@args)))))
+;;                  (egg-insert-n-decorate-pickaxed-logs (list ,@args))
+                  (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
+		  )))
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
            (list :description desc :closure func
