@@ -912,6 +912,58 @@ END-RE is the regexp to match the end of a record."
   (or (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD")
       "0000000000000000000000000000000000000000"))
 
+(defun egg-commit-at-point (&optional pos object)
+  (interactive "d")
+  (get-text-property (or pos (point)) :commit object))
+
+(defun egg-ref-at-point (&optional pos type object)
+  (interactive "d")
+  (let ((ref (get-text-property (or pos (point)) :ref object)))
+    (when ref
+      (if type
+	  (and (if (consp type)
+		   (memq (cdr ref) type)
+		 (eq (cdr ref) type)) 
+	       (car ref))
+	(car ref)))))
+
+(defsubst egg-ref-at (pos &optional object)
+  (egg-ref-at-point pos nil object))
+
+(defsubst egg-head-at-point (&optional pos object)
+  (interactive "d")
+  (egg-ref-at-point pos :head object))
+
+(defsubst egg-head-at (pos)
+  (egg-ref-at-point pos '(:remote :head)))
+
+(defsubst egg-tag-at-point (&optional pos object)
+  (interactive "d")
+  (egg-ref-at-point pos :tag object))
+
+(defsubst egg-remote-at-point (&optional pos object)
+  (interactive "d")
+  (egg-ref-at-point pos :remote object))
+
+(defsubst egg-references-at-point (&optional pos object)
+  (interactive "d")
+  (get-text-property (or pos (point)) :references object))
+
+(defsubst egg-ref-or-commit-at (pos &optional object)
+  (or (egg-ref-at-point pos object) (egg-commit-at-point pos object)))
+
+(defsubst egg-commit-at (pos &optional object)
+  (egg-commit-at-point pos object))
+
+(defsubst egg-rsite-at (pos &optional object)
+  (egg-rbranch-to-remote (egg-remote-at-point pos object)))
+
+(defsubst egg-delta-file-at (pos &optional object)
+  (car (get-text-property pos :diff object)))
+
+(defsubst egg-delta-hunk-at (pos &optional object)
+  (car (get-text-property pos :hunk object)))
+
 (defsubst egg-set-mode-info (state)
   "Set the mode-line string for buffers visiting files in the current repo.
 The string is built based on the current state STATE."
@@ -2048,9 +2100,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 (defun egg--git-cherry-pick-cmd-test (rev option)
   (interactive
    (list (egg-read-rev "cherry pick rev: " 
-		       (or (car (get-text-property (point) :ref))
-			   (get-text-property (point) :commit)
-			   (egg-string-at-point)))
+		       (or (egg-ref-at-point) (egg-commit-at-point) (egg-string-at-point)))
 	 (read-string "cherry pick option: " "--no-commit")))
   (egg--buffer-handle-result (egg--git-cherry-pick-cmd t rev option) t))
 
@@ -4156,10 +4206,8 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
 
 (defun egg-status-buffer-checkout-ref (&optional force name)
   "Prompt a revision to checkout. Default is name."
-  (interactive (list current-prefix-arg
-		     (car (get-text-property (point) :ref))))
-  (setq name (completing-read "checkout: " (egg-all-refs)
-			      nil nil (or name "HEAD")))
+  (interactive (list current-prefix-arg (egg-ref-at-point)))
+  (setq name (egg-read-rev "checkout (branch or tag): " (or name "HEAD")))
   (if force 
       (egg-status-buffer-do-co-rev name "-f")
       (egg-status-buffer-do-co-rev name)))
@@ -4520,73 +4568,6 @@ Each string should be a file name relative to the work tree."
           (prog1 (point)
 	    (insert-buffer-substring buffer)
 	    (goto-char (point-max))))))
-
-(defun egg-sync-handle-exit-code (ret accepted-codes logger)
-  (let (output)
-    (with-current-buffer (car logger)
-      (save-excursion
-        (goto-char (cdr logger))
-        (forward-line 1)
-        (setq output (buffer-substring-no-properties
-                      (point) (point-max)))))
-    (egg-cmd-log (format "RET:%d\n" ret))
-    (if (listp accepted-codes)
-        (setq accepted-codes (cons 0 accepted-codes))
-      (setq accepted-codes (list 0 accepted-codes)))
-    (if (null (memq ret accepted-codes))
-        (with-current-buffer (car logger)
-          (widen)
-          (narrow-to-region (cdr logger) (point-max))
-          (display-buffer (current-buffer) t)
-          nil)
-      (egg-run-buffers-update-hook)
-      output)))
-
-(defun egg-sync-do (program stdin accepted-codes args)
-  (let (logger ret)
-    (setq logger (egg-cmd-log "RUN:" program " "
-                              (mapconcat 'identity args " ")
-                              (if stdin " <REGION\n" "\n")))
-    (setq ret
-          (cond ((stringp stdin)
-                 (with-temp-buffer
-                   (insert stdin)
-                   (apply 'call-process-region (point-min) (point-max)
-                          program nil (car logger) nil args)))
-                ((consp stdin)
-                 (apply 'call-process-region (car stdin) (cdr stdin)
-                        program nil (car logger) nil args))
-                ((null stdin)
-                 (apply 'call-process program nil (car logger) nil args))))
-    (egg-sync-handle-exit-code ret accepted-codes logger)))
-
-(defsubst egg-sync-git-region (beg end &rest args)
-  (egg-sync-do egg-git-command (cons beg end) nil args))
-
-(defun egg-show-git-output (output line-no &optional prefix)
-  (unless (stringp prefix) (setq prefix "GIT"))
-  (if (consp output) (setq output (cdr output)))
-  (when (and (stringp output) (> (length output) 1))
-    (cond ((numberp line-no)
-	   (when (setq output (save-match-data (split-string output "\n" t)))
-	     (cond ((< line-no 0)
-		    (setq line-no (1+ line-no))
-		    (setq output (nth line-no (nreverse output))))
-		   ((> line-no 0)
-		    (setq line-no (1- line-no))
-		    (setq output (nth line-no output)))
-		   (t (setq output nil)))))
-	  ((stringp line-no)
-	   (with-temp-buffer
-	     (insert output)
-	     (goto-char (point-min))
-	     (setq output 
-		   (and (re-search-forward line-no nil t)
-			(buffer-substring-no-properties (line-beginning-position)
-							(line-end-position)))))))
-    (when (stringp output)
-      (message "%s> %s" prefix output)
-      t)))
 
 (defun egg-hunk-section-apply-cmd (pos &rest args)
   "Apply using git apply with ARGS as arguments.
@@ -5244,9 +5225,8 @@ when the buffer was created.")
 
 (defun egg-diff-ref (&optional default)
   "Prompt a revision to diff other ref."
-  (interactive (list (car (get-text-property (point) :ref))))
-  (let* ((src (completing-read "diff: " (egg-all-refs)
-                               nil nil (or default "")))
+  (interactive (list (egg-ref-at-point)))
+  (let* ((src (egg-read-rev "diff: " default))
          (buf (egg-do-diff (egg-build-diff-info src nil))))
     (pop-to-buffer buf t)))
 
@@ -5435,16 +5415,19 @@ when the buffer was created.")
                             (+ (point) 2)))
         (setq refs (when refs-start
                      (save-match-data
-                       (mapcar (lambda (lref)
-                                 (if (and (>= (length lref) 5) (string-equal (substring lref 0 5) "tag: "))
-                                     (substring lref 5)
-                                   (if (and (>= (length lref) 6) (string-equal (substring lref -5) "/HEAD"))
-                                       nil
-                                     lref)))
-                               (split-string
-                                (buffer-substring-no-properties (+ sha-end 2)
-                                                                refs-end)
-                                ", +" t)))))
+                       (delq nil
+			     (mapcar (lambda (lref)
+				       (if (and (>= (length lref) 5) 
+						(string-equal (substring lref 0 5) "tag: "))
+					   (substring lref 5)
+					 (if (and (>= (length lref) 6) 
+						  (string-equal (substring lref -5) "/HEAD"))
+					     nil
+					   lref)))
+				     (split-string
+				      (buffer-substring-no-properties (+ sha-end 2)
+								      refs-end)
+				      ", +" t))))))
 
         (setq full-refs (mapcar (lambda (full-ref-name)
                                   (cdr (assoc full-ref-name ref-alist)))
@@ -5599,10 +5582,10 @@ when the buffer was created.")
   (egg-log-pop-to-file file sha1 t use-wdir-file (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
 (defun egg-log-buffer-get-rev-at (pos &rest options)
-  (let* ((commit (get-text-property pos :commit))
-         (refs (get-text-property pos :references))
+  (let* ((commit (egg-commit-at-point))
+         (refs (egg-references-at-point))
          (first-head (if (stringp refs) refs (car (last refs))))
-         (ref-at-point (car (get-text-property pos :ref)))
+         (ref-at-point (egg-ref-at-point))
          (head-sha1 (egg-get-current-sha1)))
     
     (when (stringp commit)
@@ -5941,8 +5924,8 @@ when the buffer was created.")
 
 (defun egg-log-buffer-checkout-commit (pos &optional force)
   (interactive "d\nP")
-  (let ((ref (completing-read "checkout: " (egg-all-refs) nil nil
-			      (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
+  (let ((ref (egg-read-rev "checkout: "
+	      (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
     (if force 
 	(egg-log-buffer-do-co-rev ref "-f")
       (egg-log-buffer-do-co-rev ref))))
@@ -6031,8 +6014,8 @@ when the buffer was created.")
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
   (interactive "d\nP")
-  (let ((refs (get-text-property pos :references))
-        (ref-at-point (car (get-text-property pos :ref)))
+  (let ((refs (egg-references-at-point))
+        (ref-at-point (egg-ref-at-point))
         victim)
     (if (invoked-interactively-p)
 	(message "interactive")
@@ -6096,7 +6079,7 @@ when the buffer was created.")
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
   (interactive "d")
-  (let* ((ref-at-point (get-text-property pos :ref))
+  (let* ((ref-at-point (egg-ref-at-point pos))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
          name remote)
@@ -6112,7 +6095,7 @@ when the buffer was created.")
 
 (defun egg-log-buffer-fetch (pos)
   (interactive "d")
-  (let* ((ref-at-point (get-text-property pos :ref))
+  (let* ((ref-at-point (egg-ref-at-point pos))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
          site name def remote)
@@ -6138,7 +6121,7 @@ With C-u C-u, will force the push evel if it would be non-ff.
 When the destination of the push is HEAD, the underlying git command
 would be a pull (by default --ff-only)."
   (interactive "d\np")
-  (let ((src (or (car (get-text-property pos :ref))
+  (let ((src (or (egg-ref-at-point pos)
 		 (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
 	(prompt-dst (> level 3))
 	(non-ff (> level 15))
@@ -6167,7 +6150,7 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-push-head-to-local (pos &optional non-ff)
   (interactive "d\nP")
-  (let* ((dst (car (get-text-property pos :ref))))
+  (let* ((dst (egg-ref-at-point pos)))
     (unless dst
       (error "Nothing here to push to!"))
     (if (y-or-n-p (format "update %s with HEAD? " dst))
@@ -6177,7 +6160,7 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
   (interactive "d\nP")
-  (let* ((ref-at-point (get-text-property pos :ref))
+  (let* ((ref-at-point (egg-ref-at-point pos))
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
          rref tracking remote spec)
@@ -6218,7 +6201,7 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-push (pos)
   (interactive "d")
-  (let* ((ref-at-point (get-text-property pos :ref))
+  (let* ((ref-at-point (egg-ref-at-point pos))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
          site name def remote)
@@ -6246,11 +6229,11 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-next-ref (pos)
   (interactive "d")
-  (let ((current-ref (get-text-property pos :references))
+  (let ((current-ref (egg-references-at-point pos))
         (n-pos (next-single-property-change pos :references))
         n-ref)
     (when n-pos
-      (setq n-ref (get-text-property n-pos :references))
+      (setq n-ref (egg-references-at-point n-pos))
       (if n-ref
           (egg-log-buffer-goto-pos n-pos)
         (if (setq n-pos (next-single-property-change n-pos :references))
@@ -6258,22 +6241,22 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-prev-ref (pos)
   (interactive "d")
-  (let ((current-ref (get-text-property pos :references))
+  (let ((current-ref (egg-references-at-point pos))
         (p-pos (previous-single-property-change pos :references))
         p-ref)
     (when p-pos
       (setq p-pos (1- p-pos))
-      (setq p-ref (get-text-property p-pos :references))
+      (setq p-ref (egg-references-at-point p-pos))
       (if (and p-ref (not (equal p-ref current-ref)))
           (egg-log-buffer-goto-pos p-pos)
         (when (setq p-pos (previous-single-property-change p-pos :references))
           (setq p-pos (1- p-pos))
           (egg-log-buffer-goto-pos p-pos))))))
 
-(defun egg-log-buffer-do-insert-commit (pos &optional args highlight-regexp)
+(defun egg-log-buffer-do-insert-commit (pos &optional args highlight-regexp path-args)
   (save-excursion
     (let ((sha1 (get-text-property pos :commit))
-          (ref (get-text-property pos :references))
+          (ref (egg-references-at-point pos))
           (nav (get-text-property pos :navigation))
           (inhibit-read-only t)
           (indent-column egg-log-buffer-comment-column)
@@ -6282,19 +6265,14 @@ would be a pull (by default --ff-only)."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (if args
-		  (egg-git-ok-args t (nconc (list "show" "--no-color")
-					    (copy-list args)
-					    (list (concat "--pretty=format:"
-							  indent-spaces "%ai%n"
-							  indent-spaces "%an%n%n"
-							  "%b%n")
-						  sha1)))
-		  (egg-git-ok t "show" "--no-color" (concat "--pretty=format:"
-							    indent-spaces "%ai%n"
-							    indent-spaces "%an%n%n"
-							    "%b%n")
-			      sha1))
+      (unless (egg-git-ok-args t (nconc (list "show" "--no-color")
+					(copy-list args)
+					(list (concat "--pretty=format:"
+						      indent-spaces "%ai%n"
+						      indent-spaces "%an%n%n"
+						      "%b%n")
+					      sha1)
+					path-args))
         (error "error calling git log %s!" ref))
       (setq end (point)
 	    diff-end end)
@@ -6327,10 +6305,12 @@ would be a pull (by default --ff-only)."
          (sha1 (and next (get-text-property next :commit)))
 	 (pickaxed (and egg-internal-log-buffer-closure 
 			(plist-get egg-internal-log-buffer-closure :pickaxed)))
+	 (pickaxed-paths (and egg-internal-log-buffer-closure 
+			(plist-get egg-internal-log-buffer-closure :pickaxed-paths)))
 	 (highlight (and egg-internal-log-buffer-closure 
 			 (plist-get egg-internal-log-buffer-closure :highlight))))
     (unless (equal (get-text-property pos :commit) sha1)
-      (egg-log-buffer-do-insert-commit pos pickaxed highlight))))
+      (egg-log-buffer-do-insert-commit pos pickaxed highlight pickaxed-paths))))
 
 (defun egg-generic-display-logs (data &optional init)
   (buffer-disable-undo)
@@ -6423,11 +6403,16 @@ Each line representing a commit has extra keybindings:\\<egg-log-commit-map>
 \\[egg-log-buffer-start-new-branch] start in a new branch from the current commit.
 \\[egg-log-buffer-checkout-commit] checkout the current commit.
 \\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit.
+C-u \\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit,
+  replacing the old tag with the same name.
+\\[egg-log-buffer-atag-commit] create a new annotated tag pointing at the current commit.
+C-u \\[egg-log-buffer-atag-commit] create a new gpg-signed tag pointing at the current commit.
 \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
-the index to the current commit if it's safe to do so (the underlying git command is `reset --keep'.)
+the index to the current commit if it's safe to do so
+ (the underlying git command is `reset --keep'.)
 C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
-the index to the current commit, the work dir will also be updated, uncommitted changes
-will be lost (the underlying git command is `reset --hard').
+the index to the current commit, the work dir will also be updated,
+uncommitted changes will be lost (the underlying git command is `reset --hard').
 C-u C-u \\[egg-log-buffer-attach-head] will let the user specify a mode to run git-reset.
 \\[egg-log-buffer-merge] will merge the current commit into HEAD.
 C-u \\[egg-log-buffer-merge] will merge the current commit into HEAD but will not
@@ -6437,7 +6422,9 @@ auto-commit if the merge was successful.
 
 Each ref on the commit line has extra extra keybindings:\\<egg-log-ref-map>
 \\[egg-log-buffer-rm-ref] delete the ref under the cursor.
-\\[egg-log-buffer-push-to-local] update HEAD or another local ref using the ref.
+\\[egg-log-buffer-push-to-local] update HEAD or BASE using the ref.
+C-u \\[egg-log-buffer-push-to-local] update a local ref using the ref.
+C-u C-u \\[egg-log-buffer-push-to-local] update (non-ff allowed) a local ref using the ref.
 
 Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-local-ref-map>
 \\[egg-log-buffer-push-to-remote] upload to a remote the ref under the cursor.
@@ -6463,24 +6450,6 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-log-buffer-mode-hook))
-
-(defun egg-commit-at-point ()
-  (get-text-property (point) :commit))
-
-(defun egg-ref-at-point ()
-  (get-text-property (point) :ref))
-
-(defun egg-head-at-point ()
-  (eq (cdr (get-text-property (point) :ref)) :head))
-
-(defun egg-tag-at-point ()
-  (eq (cdr (get-text-property (point) :ref)) :tag))
-
-(defun egg-remote-at-point ()
-  (eq (cdr (get-text-property (point) :ref)) :remote))
-
-(defun egg-references-at-point ()
-  (get-text-property (point) :references))
 
 (defun egg-log-commit-line-menu-attach-head-ignore-changes (pos)
   (interactive "d")
@@ -6597,8 +6566,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defconst egg-log-buffer-mode-commit-menu (egg-log-make-commit-line-menu))
 
 (defun egg-log-commit-line-menu-heading (pos &optional prefix)
-  (let ((ref (get-text-property pos :ref))
-        (references (get-text-property pos :references))
+  (let ((ref (egg-ref-at-point pos))
+        (references (egg-references-at-point pos))
         (commit (get-text-property pos :commit))
         (prefix (or prefix "(Git/Egg)")))
     (cond ((consp ref)
@@ -7019,37 +6988,52 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map)))
 
-(defun egg-search-changes (level &optional term caller-level)
+(defun egg-search-changes (level &optional term is-regexp do-line-search file-name)
+  "Pickaxe history for TERM.
+LEVEL is nil unless invoked as a command. TERM is a posix regexp if IS-REGEXP is non-nil.
+if DO-LINE-SEARCH is not nil, then search for lines matching TERM. If FILE-NAME was
+non-nil then restrict the search to commits modifying FILE-NAME."
   (interactive "p")
-  (let* ((options (or caller-level level))
-	 (term-is-regexp (> options 3))
-	 (search-lines-matching (> options 15))
+  (let* ((level (or level 0))
+	 (default-directory (egg-work-tree-dir (egg-git-dir level)))
+	 (git-file-name (if file-name (file-relative-name file-name)))
+	 (search-prompt-prefix (concat "search "
+				       (if git-file-name (concat git-file-name "'s "))))
+	 (label-prefix (if git-file-name
+			   (concat git-file-name "'s commits")
+			 "Commits "))
+	 (term-is-regexp (or (> level 3) is-regexp))
+	 (search-lines-matching (or (> level 15) do-line-search))
 	 (term (or term
 		   (read-string (cond (search-lines-matching
-				       "search history for line matching (posix regexp) : ")
+				       (concat search-prompt-prefix
+					       "history for line matching (posix regexp) : "))
 				      (term-is-regexp
-				       "search history for changes containing (posix regexp): ")
-				      (t "search history for changes containing: "))
+				       (concat search-prompt-prefix
+					       "history for changes containing (posix regexp): "))
+				      (t (concat search-prompt-prefix
+						 "history for changes containing: ")))
 				(egg-string-at-point))))
-	 (label (cond (search-lines-matching "Commits with lines matching: ")
-		      (term-is-regexp "Commits containing regexp: ")
-		      (t "Commits containing: ")))
-	 (args (cond (search-lines-matching (list "-G" term))
-		     (term-is-regexp (list "--pickaxe-regex" "-S" term))
-		     (t (list "-S" term))))
-	 (default-directory (egg-work-tree-dir (egg-git-dir (invoked-interactively-p))))
+	 (label (concat label-prefix
+			(cond (search-lines-matching " with lines matching: ")
+			      (term-is-regexp " containing regexp: ")
+			      (t " containing: "))))
+	 (pickaxed (cond (search-lines-matching (list "-G" term))
+			    (term-is-regexp (list "--pickaxe-regex" "-S" term))
+			    (t (list "-S" term))))
+	 (args (append pickaxed (when git-file-name (list "--" git-file-name))))
          (buf (egg-get-query:commit-buffer 'create))
          (desc (concat (egg-text label 'egg-text-2)
                        (egg-text term 'egg-term)))
          (func `(lambda ()
-;;                  (egg-insert-n-decorate-pickaxed-logs (list ,@args))
                   (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
 		  )))
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
            (list :description desc :closure func
 		 :highlight (if term-is-regexp term (concat "\\<" term "\\>"))
-		 :pickaxed args))
+		 :pickaxed pickaxed
+		 :pickaxed-paths (when git-file-name (list "--" git-file-name))))
       (egg-query:commit-buffer-rerun buf 'init))
     (pop-to-buffer buf t)))
 ;;;========================================================
@@ -7120,7 +7104,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-log-buffer-reflog-ref (pos)
   (interactive "d")
-  (egg-reflog (car (get-text-property pos :ref))))
+  (egg-reflog (egg-ref-at-point pos)))
 
 ;;;========================================================
 ;;; stash
@@ -7521,6 +7505,8 @@ current file contains unstaged changes."
     (pop-to-buffer buf t)))
 
 (defun egg-file-ediff (&optional ask-for-dst)
+  "Compare, using ediff, the file's contents in work-dir with vs a rev.
+If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
@@ -7541,6 +7527,8 @@ current file contains unstaged changes."
     (ediff-buffers dst-buf src-buf)))
 
 (defun egg-resolve-merge-with-ediff (&optional what)
+  "Launch a 3-way ediff session to resolve the merge conflicts in the current file.
+WHAT is a mistery."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
@@ -7553,6 +7541,10 @@ current file contains unstaged changes."
     (ediff-buffers3 theirs ours (current-buffer))))
 
 (defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name ediff2)
+  "Invoke ediff to compare the contents of the file from FURTHER-REV to CLOSER-REV.
+CLOSER-REV-NAME and FURTHER-REV-NAME are pretty display names for the revs.
+If EDIFF2 is non-nil, use 2-way ediff session, otherwise use 3-way ediff session
+with the current contents in work-dir."
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
@@ -7859,9 +7851,11 @@ current file contains unstaged changes."
   (custom-set-default var val))
 
 (defun egg-file-log-pickaxe (level string)
+  "Search file's history for STRING.
+LEVEL is nil unless invoked as a command."
   (interactive (list (prefix-numeric-value current-prefix-arg) 
 		     (read-string "search history for: " (egg-string-at-point))))
-  (egg-search-changes nil string level))
+  (egg-search-changes nil string (> level 3) (> level 15) buffer-file-name))
 
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
@@ -7983,30 +7977,7 @@ egg in current buffer.\\<egg-minor-mode-map>
 ;;;========================================================
 ;;; tool-tip
 ;;;========================================================
-(defun egg-ref-at (pos &optional object)
-  (car (get-text-property pos :ref object)))
 
-(defun egg-head-at (pos)
-  (let ((info (get-text-property pos :ref)))
-    (and info
-	 (memq (cdr info) '(:remote :head))
-	 (car info))))
-
-(defun egg-ref-or-commit-at (pos &optional object)
-  (or (car (get-text-property pos :ref object))
-      (get-text-property pos :commit object)))
-
-(defun egg-commit-at (pos &optional object)
-  (get-text-property pos :commit object))
-
-(defun egg-rsite-at (pos &optional object)
-  (egg-rbranch-to-remote (car (get-text-property pos :ref object))))
-
-(defun egg-delta-file-at (pos &optional object)
-  (car (get-text-property pos :diff object)))
-
-(defun egg-delta-hunk-at (pos &optional object)
-  (car (get-text-property pos :hunk object)))
 
 (defun egg-section-at (pos &optional object)
   (let* ((sect-prop (get-text-property pos :sect-type object))
