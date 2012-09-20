@@ -484,6 +484,37 @@ desirable way to invoke GIT."
   :group 'egg
   :type '(set (const :bold) (const :italic)))
 
+(defvar egg-gpg-agent-info nil)
+(defun egg-gpg-agent-info (&optional action-if-not-set)
+  (or egg-gpg-agent-info
+      (setq egg-gpg-agent-info
+	    (let* ((file (and (file-readable-p "~/.gpg-agent-info")
+			      (expand-file-name "~/.gpg-agent-info")))
+		   (info (and file (egg-pick-file-contents 
+				    file "^GPG_AGENT_INFO=\\(.+\\)$" 1)))
+		   (env (getenv "GPG_AGENT_INFO"))
+		   (socket (and info (save-match-data
+				       (car (split-string info ":" t)))))
+		   agent-info)
+	      (setq agent-info
+		    (if (stringp env)
+			env ;; trust the environment
+		      (when (and info (= (aref (nth 8 (file-attributes socket)) 0) ?s))
+			info)))
+	      (when (and (not env) agent-info)
+		(cond ((eq action-if-not-set 'set)
+		       (setenv "GPG_AGENT_INFO" agent-info))
+		      ((stringp action-if-not-set)
+		       (if (y-or-n-p (format action-if-not-set agent-info))
+			   (setenv "GPG_AGENT_INFO" agent-info)
+			 (setq agent-info nil)))
+		      ((null action-if-not-set)
+		       ;; cancel everything!!!
+		       (setq agent-info nil))
+		      (t (error "What happened? (action-if-not-set = %s)"
+				action-if-not-set))))
+	      agent-info))))
+
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
@@ -2230,7 +2261,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (cond ((= ret-code 0)
 	 (or (egg--git-pp-grab-1st-line-matching 
 	      '("Deleted tag" "Updated tag" "Good signature from"
-		"^user: ") :next-action 'log :success t)
+		"^user: ") nil :next-action 'log :success t)
 	     (egg--git-pp-grab-line-no -1 :next-action 'log :success t)))
 	((= ret-code 1)
 	 (or (egg--git-pp-grab-1st-line-matching '("no signature found" "^error:"))
@@ -5582,10 +5613,10 @@ when the buffer was created.")
   (egg-log-pop-to-file file sha1 t use-wdir-file (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
 (defun egg-log-buffer-get-rev-at (pos &rest options)
-  (let* ((commit (egg-commit-at-point))
-         (refs (egg-references-at-point))
+  (let* ((commit (egg-commit-at-point pos))
+         (refs (egg-references-at-point pos))
          (first-head (if (stringp refs) refs (car (last refs))))
-         (ref-at-point (egg-ref-at-point))
+         (ref-at-point (egg-ref-at-point pos))
          (head-sha1 (egg-get-current-sha1)))
     
     (when (stringp commit)
@@ -5948,7 +5979,8 @@ when the buffer was created.")
 			 (read-string (format "sign tag '%s' with gpg key uid: " name)
 				      (egg-user-name)))
 			(t nil)))
-	 (gpg-agent-info (or egg-gpg-agent-info (getenv "GPG_AGENT_INFO"))))
+	 (gpg-agent-info 
+	  (egg-gpg-agent-info "set GPG_AGENT_INFO environment to `%s' ")))
     (when (and gpg-uid (not gpg-agent-info))
       (error "gpg-agent's info is unavailable! please set GPG_AGENT_INFO environment!"))
     (egg-create-annotated-tag name commit gpg-uid)))
@@ -5982,7 +6014,7 @@ when the buffer was created.")
 (defun egg-log-buffer-attach-head (pos &optional strict-level)
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
-         (commit (egg-commit-at-point))
+         (commit (egg-commit-at-point pos))
          (branch (egg-current-branch))
          (hard (> strict-level 3))
          (ask (> strict-level 15))
@@ -6014,8 +6046,8 @@ when the buffer was created.")
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
   (interactive "d\nP")
-  (let ((refs (egg-references-at-point))
-        (ref-at-point (egg-ref-at-point))
+  (let ((refs (egg-references-at-point pos))
+        (ref-at-point (egg-ref-at-point pos))
         victim)
     (if (invoked-interactively-p)
 	(message "interactive")
@@ -6079,7 +6111,7 @@ when the buffer was created.")
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
   (interactive "d")
-  (let* ((ref-at-point (egg-ref-at-point pos))
+  (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
          name remote)
@@ -6095,7 +6127,7 @@ when the buffer was created.")
 
 (defun egg-log-buffer-fetch (pos)
   (interactive "d")
-  (let* ((ref-at-point (egg-ref-at-point pos))
+  (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
          site name def remote)
@@ -7305,9 +7337,6 @@ non-nil then restrict the search to commits modifying FILE-NAME."
 ;;;========================================================
 ;;; annotated tag
 ;;;========================================================
-(defvar egg-internal-annotated-tag-name nil)
-(defvar egg-internal-annotated-tag-target nil)
-(defconst egg-gpg-agent-info nil)
 
 ;; (setenv "GPG_AGENT_INFO" "/tmp/gpg-peL1m4/S.gpg-agent:16429:1")
 ;; (getenv "GPG_AGENT_INFO")
@@ -7315,7 +7344,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
 (defun egg-tag-msg-create-tag (prefix text-beg text-end ignored name commit gpg-uid)
   (if gpg-uid				;; sign the tag
       (let ((egg--do-no-output-message (format "signed %s with tag '%s'" commit name))
-	    (gpg-agent-info (or egg-gpg-agent-info (getenv "GPG_AGENT_INFO")))
+	    (gpg-agent-info (egg-gpg-agent-info 'set))
 	    (force (> prefix 3)))
 
 	(unless gpg-agent-info
@@ -7333,7 +7362,6 @@ non-nil then restrict the search to commits modifying FILE-NAME."
   (setq major-mode 'egg-tag:msg-buffer-mode
         mode-name "Egg-Tag:Msg"
         mode-line-process "")
-  (make-local-variable 'egg-internal-annotated-tag-name)
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-tag:msg-mode-hook))
 
