@@ -7578,12 +7578,18 @@ current file contains unstaged changes."
 
 (defun egg-start-new-branch (&optional force)
   (interactive "P")
-  (egg-buffer-do-create-branch 
-   (read-string "start new branch from HEAD with name: ")
-   (or (egg-get-symbolic-HEAD)
-       (egg-HEAD))
-   force (egg-get-symbolic-HEAD)
-   'status))
+  (let* ((upstream (egg-current-branch))
+	 (rev (or (egg-get-symbolic-HEAD) (egg-HEAD)))
+	 (force (if force "-B" "-b"))
+	 name track)
+    (setq name (read-string (format "start new branch from %s with name: " rev)))
+    (setq track (if (and upstream
+			 (y-or-n-p (format "should the branch '%s' track '%s'"
+					   name upstream)))
+		    "--track"
+		  "--no-track"))
+    (egg-status-buffer-handle-result
+     (egg--git-co-rev-cmd t rev force name track))))
 
 (defun egg-file-get-other-version (file &optional rev prompt same-mode name)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
