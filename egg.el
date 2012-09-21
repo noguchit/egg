@@ -5982,6 +5982,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (let* ((mark (egg-log-buffer-find-first-mark ?*))
          (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 (onto (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+	 (head-name (or (egg-get-symbolic-HEAD) "HEAD"))
 	 res modified-files buf)
 
     (unless upstream
@@ -5991,11 +5992,11 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (unless upstream (error "No upstream to rebase on!"))
 
     (if (null (y-or-n-p (if onto 
-			    (format "rebase %s..HEAD onto %s? " upstream onto)
-			  (format "rebase HEAD on %s? " upstream))))
+			    (format "rebase %s..%s onto %s? " upstream head-name onto)
+			  (format "rebase %s on %s? " head-name upstream))))
 	(message (if onto
-		     (format "cancelled rebasing %s..HEAD onto %s!" upstream onto)
-		   (format "cancelled rebasing HEAD on %s!" upstream)) ))
+		     (format "cancelled rebasing %s..%s onto %s!" upstream head-name onto)
+		   (format "cancelled rebasing %s on %s!" head-name upstream)) ))
     (unless (egg-buffer-do-rebase upstream onto)
       (egg-status t))))
 
