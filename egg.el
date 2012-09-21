@@ -7619,7 +7619,7 @@ current file contains unstaged changes."
         (error "File %s contains unstaged changes!" file)))
     (setq egg--do-no-output-message (format "checked out %s's contents from index" file))
     (egg-file-buffer-handle-result
-     (egg--git-co-files-cmd (egg-get-stash-buffer) git-file))))
+     (egg--git-co-files-cmd (egg-get-status-buffer) git-file))))
 
 (defun egg-start-new-branch (&optional force)
   (interactive "P")
