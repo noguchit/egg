@@ -1134,6 +1134,43 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                                      remote-ref-properties)))))))
             refs-desc-list)))
 
+(defun egg-get-all-refs (prefix)
+  (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
+		    (format "refs/heads/%s*" prefix)
+		    (format "refs/tags/%s*" prefix)
+		    (format "refs/remotes/%s*/*" prefix)
+		    (format "refs/remotes/%s*" prefix)))
+
+(defun egg-get-local-refs (prefix)
+  (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
+		    (format "refs/heads/%s*" prefix)
+		    (format "refs/tags/%s*" prefix)))
+
+(defun egg-complete-ref (string &optional func all)
+  "Do ref name completion"
+  (let* ((matches (funcall func string))
+	 (single (= (length matches) 1))
+	 (perfect (and single (equal (car matches) string)))
+	 prefix)
+
+    (if all 
+	(all-completions string matches)
+      (unless matches
+	(setq prefix (try-completion string matches)))
+      (cond ((null matches) nil)
+	    (perfect t)
+	    (single (car matches))
+	    ((stringp prefix) prefix)
+	    ((null prefix) nil)
+	    (t string)))))
+
+(defsubst egg-read-ref (prompt &optional default)
+  (completing-read prompt #'egg-complete-ref #'egg-get-all-refs t default))
+
+(defsubst egg-read-local-ref (prompt &optional default)
+  (completing-read prompt #'egg-complete-ref #'egg-get-local-refs t default))
+
+;;(egg-read-local-ref "gimme a lref: ")
 
 
 (defun egg-complete-rev (string &optional ignored all)
@@ -6226,15 +6263,16 @@ would be a pull (by default --ff-only)."
 		 (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
 	(prompt-dst (> level 3))
 	(non-ff (> level 15))
+	(head-name (or (egg-get-symbolic-HEAD) "HEAD"))
 	dst mark base)
     
     (setq mark (egg-log-buffer-find-first-mark ?*))
     (setq base (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
-    (setq dst (or base "HEAD"))
+    (setq dst (or base head-name))
 
     (unless src
       (error "Nothing to push here!"))
-    (if prompt-dst
+    (if (or prompt-dst (equal dst src))
 	(setq dst (completing-read (format "use %s to update: " src)
 				   (cons dst (egg-local-refs)) nil t dst)))
     (if (y-or-n-p (format "push %s on %s%s? " src dst 
@@ -6261,7 +6299,7 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
   (interactive "d\nP")
-  (let* ((ref-at-point (egg-ref-at-point pos))
+  (let* ((ref-at-point (get-text-property pos :ref))
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
          rref tracking remote spec)
@@ -6302,7 +6340,7 @@ would be a pull (by default --ff-only)."
 
 (defun egg-log-buffer-push (pos)
   (interactive "d")
-  (let* ((ref-at-point (egg-ref-at-point pos))
+  (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
          site name def remote)
@@ -6667,7 +6705,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defconst egg-log-buffer-mode-commit-menu (egg-log-make-commit-line-menu))
 
 (defun egg-log-commit-line-menu-heading (pos &optional prefix)
-  (let ((ref (egg-ref-at-point pos))
+  (let ((ref (get-text-property pos :ref))
         (references (egg-references-at-point pos))
         (commit (get-text-property pos :commit))
         (prefix (or prefix "(Git/Egg)")))
