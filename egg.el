@@ -493,13 +493,21 @@ desirable way to invoke GIT."
 		   (info (and file (egg-pick-file-contents 
 				    file "^GPG_AGENT_INFO=\\(.+\\)$" 1)))
 		   (env (getenv "GPG_AGENT_INFO"))
-		   (socket (and info (save-match-data
-				       (car (split-string info ":" t)))))
+		   (info-list (and (stringp info) (save-match-data (split-string info ":" t))))
+		   (socket (and info-list (car info-list)))
+		   (agent-pid (and info-list (string-to-number (nth 1 info-list))))
+		   (agent-attr (and agent-pid (process-attributes agent-pid)))
+		   (agent-cmdline (and agent-attr (cdr (assq 'args agent-attr))))
 		   agent-info)
 	      (setq agent-info
 		    (if (stringp env)
 			env ;; trust the environment
-		      (when (and info (= (aref (nth 8 (file-attributes socket)) 0) ?s))
+		      (when (and info 
+				 (file-exists-p socket)
+				 (= (aref (nth 8 (file-attributes socket)) 0) ?s)
+				 agent-attr
+				 (save-match-data
+				   (string-match "gpg-agent" agent-cmdline)))
 			info)))
 	      (when (and (not env) agent-info)
 		(cond ((eq action-if-not-set 'set)
@@ -1153,8 +1161,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	 (perfect (and single (equal (car matches) string)))
 	 prefix)
 
-    (if all 
-	(all-completions string matches)
+    (if all matches
       (unless matches
 	(setq prefix (try-completion string matches)))
       (cond ((null matches) nil)
@@ -1164,11 +1171,11 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	    ((null prefix) nil)
 	    (t string)))))
 
-(defsubst egg-read-ref (prompt &optional default)
-  (completing-read prompt #'egg-complete-ref #'egg-get-all-refs t default))
+(defsubst egg-read-ref (prompt &optional default no-match-ok)
+  (completing-read prompt #'egg-complete-ref #'egg-get-all-refs (not no-match-ok) default))
 
-(defsubst egg-read-local-ref (prompt &optional default)
-  (completing-read prompt #'egg-complete-ref #'egg-get-local-refs t default))
+(defsubst egg-read-local-ref (prompt &optional default no-match-ok)
+  (completing-read prompt #'egg-complete-ref #'egg-get-local-refs (not no-match-ok) default))
 
 ;;(egg-read-local-ref "gimme a lref: ")
 
@@ -4277,10 +4284,10 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
 (defun egg-status-buffer-checkout-ref (&optional force name)
   "Prompt a revision to checkout. Default is name."
   (interactive (list current-prefix-arg (egg-ref-at-point)))
-  (setq name (egg-read-rev "checkout (branch or tag): " (or name "HEAD")))
+  (setq name (egg-read-local-ref "checkout (branch or tag): " name))
   (if force 
       (egg-status-buffer-do-co-rev name "-f")
-      (egg-status-buffer-do-co-rev name)))
+    (egg-status-buffer-do-co-rev name)))
 
 (defsubst egg-buffer-show-all ()
   "UnHide all hidden sections in the current special egg buffer."
@@ -6273,8 +6280,7 @@ would be a pull (by default --ff-only)."
     (unless src
       (error "Nothing to push here!"))
     (if (or prompt-dst (equal dst src))
-	(setq dst (completing-read (format "use %s to update: " src)
-				   (cons dst (egg-local-refs)) nil t dst)))
+	(setq dst (egg-read-local-ref (format "use %s to update: " src))))
     (if (y-or-n-p (format "push %s on %s%s? " src dst 
 			  (if non-ff " (allowed non-ff move)" "")))
 	(if (string-equal dst "HEAD")
