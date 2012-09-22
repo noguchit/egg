@@ -1521,14 +1521,13 @@ success."
         proc)
     
     (with-egg-async-buffer
-      (erase-buffer)
       (setq proc (get-buffer-process (current-buffer)))
       (when (and (processp proc)		       ;; is a process
 		 (not (eq (process-status proc) 'exit)) ;; not finised
 		 (= (process-exit-status proc) 0)) ;; still running
 	(error "EGG: %s is already running!" (process-command proc)))
       (setq inhibit-read-only t)
-      ;;(erase-buffer)
+      (erase-buffer)
       (widen)
       (goto-char (point-max))
       (insert "EGG-GIT-CMD:\n")
@@ -1580,6 +1579,7 @@ success."
     (with-current-buffer (process-buffer proc)
       (setq mode-line-process nil)
       (widen)
+      (egg-cmd-log-whole-buffer (current-buffer))
       (goto-char (point-max))
       (re-search-backward "^EGG-GIT-CMD:" nil t)
       ;; Narrow to the last command
@@ -2595,7 +2595,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (with-current-buffer buffer
       (save-restriction
         (with-temp-buffer
-          (when (egg-git-ok t "blame" "--porcelain" "--"
+          (when (egg-git-ok t "blame" "-w" "-M" "-C" "--porcelain" "--"
                             (file-name-nondirectory
                              (buffer-file-name buffer)))
             (egg-parse-git-blame buffer (current-buffer)
@@ -6426,7 +6426,9 @@ would be a pull (by default --ff-only)."
       (egg-decorate-diff-section :begin beg
                                  :end end
                                  :diff-map egg-log-diff-map
-                                 :hunk-map egg-log-hunk-map)
+                                 :hunk-map egg-log-hunk-map
+				 :cc-diff-map egg-log-diff-map
+                                 :cc-hunk-map egg-log-hunk-map)
       (goto-char beg)
       (setq end (or (next-single-property-change beg :diff) end)
 	    diff-beg end)
@@ -6451,7 +6453,7 @@ would be a pull (by default --ff-only)."
 	 (pickaxed (and egg-internal-log-buffer-closure 
 			(plist-get egg-internal-log-buffer-closure :pickaxed)))
 	 (pickaxed-paths (and egg-internal-log-buffer-closure 
-			(plist-get egg-internal-log-buffer-closure :pickaxed-paths)))
+			(plist-get egg-internal-log-buffer-closure :paths)))
 	 (highlight (and egg-internal-log-buffer-closure 
 			 (plist-get egg-internal-log-buffer-closure :highlight))))
     (unless (equal (get-text-property pos :commit) sha1)
@@ -7028,13 +7030,15 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                       (egg-text "all refs" 'egg-branch-mono))
                  :closure `(lambda ()
                              (egg-log-buffer-decorate-logs-simple
-                              #'egg-run-git-file-log-all ,file-name)))
+                              #'egg-run-git-file-log-all ,file-name))
+		 :paths (list (egg-file-git-name file-name)))
          (list :title title
                :description (concat (egg-text "scope: " 'egg-text-2)
                                     (egg-text "HEAD" 'egg-branch-mono))
                :closure `(lambda ()
                            (egg-log-buffer-decorate-logs-simple
-                            #'egg-run-git-file-log-HEAD ,file-name)))))
+                            #'egg-run-git-file-log-HEAD ,file-name))
+	       :paths (list (egg-file-git-name file-name)))))
       (when (memq :file-log egg-show-key-help-in-buffers)
         (setq help egg-file-log-help-text))
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
@@ -7112,16 +7116,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (cond ((null fetched-data)
 	   (insert "\t" (egg-text "Please be patient! Searching in background..." 'egg-text-2))
 	   (egg-async-0-args 
-	    (list (lambda (log-buffer closure)
-		    (plist-put closure :fetched-data 
-			       (save-match-data 
-				 (goto-char (point-min))
-				 (re-search-forward "EGG-GIT-OUTPUT:\n")
-				 (split-string (buffer-substring-no-properties (match-end 0)
-									       (point-max))
-					       "\n" t)))
+	    (list (lambda (log-buffer closure) 
+		    (let ((output (save-match-data 
+				    (goto-char (point-min))
+				    (re-search-forward "EGG-GIT-OUTPUT:\n")
+				    (split-string (buffer-substring-no-properties 
+						   (match-end 0)
+						   (point-max))
+						  "\n" t))))
+		      (plist-put closure :fetched-data
+				 (if output output "Nothing found!!!"))
 		    (with-current-buffer log-buffer
-		      (funcall egg-buffer-refresh-func log-buffer)))
+		      (funcall egg-buffer-refresh-func log-buffer))))
 		  (current-buffer) closure)
 	    (nconc (list "--no-pager" "log" "--pretty=oneline" "--decorate" "--no-color")
 		   args)))
@@ -7197,7 +7203,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
            (list :description desc :closure func
 		 :highlight (if term-is-regexp term (concat "\\<" term "\\>"))
 		 :pickaxed pickaxed
-		 :pickaxed-paths (when git-file-name (list "--" git-file-name))))
+		 :paths (when git-file-name (list "--" git-file-name))))
       (egg-query:commit-buffer-rerun buf 'init))
     (pop-to-buffer buf t)))
 ;;;========================================================
@@ -8023,7 +8029,8 @@ with the current contents in work-dir."
   "Search file's history for STRING.
 LEVEL is nil unless invoked as a command."
   (interactive (list (prefix-numeric-value current-prefix-arg) 
-		     (read-string "search history for: " (egg-string-at-point))))
+		     (unless current-prefix-arg
+		       (read-string "search history for: " (egg-string-at-point)))))
   (egg-search-changes nil string (> level 3) (> level 15) buffer-file-name))
 
 (let ((map egg-file-cmd-map))
