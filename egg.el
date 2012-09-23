@@ -1228,6 +1228,17 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                      ((null prefix) nil)
                      (t string)))))))
 
+(defsubst egg-get-rebase-apply-state (rebase-dir)
+  "Build a plist of rebase info of REBASE-DIR.
+this is for rebase -m variant."
+  (let ((patch-files (directory-files rebase-dir nil "\\`[0-9]+\\'")))
+    (list :rebase-dir rebase-dir
+        :rebase-head (egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
+        :rebase-upstream
+        (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
+        :rebase-step (string-to-number (car patch-files))
+        :rebase-num (string-to-number (car (nreverse patch-files))))))
+
 (defsubst egg-get-rebase-merge-state (rebase-dir)
   "Build a plist of rebase info of REBASE-DIR.
 this is for rebase -m variant."
@@ -1307,16 +1318,22 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
           (mapcar 'egg-name-rev
                   (if (file-readable-p merge-file)
                       (egg-pick-file-records merge-file "^" "$"))))
+	 (rebase-apply (if (file-directory-p (concat git-dir "/rebase-apply"))
+			   (concat git-dir "/rebase-apply/")))
          (rebase-dir
-          (if (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
-              (concat git-dir "/" egg-git-rebase-subdir "/")))
-         (is-rebase-interactive
-          (file-exists-p (concat rebase-dir "interactive")))
+	  (or rebase-apply
+	      (if (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
+		  (concat git-dir "/" egg-git-rebase-subdir "/"))))
+         (is-rebase-interactive 
+	  (and (not rebase-apply)
+	       (file-exists-p (concat rebase-dir "interactive"))))
          (rebase-state
-          (when rebase-dir
-            (if is-rebase-interactive
-                (egg-get-rebase-interactive-state rebase-dir)
-              (egg-get-rebase-merge-state rebase-dir))))
+          (if rebase-apply
+	      (egg-get-rebase-apply-state rebase-dir)
+	      (when rebase-dir
+		(if is-rebase-interactive
+		    (egg-get-rebase-interactive-state rebase-dir)
+		  (egg-get-rebase-merge-state rebase-dir)))))
          (state (nconc (list :gitdir git-dir
                              :head branch-full-name
                              :branch branch
@@ -3502,13 +3519,14 @@ as: (format FMT current-dir-name git-dir-full-path)."
 (defun egg-buffer-do-rebase (upstream-or-action &optional onto)
   "Perform rebase action from an egg special buffer.
 See `egg-do-rebase-head'."
-  (let ((git-dir (egg-git-dir))
+  (let ((rebase-dir (plist-get (egg-repo-state :rebase-dir) :rebase-dir))
+	(git-dir (egg-git-dir))
         res)
     (if (stringp upstream-or-action)
         (unless (egg-repo-clean)
           (egg-status)
           (error "Repo %s is not clean" git-dir))
-      (unless (file-directory-p (concat git-dir "/" egg-git-rebase-subdir))
+      (unless rebase-dir
         (error "No rebase in progress in directory %s"
                (egg-work-tree-dir git-dir))))
     (setq res (egg-do-rebase-head upstream-or-action onto))
