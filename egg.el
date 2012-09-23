@@ -5908,11 +5908,13 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (re-search-forward
        (eval-when-compile
          (concat "\\<\\(?:"
-                 "\\(please commit in egg.+$\\)"             "\\|"
-                 "\\(Successfully rebased and updated.+$\\)" "\\|"
-                 "\\(You can amend the commit now\\)" 	     "\\|"
-                 "\\(Automatic cherry-pick failed\\)"	     "\\|"
-                 "\\(nothing added to commit\\)"	     "\\|"
+                 "\\(please commit in egg.+$\\)"                             "\\|"
+                 "\\(Successfully rebased and updated.+$\\)"  		     "\\|"
+                 "\\(You can amend the commit now\\)" 	     		     "\\|"
+                 "\\(Automatic cherry-pick failed\\)"	     		     "\\|"
+                 "\\(nothing added to commit\\)"	             	     "\\|"
+                 "\\(nothing to commit (working directory clean)\\)"	     "\\|"
+                 "\\(If you wish to commit it anyway\\)"     		     "\\|"
                  "\\(\\(?:Cannot\\|Could not\\).+\\)" "\\)")) nil t)
       (setq msg (match-string-no-properties 0))
       (setq res (cond ((match-beginning 1) :rebase-commit)
@@ -5920,7 +5922,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                       ((match-beginning 3) :rebase-edit)
                       ((match-beginning 4) :rebase-conflict)
                       ((match-beginning 5) :rebase-empty)
-                      ((match-beginning 6) :rebase-fail))))
+                      ((match-beginning 6) :rebase-empty)
+                      ((match-beginning 7) :rebase-empty)
+                      ((match-beginning 8) :rebase-fail))))
     (setq buffer (process-get proc :orig-buffer))
     (with-current-buffer buffer
       (egg-run-buffers-update-hook)
