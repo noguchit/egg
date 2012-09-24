@@ -480,6 +480,15 @@ desirable way to invoke GIT."
   :group 'egg
   :type 'string)
 
+(defcustom egg-cmd-select-special-buffer nil
+  "If true, then select the special window invoked by the command.
+Instead of just displaying it. Commands like egg-status, unless prefixed
+with C-u, only display the special buffer but not selecting it. When
+this option is true, invert the meaning of the prefix. I.e. the command
+will select the window unless prefixed with C-u."
+  :group 'egg
+  :type 'boolean)
+
 (defcustom egg-dummy-option nil
   "Foo bar"
   :group 'egg
@@ -2256,7 +2265,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (with-temp-buffer
     (insert-file-contents-literally file)
     (egg--git-apply-cmd nil (buffer-string) '("-3"))
-    (egg-status)))
+    (egg-status nil nil)))
 
 (defun egg--git-pp-commit-output (ret-code)
   (cond ((= ret-code 0)
@@ -3544,7 +3553,7 @@ See `egg-do-rebase-head'."
         res)
     (if (stringp upstream-or-action)
         (unless (egg-repo-clean)
-          (egg-status)
+          (egg-status nil nil)
           (error "Repo %s is not clean" git-dir))
       (unless rebase-dir
         (error "No rebase in progress in directory %s"
@@ -3559,7 +3568,7 @@ See `egg-do-rebase-head'."
   (interactive)
   (message "continue with current rebase")
   (unless (egg-buffer-do-rebase :continue)
-    (egg-status)))
+    (egg-status nil t)))
 
 (defsubst egg-do-async-rebase-continue (callback closure &optional
                                                  action
@@ -3580,7 +3589,7 @@ The mode, sync or async, will depend on the nature of the current
 rebase session."
   (if (not (egg-interactive-rebase-in-progress))
       (unless (egg-buffer-do-rebase action)
-        (egg-status))
+        (egg-status nil t))
     (setq action (cdr (assq action '((:skip . "--skip")
                                      (:continue . "--continue")
                                      (:abort . "--abort")))))
@@ -3615,7 +3624,7 @@ rebase session."
   (interactive)
   (message "abort current rebase")
   (egg-buffer-do-rebase :abort)
-  (egg-status))
+  (egg-status nil t))
 
 (defun egg-rebase-in-progress ()
   (plist-get (egg-repo-state) :rebase-step))
@@ -4607,19 +4616,29 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defvar egg-switch-to-buffer nil
   "Set to nonnil for egg-status to switch to the status buffer in the same window.")
 
-(defun egg-status (&optional select caller)
+
+;; (defun foo (a b)
+;;   (interactive "p\nP")
+;;   (message "a=%s b=%s" a b))
+
+(defun egg-status (called-interactively select &optional caller)
   "Show the status of the current repo."
-  (interactive "P")
+  (interactive "p\nP")
   (let* ((egg-internal-current-state
           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
-         (buf (egg-get-status-buffer 'create)))
+         (buf (egg-get-status-buffer 'create))
+	 (select (if called-interactively ;; only do this for commands
+		     (if egg-cmd-select-special-buffer 
+			 (not select)	;; select by default (select=nil), C-u not select
+		       select)		;; not select by default (select=nil), C-u select
+		   select)))
     (with-current-buffer buf
       (egg-status-buffer-redisplay buf 'init))
     (cond ((eq caller :sentinel) (pop-to-buffer buf))
-          (select (pop-to-buffer buf t))
+          (select (pop-to-buffer buf))
           (egg-switch-to-buffer (switch-to-buffer buf))
-          ((invoked-interactively-p) (display-buffer buf t))
-          (t (pop-to-buffer buf t)))))
+          (called-interactively (display-buffer buf))
+          (t (display-buffer buf)))))
 
 ;;;========================================================
 ;;; action
@@ -5193,7 +5212,7 @@ using git's default msg."
 	(set (make-local-variable 'egg-log-msg-closure)
 	     (egg-log-msg-mk-closure-from-input action-closure 
 						nil text-beg text-end diff-beg)))
-      (pop-to-buffer buf t))))
+      (pop-to-buffer buf))))
 
 ;;;========================================================
 ;;; diff-mode
@@ -5400,20 +5419,20 @@ nil then compare the index and the work-dir."
   (interactive (list (egg-ref-at-point)))
   (let* ((src (egg-read-rev "diff: " default))
          (buf (egg-do-diff (egg-build-diff-info src nil))))
-    (pop-to-buffer buf t)))
+    (pop-to-buffer buf)))
 
 (defun egg-buffer-pop-to-file (file sha1 &optional other-win use-wdir-file line)
   "Put the contents of FILE from SHA1 to a buffer and show it.
 show the buffer in the other window if OTHER-WIN is not nil.
 Use the the contents from the work-tree if USE-WDIR-FILE is not nil.
 Jump to line LINE if it's not nil."
-  (pop-to-buffer (if (or (equal (egg-current-sha1) sha1)
-			 use-wdir-file)
-		     (progn
-		       (message "file:%s dir:%s" file default-directory)
-		       (find-file-noselect file))
-		   (egg-file-get-other-version file (egg-short-sha1 sha1) nil t))
-		 other-win)
+  (funcall (if other-win #'pop-to-buffer #'switch-to-buffer)
+	   (if (or (equal (egg-current-sha1) sha1)
+		   use-wdir-file)
+	       (progn
+		 (message "file:%s dir:%s" file default-directory)
+		 (find-file-noselect file))
+	     (egg-file-get-other-version file (egg-short-sha1 sha1) nil t)))
   (when (numberp line)
     (goto-char (point-min))
     (forward-line (1- line))))
@@ -6065,15 +6084,15 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
               (egg-commit-message "HEAD")))
 
             ((eq res :rebase-conflict)
-             (egg-status nil :sentinel)
+             (egg-status nil t :sentinel)
              (ding)
              (message "automatic rebase stopped! please resolve conflict(s)"))
             ((eq res :rebase-empty)
-             (egg-status nil :sentinel)
+             (egg-status nil t :sentinel)
              (ding)
              (message "automatic rebase stopped! this commit should be skipped!"))
             ((eq res :rebase-fail)
-             (egg-status nil :sentinel)
+             (egg-status nil t :sentinel)
              (ding)
              (message "Automatic rebase failed!"))))))
 
@@ -6086,7 +6105,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 			       (?f "(f)f-only" " (fast-forward only)" "--ff-only")))
         res msg option key)
     (unless (egg-repo-clean)
-      (egg-status)
+      (egg-status nil nil)
       (error "Repo is not clean!"))
 
     (setq option
@@ -6115,7 +6134,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 (defun egg-log-buffer-ff-pull (pos)
   (interactive "d")
   (unless (egg-repo-clean)
-    (egg-status)
+    (egg-status nil nil)
     (error "Repo is not clean!"))
   (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
 				   "--ff-only" t))
@@ -6123,7 +6142,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 (defun egg-log-buffer-merge-n-squash (pos)
   (interactive "d")
   (unless (egg-repo-clean)
-    (egg-status)
+    (egg-status nil nil)
     (error "Repo is not clean!"))
   (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
 				   "--squash" t))
@@ -6149,7 +6168,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 		     (format "cancelled rebasing %s..%s onto %s!" upstream head-name onto)
 		   (format "cancelled rebasing %s on %s!" head-name upstream)) ))
     (unless (egg-buffer-do-rebase upstream onto)
-      (egg-status t))))
+      (egg-status nil t))))
 
 (defun egg-log-buffer-rebase-interactive (pos &optional move)
   (interactive "d\nP")
@@ -6171,7 +6190,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
     (egg-setup-rebase-interactive rebase-dir upstream nil
                                   state todo-alist)
-    (egg-status)))
+    (egg-status nil t)))
 
 (defun egg-log-buffer-checkout-commit (pos &optional force)
   (interactive "d\nP")
@@ -7038,7 +7057,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		(t nil)))
     (setq buf (egg-do-diff 
 	       (egg-build-diff-info rev base nil pickaxe)))
-    (pop-to-buffer buf t)))
+    (pop-to-buffer buf)))
 
 (defun egg-log (&optional all)
   (interactive "P")
@@ -7070,7 +7089,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (egg-log-buffer-redisplay buf 'init))
     (cond
      (egg-switch-to-buffer (switch-to-buffer buf))
-     (t (pop-to-buffer buf t)))))
+     (t (pop-to-buffer buf)))))
 ;;;========================================================
 ;;; file history
 ;;;========================================================
@@ -7179,7 +7198,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
         (setq help egg-file-log-help-text))
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer 'init)
-    (pop-to-buffer buffer t)))
+    (pop-to-buffer buffer)))
 
 ;;;========================================================
 ;;; commit search
@@ -7222,7 +7241,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (while (and pos
                   (not (equal (get-text-property pos :commit) sha1)))
         (setq pos (next-single-property-change pos :commit))))
-    (pop-to-buffer buf t)
+    (pop-to-buffer buf)
     (egg-log-buffer-goto-pos pos)
     (recenter)))
 
@@ -7378,7 +7397,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
         (setq help egg-log-style-help-text))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
       (egg-query:commit-buffer-rerun buf 'init))
-    (pop-to-buffer buf t)))
+    (pop-to-buffer buf)))
 ;;;========================================================
 ;;; reflog
 ;;;========================================================
@@ -7443,7 +7462,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
         (setq help egg-reflog-help-text))
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer 'init)
-    (pop-to-buffer buffer t)))
+    (pop-to-buffer buffer)))
 
 (defun egg-log-buffer-reflog-ref (pos)
   (interactive "d")
@@ -7642,7 +7661,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
         (setq help egg-stash-help-text))
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer 'init)
-    (pop-to-buffer buffer t)))
+    (pop-to-buffer buffer)))
 
 
 ;;;========================================================
@@ -7686,7 +7705,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
          (inhibit-read-only inhibit-read-only)
 	 text-beg text-end)
     (or commit (error "Bad commit: %s" commit-1))
-    (pop-to-buffer buf t)
+    (pop-to-buffer buf)
     (setq inhibit-read-only t)
     (erase-buffer)
     
@@ -7758,7 +7777,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
         (src-rev (and ask (egg-read-rev "diff against: " "HEAD")))
         buf)
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file)))
-    (pop-to-buffer buf t)))
+    (pop-to-buffer buf)))
 
 (defun egg-file-checkout-other-version (&optional no-confirm)
   "Checkout HEAD's version of the current file.
@@ -7850,7 +7869,7 @@ current file contains unstaged changes."
               t)))
     (unless (bufferp buf)
       (error "Oops! can't get %s older version" (buffer-file-name)))
-    (pop-to-buffer buf t)))
+    (pop-to-buffer buf)))
 
 (add-hook 'ediff-quit-hook 'egg--kill-ediffing-temp-buffers)
 
@@ -8438,7 +8457,7 @@ egg in current buffer.\\<egg-minor-mode-map>
   "Pull up the status buffer for the current buffer if there is one."
   (let ((bufname (egg-buf-git-name)))
     (when (and egg-auto-update bufname)
-      (egg-status t)
+      (egg-status nil nil)
       (egg-goto-block-filename bufname))))
 
 (add-hook 'after-save-hook 'egg-maybe-update-status)
