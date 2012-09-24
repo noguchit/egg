@@ -6514,17 +6514,24 @@ would be a pull (by default --ff-only)."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok-args t (nconc (list "show" "--no-color")
+      (unless (egg-git-ok-args t (nconc (list "show" "--no-color" "--show-signature")
 					(copy-list args)
 					(list (concat "--pretty=format:"
 						      indent-spaces "%ai%n"
-						      indent-spaces "%an%n%n"
-						      "%b%n")
+						      indent-spaces "%an%n"
+						      "%b")
 					      sha1)
 					path-args))
         (error "error calling git log %s!" ref))
-      (setq end (point)
-	    diff-end end)
+      (setq end (point-marker))
+      (save-excursion
+	(save-match-data
+	  (goto-char beg)
+	  (while (re-search-forward "^gpg:" end t)
+	    (save-excursion
+	      (goto-char (match-beginning 0))
+	      (insert indent-spaces)))))
+      (setq diff-end end)
       (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
       (egg-decorate-diff-section :begin beg
@@ -6536,12 +6543,19 @@ would be a pull (by default --ff-only)."
       (goto-char beg)
       (setq end (or (next-single-property-change beg :diff) end)
 	    diff-beg end)
-      (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
-      (put-text-property (+  indent-column beg) (line-end-position)
-                         'face 'egg-text-2)
-      (forward-line 1)
-      (put-text-property (point) (+ indent-column (point)) 'face 'egg-diff-none)
-      (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
+
+      (while (and (< (point) end) (< (line-beginning-position) (line-end-position)))
+	(put-text-property (line-beginning-position) (+ (line-beginning-position) indent-column) 
+			   'face 'egg-diff-none)
+	(put-text-property (+ (line-beginning-position) indent-column) (line-end-position) 'face 'egg-text-2)
+	(forward-line 1)
+	(goto-char (line-end-position)))
+      ;; (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
+      ;; (put-text-property (+  indent-column beg) (line-end-position)
+      ;;                    'face 'egg-text-2)
+      ;; (forward-line 1)
+      ;; (put-text-property (point) (+ indent-column (point)) 'face 'egg-diff-none)
+      ;; (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
 
       (when (stringp highlight-regexp)
 	(goto-char diff-beg)
