@@ -1624,15 +1624,14 @@ success."
       (add-to-list 'egg--ediffing-temp-buffers buf))))
 
 (defun egg--kill-ediffing-temp-buffers ()
-  (when (eq ediff-job-name 'egg)
-    (let ((lst egg--ediffing-temp-buffers))
-      (setq egg--ediffing-temp-buffers nil)
-      (message "kill ediffing buffers: job-name=%s buffers=%S" ediff-job-name lst)
-      (dolist (buf lst)
-	(when (buffer-live-p buf)
-	  (message "egg killing buffer: %s" (if (bufferp buf) (buffer-name buf) buf))
-	  (bury-buffer buf)
-	  (kill-buffer buf))))))
+  (let ((lst egg--ediffing-temp-buffers))
+    (setq egg--ediffing-temp-buffers nil)
+    (message "kill ediffing buffers: job-name=%s buffers=%S" ediff-job-name lst)
+    (dolist (buf lst)
+      (when (buffer-live-p buf)
+	(message "egg killing buffer: %s" (if (bufferp buf) (buffer-name buf) buf))
+	(bury-buffer buf)
+	(kill-buffer buf)))))
 
 (defsubst egg--do-output (&optional erase)
   "Get the output buffer for synchronous commands.
@@ -7296,13 +7295,16 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		     (egg-string-at-point)))
   (let* ((file-name (buffer-file-name))
 	 (file-git-name (and file-name (egg-file-git-name file-name)))
+	 (mark (egg-log-buffer-find-first-mark ?*))
+	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+	 (revs (and start-rev (list (concat start-rev "..HEAD"))))
 	 search-type term case-insensitive)
     (cond ((< level 3) 			;; simple string search
-	   (egg-do-search-changes string-at-point nil nil nil file-git-name level))
+	   (egg-do-search-changes string-at-point nil nil nil file-git-name level revs))
 	  ((< level 15)			;; search posix regexp
-	   (egg-do-search-changes string-at-point t nil nil file-git-name level))
+	   (egg-do-search-changes string-at-point t nil nil file-git-name level revs))
 	  ((< level 63)		       	;; search for line
-	   (egg-do-search-changes string-at-point nil t nil file-git-name level))
+	   (egg-do-search-changes string-at-point nil t nil file-git-name level revs))
 	  (t				;; prompt
 	   (setq search-type (read-key-sequence
 			      "search type: (s)tring, (r)egex or (l)ine? "))
@@ -7310,11 +7312,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	   (unless (memq search-type '(?s ?r ?l))
 	     (error "Must be one of s, r or l (%c)!!!" search-type))
 	   (if (eq search-type ?s)
-	       (egg-do-search-changes nil string-at-point nil nil file-git-name level)
+	       (egg-do-search-changes nil string-at-point nil nil file-git-name level revs)
 	     (setq case-insensitive (y-or-n-p "ignore case when search? "))
 	     (egg-do-search-changes string-at-point (eq search-type ?r)
 				    (eq search-type ?l) case-insensitive
-				    file-git-name level))))))
+				    file-git-name level revs))))))
 
 ;; (defun egg-search-changes (level &optional term is-regexp do-line-search file-name)
 ;;   (interactive "p")
@@ -7324,7 +7326,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;; 			 nil file-name))
 
 (defun egg-do-search-changes (term is-regexp do-line-search case-insensitive file-name
-				   &optional prompt-for-term)
+				   &optional prompt-for-term extras)
   "Pickaxe history for TERM.
 LEVEL is nil unless invoked as a command. TERM is a posix regexp if IS-REGEXP is non-nil.
 if DO-LINE-SEARCH is not nil, then search for lines matching TERM. If FILE-NAME was
@@ -7356,6 +7358,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
 	 (args (append pickaxed 
 		       (when (or is-regexp do-line-search)
 			 (list "--regexp-ignore-case"))
+		       extras
 		       (when git-file-name (list "--" git-file-name))))
          (buf (egg-get-query:commit-buffer 'create))
          (desc (concat (egg-text label 'egg-text-2)
@@ -7874,7 +7877,7 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
     (unless (equal (current-buffer) dst-buf)
       (egg--add-ediffing-temp-buffers dst-buf))
     (egg--add-ediffing-temp-buffers src-buf)
-    (ediff-buffers dst-buf src-buf nil 'egg)))
+    (ediff-buffers dst-buf src-buf)))
 
 (defun egg-resolve-merge-with-ediff (&optional what)
   "Launch a 3-way ediff session to resolve the merge conflicts in the current file.
@@ -7890,8 +7893,8 @@ WHAT is a mistery."
       (error "Ooops!"))
     (egg--add-ediffing-temp-buffers ours theirs)
     (if (egg-rebase-in-progress)
-	(ediff-buffers3 ours theirs (current-buffer) nil 'egg)
-      (ediff-buffers3 theirs ours (current-buffer) nil 'egg))))
+	(ediff-buffers3 ours theirs (current-buffer))
+      (ediff-buffers3 theirs ours (current-buffer)))))
 
 (defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name ediff2)
   "Invoke ediff to compare the contents of the file from FURTHER-REV to CLOSER-REV.
@@ -7915,8 +7918,8 @@ with the current contents in work-dir."
     (egg--add-ediffing-temp-buffers this that)
     (if (bufferp that)
         (if ediff2
-            (ediff-buffers that this nil 'egg)
-          (ediff-buffers3 that this (current-buffer) 'egg))
+            (ediff-buffers that this)
+          (ediff-buffers3 that this (current-buffer)))
       (ediff-buffers this (current-buffer)))))
 
 (defconst egg-key-action-alist
@@ -8211,7 +8214,7 @@ with the current contents in work-dir."
 ;; 		     (unless current-prefix-arg
 ;; 		       (read-string "search history for: " (egg-string-at-point)))))
 ;;   (egg-do-search-changes string (> level 3) (> level 15) buffer-file-name))
-(defalias 'egg-file-log-pickaxe 'egg-prompt-n-search-changes)
+(defalias 'egg-file-log-pickaxe 'egg-search-changes)
 
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
