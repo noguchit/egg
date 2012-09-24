@@ -1048,7 +1048,7 @@ The string is built based on the current state STATE."
                  (lambda (head)
                    (if (file-exists-p (concat (egg-git-dir) "/" head))
                        head))
-                 '("HEAD" "ORIG_HEAD" "MERGE_HEAD" "FETCH_HEAD")))))
+                 '("HEAD" "ORIG_HEAD")))))
 
 (defun egg-ref-type-alist ()
   "Build an alist of (REF-NAME . :type) cells."
@@ -1397,6 +1397,9 @@ use STATE as repo state if it was not nil. Otherwise re-read the repo state."
 was not nil then use it as repo state instead of re-read from disc."
   (plist-get (or state (egg-repo-state)) :branch))
 
+(defsubst egg-short-sha1 (&optional sha1)
+  (egg-git-to-string "rev-parse" "--short" (or sha1 (egg-current-sha1))))
+
 (defsubst egg-current-sha1 (&optional state)
   "The immutable sha1 of HEAD.  if STATE was not nil then use it
 as repo state instead of re-read from disc."
@@ -1613,6 +1616,24 @@ success."
 ;;;========================================================
 ;;; New: internal command
 ;;;========================================================
+
+(defvar egg--ediffing-temp-buffers nil)
+(defun egg--add-ediffing-temp-buffers (&rest buffers)
+  (dolist (buf buffers)
+    (when (buffer-live-p buf)
+      (add-to-list 'egg--ediffing-temp-buffers buf))))
+
+(defun egg--kill-ediffing-temp-buffers ()
+  (when (eq ediff-job-name 'egg)
+    (let ((lst egg--ediffing-temp-buffers))
+      (setq egg--ediffing-temp-buffers nil)
+      (message "kill ediffing buffers: job-name=%s buffers=%S" ediff-job-name lst)
+      (dolist (buf lst)
+	(when (buffer-live-p buf)
+	  (message "egg killing buffer: %s" (if (bufferp buf) (buffer-name buf) buf))
+	  (bury-buffer buf)
+	  (kill-buffer buf))))))
+
 (defsubst egg--do-output (&optional erase)
   "Get the output buffer for synchronous commands.
 erase the buffer's contents if ERASE was non-nil."
@@ -5392,7 +5413,7 @@ Jump to line LINE if it's not nil."
 		     (progn
 		       (message "file:%s dir:%s" file default-directory)
 		       (find-file-noselect file))
-		   (egg-file-get-other-version file sha1 nil t))
+		   (egg-file-get-other-version file (egg-short-sha1 sha1) nil t))
 		 other-win)
   (when (numberp line)
     (goto-char (point-min))
@@ -7828,6 +7849,8 @@ current file contains unstaged changes."
       (error "Oops! can't get %s older version" (buffer-file-name)))
     (pop-to-buffer buf t)))
 
+(add-hook 'ediff-quit-hook 'egg--kill-ediffing-temp-buffers)
+
 (defun egg-file-ediff (&optional ask-for-dst)
   "Compare, using ediff, the file's contents in work-dir with vs a rev.
 If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs."
@@ -7846,9 +7869,12 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
                    nil
                    (format "(ediff) %s's older version: " file)
                    t)))
-    (unless (and (bufferp dst-buf) (bufferp src-buf))
+    (unless (and (bufferp src-buf) (bufferp dst-buf))
       (error "Ooops!"))
-    (ediff-buffers dst-buf src-buf)))
+    (unless (equal (current-buffer) dst-buf)
+      (egg--add-ediffing-temp-buffers dst-buf))
+    (egg--add-ediffing-temp-buffers src-buf)
+    (ediff-buffers dst-buf src-buf nil 'egg)))
 
 (defun egg-resolve-merge-with-ediff (&optional what)
   "Launch a 3-way ediff session to resolve the merge conflicts in the current file.
@@ -7862,7 +7888,10 @@ WHAT is a mistery."
          (theirs (egg-file-get-other-version file ":3" nil t (concat "their:" short-file))))
     (unless (and (bufferp ours) (bufferp theirs))
       (error "Ooops!"))
-    (ediff-buffers3 theirs ours (current-buffer))))
+    (egg--add-ediffing-temp-buffers ours theirs)
+    (if (egg-rebase-in-progress)
+	(ediff-buffers3 ours theirs (current-buffer) nil 'egg)
+      (ediff-buffers3 theirs ours (current-buffer) nil 'egg))))
 
 (defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name ediff2)
   "Invoke ediff to compare the contents of the file from FURTHER-REV to CLOSER-REV.
@@ -7883,10 +7912,11 @@ with the current contents in work-dir."
                     (egg-file-get-other-version file further-rev nil t further-name))))
     (unless (bufferp this) (error "Ooops!"))
     (unless (or (null further-rev) (bufferp that)) (error "Ooops!"))
+    (egg--add-ediffing-temp-buffers this that)
     (if (bufferp that)
         (if ediff2
-            (ediff-buffers that this)
-          (ediff-buffers3 that this (current-buffer)))
+            (ediff-buffers that this nil 'egg)
+          (ediff-buffers3 that this (current-buffer) 'egg))
       (ediff-buffers this (current-buffer)))))
 
 (defconst egg-key-action-alist
