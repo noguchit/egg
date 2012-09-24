@@ -6407,7 +6407,7 @@ would be a pull (by default --ff-only)."
 	(setq dst (egg-read-local-ref (format "use %s to update: " src))))
     (if (y-or-n-p (format "push %s on %s%s? " src dst 
 			  (if non-ff " (allowed non-ff move)" "")))
-	(if (string-equal dst "HEAD")
+	(if (string-equal dst head-name)
 	    (if non-ff
 		(if (egg-repo-clean)
 		    (egg-log-buffer-do-move-head "--hard" src)
