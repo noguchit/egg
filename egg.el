@@ -1457,6 +1457,8 @@ as repo state instead of re-read from disc."
          (branch (plist-get state :branch)))
     (or branch (egg-describe-rev (plist-get state :sha1)))))
 
+(defsubst egg-branch-or-HEAD () (or (egg-get-symbolic-HEAD) "HEAD"))
+
 
 (defsubst egg-config-section-raw (type &optional name)
   (egg-pick-file-contents (concat (egg-git-dir) "/config")
@@ -2660,16 +2662,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
       (if (overlay-get ov :blame)
           (setq sha1 (plist-get (nth 3 (overlay-get ov :blame)) :sha1))))
     (if sha1
-        (let (commit-pos)
-          (egg-log all)
-          (setq commit-pos (point-min))
-          (while (and commit-pos
-                      (not (equal (get-text-property commit-pos :commit) sha1)))
-            (setq commit-pos (next-single-property-change commit-pos :commit)))
-          (if commit-pos
-              (progn
-                (egg-log-buffer-goto-pos commit-pos)
-                (recenter)))))))
+	(egg-do-locate-commit sha1))))
 
 ;;;========================================================
 ;;; Diff/Hunk
@@ -4884,7 +4877,7 @@ The command usually takes the next action recommended by the results, but
 if the next action is IGNORED-ACTION then it won't be taken."
   (let* ((egg--do-no-output-message 
 	  (format "detached %s and re-attached on %s" 
-		  (or (egg-current-branch) "HEAD") rev))
+		  (egg-branch-or-HEAD) rev))
 	 (res (egg--git-reset-cmd t reset-mode rev)))
     (egg--buffer-handle-result res t ignored-action)
     (plist-get res :success)))
@@ -6152,7 +6145,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (let* ((mark (egg-log-buffer-find-first-mark ?*))
          (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 (onto (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
-	 (head-name (or (egg-get-symbolic-HEAD) "HEAD"))
+	 (head-name (egg-branch-or-HEAD))
 	 res modified-files buf)
 
     (unless upstream
@@ -6320,13 +6313,14 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (interactive "d\nP")
   
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic))
+	(head-name (egg-branch-or-HEAD))
 	res modified-files old-msg)
     (unless (and rev (stringp rev))
       (error "No cherry here for picking! must be a bad season!" ))
     (when (string-equal rev "HEAD")
       (error "Cannot pick your own HEAD!"))
 
-    (if (not (y-or-n-p (format "pick %s and put it on HEAD%s? " rev
+    (if (not (y-or-n-p (format "pick %s and put it on %s%s? " rev head-name
 			       (if edit-commit-msg " (with new commit message)" ""))))
 	(message "Nah! that cherry (%s) looks rotten!!!" rev)
       
@@ -6413,7 +6407,7 @@ would be a pull (by default --ff-only)."
 		 (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
 	(prompt-dst (> level 3))
 	(non-ff (> level 15))
-	(head-name (or (egg-get-symbolic-HEAD) "HEAD"))
+	(head-name (egg-branch-or-HEAD))
 	dst mark base)
     
     (setq mark (egg-log-buffer-find-first-mark ?*))
@@ -7031,7 +7025,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
          (mark (egg-log-buffer-find-first-mark ?*))
-         (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) "HEAD"))
+	 (head-name (egg-branch-or-HEAD))
+         (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) head-name))
 	 (key-type-alist '((?s "string" identity)
 			   (?r "posix regex" (lambda (s) (list s :regex)))
 			   (?l "line matching regex" (lambda (s) (list s :line)))))
@@ -7066,6 +7061,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
          (default-directory (egg-work-tree-dir 
 			     (egg-git-dir (invoked-interactively-p))))
          (buf (egg-get-log-buffer 'create))
+	 (head-name (egg-branch-or-HEAD))
          help)
     (with-current-buffer buf
       (when (memq :log egg-show-key-help-in-buffers)
@@ -7081,7 +7077,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                              'egg-run-git-log-all)))
          (list :description (concat
                              (egg-text "history scope: " 'egg-text-2)
-                             (egg-text "HEAD" 'egg-term))
+                             (egg-text head-name 'egg-term))
                :closure (lambda ()
                           (egg-log-buffer-insert-n-decorate-logs
                            'egg-run-git-log-HEAD)))))
@@ -7175,6 +7171,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let ((buffer (egg-get-file-log-buffer 'create))
         (title (concat (egg-text "history of " 'egg-text-2)
                        (egg-text file-name 'egg-term)))
+	(head-name (egg-branch-or-HEAD))
         help)
     (with-current-buffer buffer
       (set
@@ -7189,7 +7186,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		 :paths (list (egg-file-git-name file-name)))
          (list :title title
                :description (concat (egg-text "scope: " 'egg-text-2)
-                                    (egg-text "HEAD" 'egg-branch-mono))
+                                    (egg-text head-name 'egg-branch-mono))
                :closure `(lambda ()
                            (egg-log-buffer-decorate-logs-simple
                             #'egg-run-git-file-log-HEAD ,file-name))
@@ -7218,24 +7215,26 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     ;;
     map))
 
-(defun egg-log-locate-commit (pos)
-  (interactive "d")
-  (let ((sha1 (get-text-property pos :commit))
-        (buf (egg-get-log-buffer 'create)))
+(defun egg-do-locate-commit (sha1)
+  (let ((buf (egg-get-log-buffer 'create))
+	(head-name (egg-branch-or-HEAD))
+	(short-sha1 (egg-short-sha1 sha1))
+	pos)
+    (setq short-sha1 (egg-short-sha1 sha1))
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
            (list :description
                  (concat (egg-text "history scope: " 'egg-text-2)
-                         (egg-text "HEAD" 'egg-term)
+                         (egg-text head-name 'egg-term)
                          (egg-text " and " 'egg-text-2)
-                         (egg-text sha1 'egg-term))
+                         (egg-text short-sha1 'egg-term))
                  :closure
                  `(lambda ()
 		    (egg-log-buffer-insert-n-decorate-logs
 		     (lambda ()
                        (egg-git-ok t "log" "--max-count=10000" "--graph"
                                    "--topo-order" "--pretty=oneline" "--no-color"
-                                   "--decorate" "HEAD" ,sha1))))))
+                                   "--decorate" ,head-name ,sha1))))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
@@ -7244,6 +7243,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (pop-to-buffer buf)
     (egg-log-buffer-goto-pos pos)
     (recenter)))
+
+(defun egg-log-locate-commit (pos)
+  (interactive "d")
+  (egg-do-locate-commit (get-text-property pos :commit)))
 
 (defun egg-query:commit-buffer-rerun (buffer &optional init)
   (interactive (list (current-buffer)))
@@ -7442,9 +7445,10 @@ non-nil then restrict the search to commits modifying FILE-NAME."
    ))
 
 (defun egg-reflog (branch)
-  (interactive (list (if current-prefix-arg
-                         (egg-read-rev "show history of ref: " "HEAD")
-                       "HEAD")))
+  (interactive (let ((head-name (egg-branch-or-HEAD)))
+		 (list (if current-prefix-arg
+			   (egg-read-rev "show history of ref: " head-name)
+                       "HEAD"))))
   (unless branch (setq branch "HEAD"))
   (let ((egg-internal-current-state (egg-repo-state :error-if-not-git))
         (buffer (egg-get-reflog-buffer 'create))
@@ -7774,7 +7778,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let ((git-file (egg-buf-git-name))
-        (src-rev (and ask (egg-read-rev "diff against: " "HEAD")))
+        (src-rev (and ask (egg-read-rev "diff against: " (egg-branch-or-HEAD))))
         buf)
     (setq buf (egg-do-diff (egg-build-diff-info src-rev nil git-file)))
     (pop-to-buffer buf)))
@@ -7789,11 +7793,12 @@ current file contains unstaged changes."
   (let* ((file (file-name-nondirectory (buffer-file-name)))
          (file-modified (not (egg-file-committed (buffer-file-name))))
 	 (egg--do-no-output-message egg--do-no-output-message)
+	 (head-name (egg-branch-or-HEAD))
          rev)
     (when file-modified
       (unless (y-or-n-p (format "ignored uncommitted changes in %s? " file))
         (error "File %s contains uncommitted changes!" file)))
-    (setq rev (egg-read-rev (format "checkout %s version: " file) "HEAD"))
+    (setq rev (egg-read-rev (format "checkout %s version: " file) head-name))
     (setq egg--do-no-output-message (format "checked out %s's contents from %s" file rev))
     (egg-file-buffer-handle-result
      (egg--git-co-files-cmd (egg-get-stash-buffer) file rev))))
