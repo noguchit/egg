@@ -491,6 +491,7 @@ Different versions of git have different names for this subdir."
               (cons :format "%v"  (const :tag "File Log (History) Buffer" egg-file-log-buffer-mode)
                     egg-quit-window-actions-set)))
 
+
 (defcustom egg-git-command "git"
   "Name or full-path to the git command.
 Set this to the appropriate string in the case where `git' is not the
@@ -506,6 +507,37 @@ this option is true, invert the meaning of the prefix. I.e. the command
 will select the window unless prefixed with C-u."
   :group 'egg
   :type 'boolean)
+
+(defcustom egg-git-diff-file-options-alist 
+  '((c-mode "--patience" "--ignore-all-space")
+    (emacs-lisp-mode "--patience" "--ignore-all-space")
+    (text-mode "--histogram"))
+  "Extra options for when show diff of a file matching a major mode."
+  :group 'egg
+  :type '(repeat (cons :tag "File Diff"
+		       (choice :tag "Mode"
+			       (const :tag "C" c-mode)
+			       (const :tag "C++" c++-mode)
+			       (const :tag "Java" java-mode)
+			       (const :tag "Text" text-mode)
+			       (const :tag "ELisp" emacs-lisp-mode)
+			       (const :tag "Lisp" lisp-mode)
+			       (const :tag "Python" python-mode)
+			       (const :tag "Perl" perl-mode)
+			       (symbol :tag "Other"))
+		       (set :tag "Extra Options"
+			    (choice :tag "Algorithm"
+				    (const :tag "Patience" "--patience")
+				    (const :tag "Historgram" "--histogram")
+				    (const :tag "Minimal" "--minimal"))
+			    (choice :tag "White Space Handling"
+				    (const :tag "Ignore Space at End-of-Line" 
+					   "--ignore-space-at-eol")
+				    (const :tag "Ignore Space Changes"
+					   "--ignore-space-change")
+				    (const :tag "Ignore All Space"
+					   "--ignore-all-space"))))
+		 ))
 
 (defcustom egg-dummy-option nil
   "Foo bar"
@@ -702,6 +734,12 @@ current-buffer would be used."
 return the t if the exit-code was 0. if BUFFER was t then
 current-buffer would be used."
   (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+
+(defun egg-git-show-file (buffer file rev &rest args)
+  (egg-git-ok-args buffer (nconc (list "--no-pager" "show")
+				 egg-git-diff-options
+				 args
+				 (cons rev "--" file))))
 
 (defsubst egg-git-region-ok (start end &rest args)
   "run GIT with ARGS and insert output into current buffer at point.
@@ -7187,7 +7225,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (setq default-directory dir)
       (setq inhibit-read-only t)
       (erase-buffer)
-      (egg-git-ok t "--no-pager" "show" "-U1000000000" sha1 "--" git-name)
+      (egg-git-ok t "--no-pager" "show" "--patience" "-U1000000000" sha1 "--" git-name)
       (rename-buffer (concat "*" repo ":" short-sha1 "@" git-name "*"))
       (set (make-local-variable 'egg-rev-file-buffer-closure)
 	   (list :sha1 sha1 :path git-name :work-tree dir))
