@@ -271,6 +271,24 @@ Many Egg faces inherit from this one by default."
   "Face for lines in a diff that have been added."
   :group 'egg-faces)
 
+(defface egg-add-bg
+  '((((class color) (background light))
+     :background "medium sea green")
+    (((class color) (background dark))
+     :background "#375243"))
+  "Background Face for lines in a diff that have been added."
+  :group 'egg-faces)
+
+(defface egg-del-bg
+  '((((class color) (background light))
+     :background "indian red")
+    (((class color) (background dark))
+     :background "IndianRed4"))
+  "Background Face for lines in a diff that have been deleted."
+  :group 'egg-faces)
+
+
+
 (defface egg-diff-none
   '((((class color) (background light))
      :foreground "grey50")
@@ -5474,10 +5492,18 @@ Jump to line LINE if it's not nil."
     map))
 
 (defconst egg-log-commit-simple-map
-  (let ((map (make-sparse-keymap "Egg:FileLogCommit")))
+  (let ((map (make-sparse-keymap "Egg:LogCommitSimple")))
     (set-keymap-parent map egg-log-commit-base-map)
     (define-key map (kbd "RET") 'egg-log-locate-commit)
     (define-key map (kbd "C-c C-c") 'egg-log-locate-commit)
+    map))
+
+(defconst egg-file-log-commit-map
+  (let ((map (make-sparse-keymap "Egg:FileLogCommit")))
+    (set-keymap-parent map egg-log-commit-simple-map)
+    (define-key map (kbd "M-SPC") 'egg-file-log-walk-current-rev)
+    (define-key map (kbd "M-n") 'egg-file-log-walk-rev-next)
+    (define-key map (kbd "M-p") 'egg-file-log-walk-rev-prev)
     map))
 
 (defconst egg-log-commit-map
@@ -5589,7 +5615,6 @@ Jump to line LINE if it's not nil."
        'egg-log-buffer-simple-redisplay)
   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
   (set (make-local-variable 'egg-internal-log-buffer-closure) nil)
-  (set (make-local-variable 'egg-buffer-refresh-func) nil)
 
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks (or hook 'egg-log-style-buffer-hook)))
@@ -7108,6 +7133,104 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 			     egg-log-buffer-mode-map
 			     'egg-file-log-buffer-mode-hook))
 
+
+(defvar egg-rev-file-buffer-closure nil)
+
+(defun egg-grok-n-map-single-hunk-buffer (header-end prefix-len prefix-mapping)
+  (let* ((inhibit-read-only t)
+	 (prefix (make-string prefix-len ? )) ;; start with no-change
+	 (range (list :type (cdr (assoc prefix prefix-mapping)) :beg nil :end nil))
+	 ranges-list line-start)
+    (delete-region (point-min) header-end)
+    (goto-char (point-min))
+    (plist-put range :beg (point))
+    (while (not (eobp))
+      (setq line-start (buffer-substring-no-properties (point) (+ (point) prefix-len)))
+      (delete-region (point) (+ (point) prefix-len))
+      (unless (equal line-start prefix) ;; keep going if it's same prefix
+	(plist-put range :end (point))
+	(setq ranges-list (cons range ranges-list))
+	(setq prefix line-start)
+	(setq range (list :type (cdr (assoc prefix prefix-mapping))
+			  :beg (point) :end nil)))
+      (forward-line 1)
+      (goto-char (line-beginning-position)))
+    ranges-list))
+
+(defun egg-decorate-single-hunk-buffer (ranges-list mode)
+  (funcall mode)
+  (dolist (range ranges-list)
+    (let* ((beg (plist-get range :beg))
+	   (end (plist-get range :end))
+	   (type (plist-get range :type))
+	   (ov (make-overlay beg end)))
+      (overlay-put ov 'evaporate t)
+      (overlay-put ov 'face (cdr (assq type '((add . egg-add-bg)
+					      (del . egg-del-bg))))))))
+
+(defun egg-file-log-walk-show-buffer ()
+  (let ((pos (point))
+	(log-buffer (current-buffer))
+	(dir (egg-work-tree-dir))
+	(repo (egg-repo-name))
+	(git-name (car (plist-get egg-internal-log-buffer-closure :paths)))
+	(rev-file-buffer (plist-get egg-internal-log-buffer-closure :rev-file-buffer))
+	(inhibit-read-only inhibit-read-only)
+	sha1 short-sha1 mode cc-diff ranges-list)
+    (setq sha1 (egg-commit-at-point))
+    (setq short-sha1 (and sha1 (egg-short-sha1 sha1)))
+    (setq mode (assoc-default git-name auto-mode-alist 'string-match))
+    (unless (and (bufferp rev-file-buffer) (buffer-live-p rev-file-buffer))
+      (setq rev-file-buffer (get-buffer-create (concat "*egg@" git-name "*")))
+      (plist-put egg-internal-log-buffer-closure :rev-file-buffer rev-file-buffer))
+    (with-current-buffer rev-file-buffer
+      (setq default-directory dir)
+      (setq inhibit-read-only t)
+      (erase-buffer)
+      (egg-git-ok t "--no-pager" "show" "-U1000000000" sha1 "--" git-name)
+      (rename-buffer (concat "*" repo ":" short-sha1 "@" git-name "*"))
+      (set (make-local-variable 'egg-rev-file-buffer-closure)
+	   (list :sha1 sha1 :path git-name :work-tree dir))
+      (goto-char (point-min))
+      (save-match-data
+	(re-search-forward "^@@\\(@\\)?.+@@\\(@\\)?\n")
+	(setq cc-diff (and (match-beginning 1) (match-beginning 2))) ;; the delta is a cc diff
+	(setq ranges-list 
+	      (egg-grok-n-map-single-hunk-buffer
+	       (match-end 0) (if cc-diff 2 1)
+	       (if cc-diff '(("  " . keep)
+			     ("++" . add)
+			     ("+ " . add)
+			     (" +" . add)
+			     ("--" . del)
+			     ("- " . del)
+			     (" -" . del)
+			     ("+-" . bad)
+			     ("-+" . bad))
+		 '((" " . keep)
+		   ("+" . add)
+		   ("-" . del))))))
+      (egg-decorate-single-hunk-buffer ranges-list mode)
+      (set-buffer-modified-p nil)
+      (setq buffer-read-only t)
+      (put-text-property (point-min) (point-max) :commit sha1))
+    (display-buffer rev-file-buffer t)))
+
+(defun egg-file-log-walk-rev-next ()
+  (interactive)
+  (egg-buffer-cmd-next-block :commit)
+  (egg-file-log-walk-show-buffer))
+
+(defun egg-file-log-walk-rev-prev ()
+  (interactive)
+  (egg-buffer-cmd-prev-block :commit)
+  (egg-file-log-walk-show-buffer))
+
+(defun egg-file-log-walk-current-rev ()
+  (interactive)
+  (when (egg-commit-at-point)
+    (egg-file-log-walk-show-buffer)))
+
 (defsubst egg-run-git-file-log-HEAD (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
               "--graph" "--topo-order" "--no-color"
@@ -7118,17 +7241,30 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
               "--graph" "--topo-order" "--no-color"
               "--pretty=oneline" "--decorate" "--all" "--" file))
 
-(defsubst egg-log-buffer-decorate-logs-simple (log-insert-func arg)
+
+(defun egg-log-buffer-decorate-logs-simple-1 (log-insert-func arg
+					   line-map head-map tag-map remote-map)
   (let ((beg (point)))
     (funcall log-insert-func arg)
     (unless (= (char-before (point-max)) ?\n)
       (goto-char (point-max))
       (insert ?\n))
     (goto-char beg)
-    (egg-decorate-log egg-log-commit-simple-map
-                      egg-log-commit-simple-map
-                      egg-log-commit-simple-map
-                      egg-log-commit-simple-map)))
+    (egg-decorate-log line-map head-map tag-map remote-map)))
+
+(defsubst egg-log-buffer-decorate-logs-simple (log-insert-func arg)
+  (egg-log-buffer-decorate-logs-simple-1 log-insert-func arg
+					 egg-log-commit-simple-map
+					 egg-log-commit-simple-map
+					 egg-log-commit-simple-map
+					 egg-log-commit-simple-map))
+
+(defsubst egg-file-log-buffer-decorate-logs (log-insert-func arg)
+  (egg-log-buffer-decorate-logs-simple-1 log-insert-func arg
+					 egg-file-log-commit-map
+					 egg-file-log-commit-map
+					 egg-file-log-commit-map
+					 egg-file-log-commit-map))
 
 (defun egg-log-buffer-simple-redisplay (buffer &optional init)
   (with-current-buffer buffer
@@ -7181,14 +7317,14 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                  :description (concat (egg-text "scope: " 'egg-text-2)
                                       (egg-text "all refs" 'egg-branch-mono))
                  :closure `(lambda ()
-                             (egg-log-buffer-decorate-logs-simple
+                             (egg-file-log-buffer-decorate-logs
                               #'egg-run-git-file-log-all ,file-name))
 		 :paths (list (egg-file-git-name file-name)))
          (list :title title
                :description (concat (egg-text "scope: " 'egg-text-2)
                                     (egg-text head-name 'egg-branch-mono))
                :closure `(lambda ()
-                           (egg-log-buffer-decorate-logs-simple
+                           (egg-file-log-buffer-decorate-logs
                             #'egg-run-git-file-log-HEAD ,file-name))
 	       :paths (list (egg-file-git-name file-name)))))
       (when (memq :file-log egg-show-key-help-in-buffers)
