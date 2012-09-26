@@ -530,7 +530,7 @@ will select the window unless prefixed with C-u."
 				    (const :tag "Patience" "--patience")
 				    (const :tag "Historgram" "--histogram")
 				    (const :tag "Minimal" "--minimal"))
-			    (choice :tag "White Space Handling"
+			    (choice :tag "White Space"
 				    (const :tag "Ignore Space at End-of-Line" 
 					   "--ignore-space-at-eol")
 				    (const :tag "Ignore Space Changes"
@@ -735,11 +735,16 @@ return the t if the exit-code was 0. if BUFFER was t then
 current-buffer would be used."
   (= (apply 'call-process egg-git-command nil buffer nil args) 0))
 
-(defun egg-git-show-file (buffer file rev &rest args)
-  (egg-git-ok-args buffer (nconc (list "--no-pager" "show")
-				 egg-git-diff-options
-				 args
-				 (cons rev "--" file))))
+(defun egg-git-show-file-args (buffer file rev args)
+  (let* ((mode (assoc-default file auto-mode-alist 'string-match))
+	 (extras (and mode (assoc-default mode egg-git-diff-file-options-alist 'eq))))
+    (egg-git-ok-args buffer (append (list "--no-pager" "show")
+				    extras
+				    args
+				    (list rev "--" file)))))
+
+(defsubst egg-git-show-file (buffer file rev &rest args)
+  (egg-git-show-file-args buffer file rev args))
 
 (defsubst egg-git-region-ok (start end &rest args)
   "run GIT with ARGS and insert output into current buffer at point.
@@ -1415,9 +1420,7 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
                                   state))))
             ((eq req :staged)
              (setq state
-                   (nconc (list :staged
-                                (egg-git-to-lines "diff" "--cached"
-                                                  "--name-only"))
+                   (nconc (list :staged (egg-git-to-lines "diff" "--cached" "--name-only"))
                           state)))
 	    
 	    ((eq req :name)
@@ -3879,7 +3882,7 @@ adding the contents."
             "\n")
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
-    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
+    (apply 'call-process egg-git-command nil t nil "diff" "--no-color" "--patience"
            "-M" "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
            extra-diff-options)
     (egg-delimit-section :section 'unstaged beg (point)
@@ -3904,7 +3907,7 @@ adding the contents."
             "\n")
     (setq diff-beg (point)
           inv-beg (1- diff-beg))
-    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
+    (apply 'call-process egg-git-command nil t nil "diff" "--no-color" "--patience"
            "--cached" "-M" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
            extra-diff-options)
     (egg-delimit-section :section 'staged beg (point)
@@ -5399,7 +5402,7 @@ nil then compare the index and the work-dir."
 	info tmp)
     (setq info
           (cond ((and (null src) (null dst))
-                 (list :args (list "--no-color" "-p"
+                 (list :args (list "--no-color" "-p" "--patience"
                                    "--src-prefix=INDEX/"
                                    "--dst-prefix=WORKDIR/")
                        :title (format "%sfrom INDEX to %s" search-string dir)
@@ -5408,7 +5411,7 @@ nil then compare the index and the work-dir."
                        :diff-map egg-unstaged-diff-section-map
                        :hunk-map egg-unstaged-hunk-section-map))
                 ((and (equal src "HEAD") (equal dst "INDEX"))
-                 (list :args (list "--no-color" "--cached" "-p"
+                 (list :args (list "--no-color" "--cached" "-p" "--patience"
                                    "--src-prefix=INDEX/"
                                    "--dst-prefix=WORKDIR/")
                        :title (format "%sfrom HEAD to INDEX" search-string)
@@ -5417,7 +5420,7 @@ nil then compare the index and the work-dir."
                        :diff-map egg-staged-diff-section-map
                        :hunk-map egg-staged-hunk-section-map))
                 ((and (stringp src) (stringp dst))
-                 (list :args (list "--no-color" "-p"
+                 (list :args (list "--no-color" "-p" "--patience"
                                    (concat src ".." dst))
                        :title (format "%sfrom %s to %s" search-string src dst)
                        :prologue (format "a: %s\nb: %s" src dst)
@@ -5426,7 +5429,7 @@ nil then compare the index and the work-dir."
                        :diff-map egg-diff-section-map
                        :hunk-map egg-hunk-section-map))
                 ((and (stringp src) (null dst))
-                 (list :args (list "--no-color" "-p" src)
+                 (list :args (list "--no-color" "-p" "--patience" src)
                        :title (format "%sfrom %s to %s" search-string src dir)
                        :prologue (concat (format "a: %s\nb: %s\n" src dir)
                                          "hunks can be removed???")
@@ -6610,8 +6613,8 @@ would be a pull (by default --ff-only)."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok-args t (nconc (list "show" "--no-color" "--show-signature")
-					(copy-list args)
+      (unless (egg-git-ok-args t (nconc (list "show" "--no-color" "--show-signature" "--patience")
+					(copy-sequence args)
 					(list (concat "--pretty=format:"
 						      indent-spaces "%ai%n"
 						      indent-spaces "%an%n"
@@ -7225,7 +7228,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (setq default-directory dir)
       (setq inhibit-read-only t)
       (erase-buffer)
-      (egg-git-ok t "--no-pager" "show" "--patience" "-U1000000000" sha1 "--" git-name)
+      (egg-git-show-file t git-name sha1 "-U1000000000")
+      ;; (egg-git-ok t "--no-pager" "show" "--patience" "-U1000000000" sha1 "--" git-name)
       (rename-buffer (concat "*" repo ":" short-sha1 "@" git-name "*"))
       (set (make-local-variable 'egg-rev-file-buffer-closure)
 	   (list :sha1 sha1 :path git-name :work-tree dir))
@@ -7693,7 +7697,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "stash" "show" "-p"
+      (unless (egg-git-ok t "stash" "show" "-p" "--patience"
                           "--src-prefix=BASE:/" "--dst-prefix=WIP:/"
                           stash)
         (error "error calling git stash show %s!" stash))
