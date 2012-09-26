@@ -511,7 +511,8 @@ will select the window unless prefixed with C-u."
 (defcustom egg-git-diff-file-options-alist 
   '((c-mode "--patience" "--ignore-all-space")
     (emacs-lisp-mode "--patience" "--ignore-all-space")
-    (text-mode "--histogram"))
+    (text-mode "--histogram")
+    (makefile-mode "--patience" "--ignore-space-at-eol"))
   "Extra options for when show diff of a file matching a major mode."
   :group 'egg
   :type '(repeat (cons :tag "File Diff"
@@ -522,6 +523,7 @@ will select the window unless prefixed with C-u."
 			       (const :tag "Text" text-mode)
 			       (const :tag "ELisp" emacs-lisp-mode)
 			       (const :tag "Lisp" lisp-mode)
+			       (const :tag "Makefile" makefile-mode)
 			       (const :tag "Python" python-mode)
 			       (const :tag "Perl" perl-mode)
 			       (symbol :tag "Other"))
