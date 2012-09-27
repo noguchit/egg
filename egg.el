@@ -590,6 +590,13 @@ will select the window unless prefixed with C-u."
 ;;; simple routines
 ;;;========================================================
 
+(defsubst egg-unquote-posix-regexp (string)
+  (while (string-match "\\\\[\\|()]" string)
+    (setq string (concat (substring string 0 (match-beginning 0))
+			 (substring string (1+ (match-beginning 0))))))
+  string)
+
+
 (defmacro invoked-interactively-p ()
   "wrapper for checking if the function was invoked interactively,
 works around the deprecation of 'interactive-p' after Emacs 23.2"
@@ -5287,7 +5294,7 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
           (dst-prefix (plist-get egg-diff-buffer-info :dst))
           (help (plist-get egg-diff-buffer-info :help))
           (inhibit-read-only t)
-          pos beg inv-beg help-beg help-end help-inv-beg)
+          pos beg inv-beg help-beg help-end help-inv-beg err-code)
       (erase-buffer)
       (insert (egg-text title 'egg-section-title) "\n")
       (insert prologue "\n")
@@ -5301,7 +5308,9 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
         (setq help-end (point)))
       (setq pos (point))
       (setq beg (point))
-      (apply 'call-process egg-git-command nil t nil "diff" args)
+      (egg-cmd-log "RUN: git diff" (mapconcat #'identity args " ") "\n")
+      (setq err-code (apply 'call-process egg-git-command nil t nil "diff" args))
+      (egg-cmd-log (format "RET:%d\n" err-code))
       (unless (> (point) beg)
         (insert (egg-text "No difference!\n" 'egg-text-4)))
       (egg-delimit-section :section 'file (point-min) (point) inv-beg
@@ -5401,29 +5410,37 @@ nil then compare the index and the work-dir."
 	(search-string (if pickaxe (format "Search for %s " 
 					   (if (stringp pickaxe) pickaxe (car pickaxe)))
 			 ""))
-	info tmp)
+	info tmp options)
+
+    (setq options 
+	  (append '("--no-color" "-p")
+		  (copy-sequence
+		   (if (stringp file)
+		       (assoc-default (assoc-default file auto-mode-alist #'string-match)
+				      egg-git-diff-file-options-alist #'eq
+				      '("--patience"))
+		     '("--patience")))))    
+    
     (setq info
           (cond ((and (null src) (null dst))
-                 (list :args (list "--no-color" "-p" "--patience"
-                                   "--src-prefix=INDEX/"
-                                   "--dst-prefix=WORKDIR/")
+                 (list :args (nconc options (list "--src-prefix=INDEX/"
+						  "--dst-prefix=WORKDIR/"))
                        :title (format "%sfrom INDEX to %s" search-string dir)
                        :prologue "hunks can be removed or added into INDEX."
                        :src "INDEX/" :dst "WORKDIR/"
                        :diff-map egg-unstaged-diff-section-map
                        :hunk-map egg-unstaged-hunk-section-map))
                 ((and (equal src "HEAD") (equal dst "INDEX"))
-                 (list :args (list "--no-color" "--cached" "-p" "--patience"
-                                   "--src-prefix=INDEX/"
-                                   "--dst-prefix=WORKDIR/")
+                 (list :args (nconc options (list "--cached"
+						  "--src-prefix=INDEX/"
+						  "--dst-prefix=WORKDIR/"))
                        :title (format "%sfrom HEAD to INDEX" search-string)
                        :prologue "hunks can be removed from INDEX."
                        :src "HEAD/" :dst "INDEX/"
                        :diff-map egg-staged-diff-section-map
                        :hunk-map egg-staged-hunk-section-map))
                 ((and (stringp src) (stringp dst))
-                 (list :args (list "--no-color" "-p" "--patience"
-                                   (concat src ".." dst))
+                 (list :args (nconc options (list (concat src ".." dst)))
                        :title (format "%sfrom %s to %s" search-string src dst)
                        :prologue (format "a: %s\nb: %s" src dst)
                        :src-revision src
@@ -5431,7 +5448,7 @@ nil then compare the index and the work-dir."
                        :diff-map egg-diff-section-map
                        :hunk-map egg-hunk-section-map))
                 ((and (stringp src) (null dst))
-                 (list :args (list "--no-color" "-p" "--patience" src)
+                 (list :args (nconc options (list src))
                        :title (format "%sfrom %s to %s" search-string src dir)
                        :prologue (concat (format "a: %s\nb: %s\n" src dir)
                                          "hunks can be removed???")
@@ -5449,9 +5466,11 @@ nil then compare the index and the work-dir."
       (setq tmp (plist-get info :args))
       (setq tmp (nconc (cond ((stringp pickaxe)
 			      (list "-S" pickaxe))
-			     ((and (consp pickaxe) (stringp (car pickaxe)) (memq :line pickaxe))
+			     ((and (consp pickaxe) (stringp (car pickaxe))
+				   (memq :line pickaxe))
 			      (list "-G" (car pickaxe)))
-			     ((and (consp pickaxe) (stringp (car pickaxe)) (memq :regex pickaxe))
+			     ((and (consp pickaxe) (stringp (car pickaxe))
+				   (memq :regex pickaxe))
 			      (list "--pickaxe-regex" "-S" (car pickaxe)))
 			     (t nil))
 		       tmp))
@@ -5548,6 +5567,11 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "M-n") 'egg-file-log-walk-rev-next)
     (define-key map (kbd "M-p") 'egg-file-log-walk-rev-prev)
     map))
+
+
+;; (defconst egg-log-popup-commit-menu
+;;   (let ((map (make-sparse-keymap "Commit")))
+;;     (define-key )))
 
 (defconst egg-log-commit-map
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
@@ -6611,18 +6635,19 @@ would be a pull (by default --ff-only)."
           (inhibit-read-only t)
           (indent-column egg-log-buffer-comment-column)
           (indent-spaces (make-string egg-log-buffer-comment-column ? ))
-          beg end diff-beg diff-end)
+          beg end diff-beg diff-end is-cc-diff)
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok-args t (nconc (list "show" "--no-color" "--show-signature" "--patience")
-					(copy-sequence args)
-					(list (concat "--pretty=format:"
-						      indent-spaces "%ai%n"
-						      indent-spaces "%an%n"
-						      "%b")
-					      sha1)
-					path-args))
+      (unless (egg-git-ok-args 
+	       t (nconc (list "show" "--no-color" "--show-signature" "--patience")
+			(copy-sequence args)
+			(list (concat "--pretty=format:"
+				      indent-spaces "%ai%n"
+				      indent-spaces "%an%n"
+				      "%b")
+			      sha1)
+			path-args))
         (error "error calling git log %s!" ref))
       (setq end (point-marker))
       (save-excursion
@@ -6631,7 +6656,9 @@ would be a pull (by default --ff-only)."
 	  (while (re-search-forward "^gpg:" end t)
 	    (save-excursion
 	      (goto-char (match-beginning 0))
-	      (insert indent-spaces)))))
+	      (insert indent-spaces)))
+	  (goto-char beg)
+	  (setq is-cc-diff (re-search-forward "^@@@" end t))))
       (setq diff-end end)
       (egg-delimit-section :commit sha1 beg end (1- beg) nil nav)
       (put-text-property beg end 'keymap egg-section-map)
@@ -6659,8 +6686,12 @@ would be a pull (by default --ff-only)."
       ;; (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
 
       (when (stringp highlight-regexp)
+	(when (eq (aref highlight-regexp 0) ?^)
+	  (setq highlight-regexp
+		(concat "^" (make-string (if is-cc-diff 2 1) ?.)
+			(substring highlight-regexp 1))))
 	(goto-char diff-beg)
-	(while (posix-search-forward highlight-regexp diff-end t)
+	(while (re-search-forward highlight-regexp diff-end t)
 	  (put-text-property (match-beginning 0) (match-end 0) 'face 'highlight)))
 
       (set-buffer-modified-p nil))))
@@ -6964,18 +6995,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
          menu keys cmd)
     (when (bufferp buffer)
       (save-excursion
-        (with-temp-buffer buffer)
-        (goto-char pos)
-        (setq menu
-              (nconc (list 'keymap
-                           (egg-log-commit-line-menu-heading pos))
-                     (cdr generic-menu)))
-        (setq keys (progn
-                     (force-mode-line-update)
-                     (x-popup-menu event menu)))
-        (setq cmd (and keys (lookup-key menu (apply 'vector keys))))
-        (when (and cmd (commandp cmd))
-          (call-interactively cmd))))))
+        (with-current-buffer buffer
+	  (goto-char pos)
+	  (setq menu
+		(nconc (list 'keymap
+			     (egg-log-commit-line-menu-heading pos))
+		       (cdr generic-menu)))
+	  (setq keys (progn
+		       (force-mode-line-update)
+		       (x-popup-menu event menu)))
+	  (setq cmd (and keys (lookup-key menu (apply 'vector keys))))
+	  (when (and cmd (commandp cmd))
+	    (call-interactively cmd)))))))
 
 (defun egg-log-popup-local-ref-menu (event)
   (interactive "e")
@@ -7492,21 +7523,57 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map)))
 
+;; (defun egg-search-changes (level &optional string-at-point)
+;;   (interactive (list (prefix-numeric-value current-prefix-arg)
+;; 		     (egg-string-at-point)))
+;;   (let* ((file-name (buffer-file-name))
+;; 	 (file-git-name (and file-name (egg-file-git-name file-name)))
+;; 	 (mark (egg-log-buffer-find-first-mark ?*))
+;; 	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+;; 	 (revs (and start-rev (list (concat start-rev "..HEAD"))))
+;; 	 search-type term case-insensitive)
+;;     (cond ((< level 3) 			;; simple string search
+;; 	   (egg-do-search-changes string-at-point nil nil nil file-git-name level revs))
+;; 	  ((< level 15)			;; search posix regexp
+;; 	   (egg-do-search-changes string-at-point t nil nil file-git-name level revs))
+;; 	  ((< level 63)		       	;; search for line
+;; 	   (egg-do-search-changes string-at-point nil t nil file-git-name level revs))
+;; 	  (t				;; prompt
+;; 	   (setq search-type (read-key-sequence
+;; 			      "search type: (s)tring, (r)egex or (l)ine? "))
+;; 	   (setq search-type (string-to-char search-type))
+;; 	   (unless (memq search-type '(?s ?r ?l))
+;; 	     (error "Must be one of s, r or l (%c)!!!" search-type))
+;; 	   (if (eq search-type ?s)
+;; 	       (egg-do-search-changes nil string-at-point nil nil file-git-name level revs)
+;; 	     (setq case-insensitive (y-or-n-p "ignore case when search? "))
+;; 	     (egg-do-search-changes string-at-point (eq search-type ?r)
+;; 				    (eq search-type ?l) case-insensitive
+;; 				    file-git-name level revs))))))
+
 (defun egg-search-changes (level &optional string-at-point)
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
+  (let* ((mark (egg-log-buffer-find-first-mark ?*))
+	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+	 (revs (and start-rev (list (concat start-rev "..HEAD")))))
+    (egg-search-changes-1 level string-at-point revs)))
+
+(defun egg-search-changes-all (level &optional string-at-point)
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)))
+  (egg-search-changes-1 level string-at-point (list "--all")))
+
+(defun egg-search-changes-1 (level initial-string revs)
   (let* ((file-name (buffer-file-name))
 	 (file-git-name (and file-name (egg-file-git-name file-name)))
-	 (mark (egg-log-buffer-find-first-mark ?*))
-	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
-	 (revs (and start-rev (list (concat start-rev "..HEAD"))))
 	 search-type term case-insensitive)
     (cond ((< level 3) 			;; simple string search
-	   (egg-do-search-changes string-at-point nil nil nil file-git-name level revs))
+	   (egg-do-search-changes initial-string nil nil nil file-git-name level revs))
 	  ((< level 15)			;; search posix regexp
-	   (egg-do-search-changes string-at-point t nil nil file-git-name level revs))
+	   (egg-do-search-changes initial-string t nil nil file-git-name level revs))
 	  ((< level 63)		       	;; search for line
-	   (egg-do-search-changes string-at-point nil t nil file-git-name level revs))
+	   (egg-do-search-changes initial-string nil t nil file-git-name level revs))
 	  (t				;; prompt
 	   (setq search-type (read-key-sequence
 			      "search type: (s)tring, (r)egex or (l)ine? "))
@@ -7514,9 +7581,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	   (unless (memq search-type '(?s ?r ?l))
 	     (error "Must be one of s, r or l (%c)!!!" search-type))
 	   (if (eq search-type ?s)
-	       (egg-do-search-changes nil string-at-point nil nil file-git-name level revs)
+	       (egg-do-search-changes nil initial-string nil nil file-git-name level revs)
 	     (setq case-insensitive (y-or-n-p "ignore case when search? "))
-	     (egg-do-search-changes string-at-point (eq search-type ?r)
+	     (egg-do-search-changes initial-string (eq search-type ?r)
 				    (eq search-type ?l) case-insensitive
 				    file-git-name level revs))))))
 
@@ -7558,7 +7625,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
 			 (is-regexp (list "--pickaxe-regex" "-S" term))
 			 (t (list "-S" term))))
 	 (args (append pickaxed 
-		       (when (or is-regexp do-line-search)
+		       (when (and (or is-regexp do-line-search) case-insensitive)
 			 (list "--regexp-ignore-case"))
 		       extras
 		       (when git-file-name (list "--" git-file-name))))
@@ -7572,7 +7639,8 @@ non-nil then restrict the search to commits modifying FILE-NAME."
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
            (list :description desc :closure func
-		 :highlight (if is-regexp term (concat "\\<" term "\\>"))
+		 :highlight (if is-regexp (egg-unquote-posix-regexp term)
+			      (concat "\\<" term "\\>"))
 		 :pickaxed pickaxed
 		 :ignore-case case-insensitive
 		 :paths (when git-file-name (list "--" git-file-name))))
