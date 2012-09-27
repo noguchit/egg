@@ -6940,6 +6940,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                :visible '(egg-commit-at-point)))
     (define-key map [co-dh] (list 'menu-item "Detach HEAD and Checkout"
                                   'egg-log-buffer-checkout-commit
+				  :enable ' (not (egg-head-at-point))
                                   :visible '(egg-commit-at-point)))
     (define-key map [sp1] '("--"))
     (define-key map [sb] (list 'menu-item "Start New Branch"
