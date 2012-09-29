@@ -508,6 +508,23 @@ will select the window unless prefixed with C-u."
   :group 'egg
   :type 'boolean)
 
+(defcustom egg-git-diff-options
+  '("--patience" "--ignore-space-at-eol")
+  "Extra options for git diff."
+  :group 'egg
+  :type '(set :tag "Extra Diff Options"
+	      (radio :tag "Algorithm"
+		     (const :tag "Patience" "--patience")
+		     (const :tag "Historgram" "--histogram")
+		     (const :tag "Minimal" "--minimal"))
+	      (radio :tag "White Space"
+		      (const :tag "Ignore Space at End-of-Line" 
+			     "--ignore-space-at-eol")
+		      (const :tag "Ignore Space Changes"
+			     "--ignore-space-change")
+		      (const :tag "Ignore All Space"
+			     "--ignore-all-space"))))
+
 (defcustom egg-git-diff-file-options-alist 
   '((c-mode "--patience" "--ignore-all-space")
     (emacs-lisp-mode "--patience" "--ignore-all-space")
@@ -528,11 +545,11 @@ will select the window unless prefixed with C-u."
 			       (const :tag "Perl" perl-mode)
 			       (symbol :tag "Other"))
 		       (set :tag "Extra Options"
-			    (choice :tag "Algorithm"
+			    (radio :tag "Algorithm"
 				    (const :tag "Patience" "--patience")
 				    (const :tag "Historgram" "--histogram")
 				    (const :tag "Minimal" "--minimal"))
-			    (choice :tag "White Space"
+			    (radio :tag "White Space"
 				    (const :tag "Ignore Space at End-of-Line" 
 					   "--ignore-space-at-eol")
 				    (const :tag "Ignore Space Changes"
@@ -1468,6 +1485,9 @@ use STATE as repo state if it was not nil. Otherwise re-read the repo state."
    (not (if (memq :staged state)
             (plist-get state :staged)
           (egg-index-empty)))))
+
+(defun egg-wdir-dirty () (plist-get (egg-repo-state :unstaged) :unstaged))
+(defun egg-staged-changes () (plist-get (egg-repo-state :staged) :staged))
 
 (defsubst egg-current-branch (&optional state)
   "The current symbolic value of HEAD. i.e. name of a branch. if STATE
@@ -3891,9 +3911,9 @@ adding the contents."
             "\n")
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
-    (apply 'call-process egg-git-command nil t nil "diff" "--no-color" "--patience"
+    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
            "-M" "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
-           extra-diff-options)
+           (append egg-git-diff-options extra-diff-options))
     (egg-delimit-section :section 'unstaged beg (point)
                          inv-beg egg-section-map 'unstaged)
     ;; this section might contains merge conflicts, thus cc-diff
@@ -3916,9 +3936,9 @@ adding the contents."
             "\n")
     (setq diff-beg (point)
           inv-beg (1- diff-beg))
-    (apply 'call-process egg-git-command nil t nil "diff" "--no-color" "--patience"
+    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
            "--cached" "-M" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
-           extra-diff-options)
+           (append egg-git-diff-options extra-diff-options))
     (egg-delimit-section :section 'staged beg (point)
                          inv-beg egg-section-map 'staged)
     ;; this section never contains merge conflicts, thus no cc-diff
@@ -4584,7 +4604,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (define-key map [sp8] '("--"))
     (define-key map [goto-file] (list 'menu-item "Open File"
                                       'egg-diff-section-cmd-visit-file-other-window
-                                      :visble '(and (egg-diff-at-point) (not (egg-hunk-at-point)))))
+                                      :visble '(and (egg-diff-at-point) 
+						    (not (egg-hunk-at-point)))))
     (define-key map [goto-line] (list 'menu-item "Locate Line"
                                       'egg-hunk-section-cmd-visit-file-other-window
                                       :visible '(egg-hunk-at-point)))
@@ -4655,9 +4676,11 @@ If INIT was not nil, then perform 1st-time initializations as well."
   (define-key menu [commit] '(menu-item "Commit Staged Changes"
                                         egg-commit-log-edit))
   (define-key menu [stage] '(menu-item "Stage All Modifications"
-                                       egg-stage-all-files))
-  (define-key menu [stage] '(menu-item "UnStage All Staged Modifications"
-                                       egg-stage-all-files))
+				       egg-stage-all-files
+				       :enable (egg-wdir-dirty)))
+  (define-key menu [unstage] '(menu-item "UnStage All Staged Modifications"
+					 egg-unstage-all-files
+					 :enable (egg-staged-changes)))
   (define-key menu [stage-untracked] '(menu-item "Stage All Untracked Files"
                                                  egg-stage-untracked-files))
   (define-key menu [sp1] '("--"))
@@ -5418,8 +5441,8 @@ nil then compare the index and the work-dir."
 		   (if (stringp file)
 		       (assoc-default (assoc-default file auto-mode-alist #'string-match)
 				      egg-git-diff-file-options-alist #'eq
-				      '("--patience"))
-		     '("--patience")))))    
+				      egg-git-diff-options)
+		     egg-git-diff-options))))
     
     (setq info
           (cond ((and (null src) (null dst))
@@ -6640,7 +6663,8 @@ would be a pull (by default --ff-only)."
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
       (unless (egg-git-ok-args 
-	       t (nconc (list "show" "--no-color" "--show-signature" "--patience")
+	       t (nconc (list "show" "--no-color" "--show-signature")
+			(copy-sequence egg-git-diff-options)
 			(copy-sequence args)
 			(list (concat "--pretty=format:"
 				      indent-spaces "%ai%n"
@@ -7768,9 +7792,11 @@ non-nil then restrict the search to commits modifying FILE-NAME."
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok t "stash" "show" "-p" "--patience"
-                          "--src-prefix=BASE:/" "--dst-prefix=WIP:/"
-                          stash)
+      (unless (egg-git-ok-args t
+			       (append '("stash" "show" "-p")
+				       egg-git-diff-options
+				       (list "--src-prefix=BASE:/" "--dst-prefix=WIP:/"
+					     stash)))
         (error "error calling git stash show %s!" stash))
       (setq end (point))
       (egg-delimit-section :stash stash beg end (1- beg) nil nav)
