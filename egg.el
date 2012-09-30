@@ -207,9 +207,9 @@ Many Egg faces inherit from this one by default."
 
 (defface egg-reflog-mono
   '((((class color) (background light))
-     :inherit egg-stash-mono)
+     :foreground "gray70" :inherit egg-stash-mono)
     (((class color) (background dark))
-     :inherit egg-stash-mono)
+     :foreground "gray30" :inherit egg-stash-mono)
     (t :weight bold))
   "Face for a reflog identifier."
   :group 'egg-faces)
@@ -5748,27 +5748,31 @@ Jump to line LINE if it's not nil."
    ))
 
 (defun egg--log-parse-decoration-refs (dec-ref-start dec-ref-end repo-refs-prop-alist
-						     pseudo-ref &rest extras-properties)
+						     pseudo-refs-list &rest extras-properties)
   (let ((pos dec-ref-start)
 	ref-full-name ref
 	short-ref-list decorated-refs 
 	full-ref-list 
 	ref-string)
-    (goto-char pos)
-    (while (> (skip-chars-forward "^ ,:" dec-ref-end) 0)
-      (setq ref-full-name (buffer-substring-no-properties pos (point)))
-      (forward-char 2)
-      (setq pos (point))
-      (unless (or (equal ref-full-name "HEAD") 
-		  (equal ref-full-name "tag")
-		  (equal (subseq ref-full-name -5) "/HEAD"))
-	(setq ref (assoc-default ref-full-name repo-refs-prop-alist))
-	(when ref
-	  (add-to-list 'decorated-refs ref)
-	  (add-to-list 'full-ref-list ref-full-name)
-	  (add-to-list 'short-ref-list (car (get-text-property 0 :ref ref))))))
-    (when decorated-refs
-      (setq ref-string (mapconcat 'identity (cons pseudo-ref decorated-refs) " "))
+    (when (and dec-ref-start (> dec-ref-start 0))
+      (goto-char pos)
+      (while (> (skip-chars-forward "^ ,:" dec-ref-end) 0)
+	(setq ref-full-name (buffer-substring-no-properties pos (point)))
+	(forward-char 2)
+	(setq pos (point))
+	(unless (or (equal ref-full-name "HEAD") 
+		    (equal ref-full-name "tag")
+		    (equal (subseq ref-full-name -5) "/HEAD"))
+	  (setq ref (assoc-default ref-full-name repo-refs-prop-alist))
+	  (when ref
+	    (add-to-list 'decorated-refs ref)
+	    (add-to-list 'full-ref-list ref-full-name)
+	    (add-to-list 'short-ref-list (car (get-text-property 0 :ref ref)))))))
+
+    (setq ref-string (mapconcat 'identity (append pseudo-refs-list decorated-refs) " "))
+    (when (equal ref-string "")
+      (setq ref-string nil))
+    (when (and decorated-refs ref-string) 
       (add-text-properties 0 (length ref-string)
 			   (nconc (list :references short-ref-list
 					:full-references full-ref-list) 
@@ -5798,7 +5802,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
         (ref-string-len 0)
         (dashes-len 0)
         (min-dashes-len 300)
-        separator ref-string sha1 pseudo-ref
+        separator ref-string sha1 pseudo-refs-list
         line-props graph-len beg end sha-beg sha-end subject-beg
         refs-start refs-end
         head-line)
@@ -5822,16 +5826,11 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 			    (skip-chars-forward "^)")
                             (setq refs-end (point))
                             (+ (point) 2)))
-	(setq pseudo-ref (assoc-default sha1 sha1-pseudo-ref-alist))
-	;; (when pseudo-ref
-	;;   (set-text-properties 0 (length pseudo-ref) 
-	;; 		       (list 'face 'egg-branch-mono 'keymap remote-map 
-	;; 			     'help-echo (egg-tooltip-func))
-	;; 		       pseudo-ref))
+	(setq pseudo-refs-list (assoc-default sha1 sha1-pseudo-ref-alist))
 	(setq ref-string
-	      (when (and refs-start refs-end)
-		(egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist pseudo-ref
-						:navigation sha1 :commit sha1)))
+	      (egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist 
+					      pseudo-refs-list 
+					      :navigation sha1 :commit sha1))
         ;; common line decorations
         (setq line-props (nconc (list :navigation sha1 :commit sha1)
 				(if line-map (list 'keymap line-map))
@@ -5840,9 +5839,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 					  (get-text-property 0 :references ref-string)))))
 	
 
-	(when (and (not ref-string) pseudo-ref)
-	  (setq ref-string pseudo-ref)
-	  (add-text-properties 0 (length ref-string) line-props ref-string))
+	;; (when (and (not ref-string) pseudo-ref)
+	;;   (setq ref-string pseudo-ref)
+	;;   (add-text-properties 0 (length ref-string) line-props ref-string))
 
         (setq separator (apply 'propertize " " line-props))
         (setq ref-string-len (if ref-string (length ref-string)))
@@ -7519,13 +7518,17 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defun egg-yggdrasil-insert-logs (ref)
   (let* ((mappings (egg-git-to-lines "--no-pager" "log" "-g" "--pretty=%H %gd%n" ref))
 	 (beg (point)) 
-	 sha1-list sha1-reflog-alist sha1 reflog)
+	 (reflog-0 (concat ref "@{0}"))
+	 sha1-list sha1-reflog-alist sha1 reflog dup)
     (setq mappings (save-match-data (mapcar #'split-string mappings)))
     (dolist (map mappings)
       (setq sha1 (car map) reflog (cadr map))
-      (put-text-property 0 (length reflog) 'face 'egg-reflog-mono reflog)
-      (add-to-list 'sha1-list sha1)
-      (add-to-list 'sha1-reflog-alist (cons sha1 reflog)))
+      (unless (equal reflog reflog-0)
+	(put-text-property 0 (length reflog) 'face 'egg-reflog-mono reflog)
+	(add-to-list 'sha1-list sha1)
+	(setq dup (assoc sha1 sha1-reflog-alist))
+	(if dup (setcdr dup (cons reflog (cdr dup)))
+	  (add-to-list 'sha1-reflog-alist map))))
 
     (egg-git-ok-args t (nconc (list "--no-pager" "log"
 				    (format "--max-count=%d" egg-log-HEAD-max-len)
