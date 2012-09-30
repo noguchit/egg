@@ -205,6 +205,15 @@ Many Egg faces inherit from this one by default."
   "Face for a stash identifier."
   :group 'egg-faces)
 
+(defface egg-reflog-mono
+  '((((class color) (background light))
+     :inherit egg-stash-mono)
+    (((class color) (background dark))
+     :inherit egg-stash-mono)
+    (t :weight bold))
+  "Face for a reflog identifier."
+  :group 'egg-faces)
+
 (defface egg-remote-mono
   '((((class color) (background light))
      :foreground "Orchid" :inherit bold)
@@ -5814,11 +5823,11 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                             (setq refs-end (point))
                             (+ (point) 2)))
 	(setq pseudo-ref (assoc-default sha1 sha1-pseudo-ref-alist))
-	(when pseudo-ref
-	  (set-text-properties 0 (length pseudo-ref) 
-			       (list 'face 'egg-branch-mono 'keymap remote-map 
-				     'help-echo (egg-tooltip-func))
-			       pseudo-ref))
+	;; (when pseudo-ref
+	;;   (set-text-properties 0 (length pseudo-ref) 
+	;; 		       (list 'face 'egg-branch-mono 'keymap remote-map 
+	;; 			     'help-echo (egg-tooltip-func))
+	;; 		       pseudo-ref))
 	(setq ref-string
 	      (when (and refs-start refs-end)
 		(egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist pseudo-ref
@@ -5830,6 +5839,10 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 				    (list :references
 					  (get-text-property 0 :references ref-string)))))
 	
+
+	(when (and (not ref-string) pseudo-ref)
+	  (setq ref-string pseudo-ref)
+	  (add-text-properties 0 (length ref-string) line-props ref-string))
 
         (setq separator (apply 'propertize " " line-props))
         (setq ref-string-len (if ref-string (length ref-string)))
@@ -5912,7 +5925,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                         (1+ (line-end-position))))
         head-line))))
 
-(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func)
+(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func &optional sha1-name-alist)
   "Use LOG-INSERT-FUNC to insert logs in current buffer then decorate it."
   (let ((beg (point)))
     (funcall log-insert-func)
@@ -5921,7 +5934,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                       egg-log-local-ref-map
                       egg-log-local-ref-map
                       egg-log-remote-ref-map
-                      egg-log-remote-site-map)))
+                      egg-log-remote-site-map
+		      sha1-name-alist)))
 
 ;; (defun egg-log-pop-to-file (file sha1 &optional other-win use-wdir-file line)
 ;;   (pop-to-buffer (if (or (equal (egg-current-sha1) sha1)
@@ -7445,6 +7459,108 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (if help (plist-put egg-internal-log-buffer-closure :help help)))
     (egg-log-buffer-simple-redisplay buffer 'init)
     (pop-to-buffer buffer)))
+
+
+(define-egg-buffer yggdrasil "*%s-yggdrasil@%s*"
+  "Major mode to display the output of git log.\\<egg-log-buffer-mode-map>
+Each line with a shorten sha1 representing a commit in the repo's history.
+\\[egg-log-buffer-next-ref] move the cursor to the next commit with a ref
+\\[egg-log-buffer-prev-ref] move the cursor to the previous commit line with a ref.
+\\[egg-buffer-cmd-refresh] refresh the display of the log buffer
+\\[egg-status] shows the repo's current status.
+
+\\{egg-log-buffer-mode-map}
+
+Each line representing a commit has extra keybindings:\\<egg-log-commit-map>
+\\[egg-log-buffer-insert-commit] fetch and show the commit's details.
+\\[egg-section-cmd-toggle-hide-show] hide/show the current commit's details
+\\[egg-section-cmd-toggle-hide-show-children] hide all the sub-blocks of the current commit's details.
+\\[egg-log-buffer-create-new-branch] create a new branch starting from the current commit.
+\\[egg-log-buffer-start-new-branch] start in a new branch from the current commit.
+\\[egg-log-buffer-checkout-commit] checkout the current commit.
+\\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit.
+C-u \\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the current commit,
+  replacing the old tag with the same name.
+\\[egg-log-buffer-atag-commit] create a new annotated tag pointing at the current commit.
+C-u \\[egg-log-buffer-atag-commit] create a new gpg-signed tag pointing at the current commit.
+\\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
+the index to the current commit if it's safe to do so
+ (the underlying git command is `reset --keep'.)
+C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
+the index to the current commit, the work dir will also be updated,
+uncommitted changes will be lost (the underlying git command is `reset --hard').
+C-u C-u \\[egg-log-buffer-attach-head] will let the user specify a mode to run git-reset.
+\\[egg-log-buffer-merge] will merge the current commit into HEAD.
+C-u \\[egg-log-buffer-merge] will merge the current commit into HEAD but will not
+auto-commit if the merge was successful.
+
+\\{egg-log-commit-map}
+
+Each ref on the commit line has extra extra keybindings:\\<egg-log-ref-map>
+\\[egg-log-buffer-rm-ref] delete the ref under the cursor.
+\\[egg-log-buffer-push-to-local] update HEAD or BASE using the ref.
+C-u \\[egg-log-buffer-push-to-local] update a local ref using the ref.
+C-u C-u \\[egg-log-buffer-push-to-local] update (non-ff allowed) a local ref using the ref.
+
+Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-local-ref-map>
+\\[egg-log-buffer-push-to-remote] upload to a remote the ref under the cursor.
+  for a remote-tracking local branch this would updating the tracking target.
+  for other local refs this  means uploading (or deleting) the local value
+   of the ref to the remote repository.
+\\[egg-log-buffer-push-head-to-local] update the local ref under the cursor with the current HEAD.
+
+Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-ref-map>
+\\[egg-log-buffer-fetch-remote-ref] download the new value of the ref from the remote repo.
+."
+  (egg-log-buffer-mode))
+
+(defun egg-yggdrasil-insert-logs (ref)
+  (let* ((mappings (egg-git-to-lines "--no-pager" "log" "-g" "--pretty=%H %gd%n" ref))
+	 (beg (point)) 
+	 sha1-list sha1-reflog-alist sha1 reflog)
+    (setq mappings (save-match-data (mapcar #'split-string mappings)))
+    (dolist (map mappings)
+      (setq sha1 (car map) reflog (cadr map))
+      (put-text-property 0 (length reflog) 'face 'egg-reflog-mono reflog)
+      (add-to-list 'sha1-list sha1)
+      (add-to-list 'sha1-reflog-alist (cons sha1 reflog)))
+
+    (egg-git-ok-args t (nconc (list "--no-pager" "log"
+				    (format "--max-count=%d" egg-log-HEAD-max-len)
+				    "--graph" "--topo-order"
+				    "--pretty=oneline" "--decorate=full" "--no-color")
+			      (cons ref sha1-list)))
+    (goto-char beg)
+    (egg-decorate-log egg-log-commit-map
+                      egg-log-local-ref-map
+                      egg-log-local-ref-map
+                      egg-log-remote-ref-map
+                      egg-log-remote-site-map
+		      sha1-reflog-alist)))
+
+(defun egg-yggdrasil ()
+  (interactive)
+  (let* ((egg-internal-current-state
+          (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
+         (default-directory (egg-work-tree-dir 
+			     (egg-git-dir (invoked-interactively-p))))
+         (buf (egg-get-yggdrasil-buffer 'create))
+	 (head-name (egg-branch-or-HEAD))
+         help)
+    (with-current-buffer buf
+      (when (memq :log egg-show-key-help-in-buffers)
+        (setq help egg-log-buffer-help-text))
+      (set
+       (make-local-variable 'egg-internal-log-buffer-closure)
+       (list :description (concat
+                             (egg-text "the lives of: " 'egg-text-2)
+                             (egg-text head-name 'egg-term))
+               :closure `(lambda () (egg-yggdrasil-insert-logs ,head-name))))
+      (if help (plist-put egg-internal-log-buffer-closure :help help))
+      (egg-log-buffer-redisplay buf 'init))
+    (cond
+     (egg-switch-to-buffer (switch-to-buffer buf))
+     (t (pop-to-buffer buf)))))
 
 ;;;========================================================
 ;;; commit search
