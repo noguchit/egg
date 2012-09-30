@@ -7512,7 +7512,9 @@ Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-l
 Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-ref-map>
 \\[egg-log-buffer-fetch-remote-ref] download the new value of the ref from the remote repo.
 ."
-  (egg-log-buffer-mode))
+  (egg-log-buffer-mode)
+  (setq major-mode 'egg-yggdrasil-buffer-mode
+	mode-name "Egg-Yggdrasil"))
 
 (defun egg-yggdrasil-insert-logs (ref)
   (let* ((mappings (egg-git-to-lines "--no-pager" "log" "-g" "--pretty=%H %gd%n" ref))
