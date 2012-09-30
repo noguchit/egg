@@ -5543,22 +5543,22 @@ Jump to line LINE if it's not nil."
   (if refs-only
       (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
                   "--graph" "--topo-order" "--simplify-by-decoration"
-                  "--pretty=oneline" "--decorate" "--no-color")
+                  "--pretty=oneline" "--decorate=full" "--no-color")
     (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
                 "--graph" "--topo-order"
-                "--pretty=oneline" "--decorate" "--no-color")))
+                "--pretty=oneline" "--decorate=full" "--no-color")))
 
 (defun egg-run-git-log-all (&optional refs-only)
   (if refs-only
       (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
                   "--graph" "--topo-order" "--simplify-by-decoration"
-                  "--pretty=oneline" "--decorate" "--all" "--no-color")
+                  "--pretty=oneline" "--decorate=full" "--all" "--no-color")
     (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
                 "--graph" "--topo-order"
-                "--pretty=oneline" "--decorate" "--all" "--no-color")))
+                "--pretty=oneline" "--decorate=full" "--all" "--no-color")))
 
 (defun egg-run-git-log-pickaxe (string)
-  (egg-git-ok t "log" "--pretty=oneline" "--decorate" "--no-color"
+  (egg-git-ok t "log" "--pretty=oneline" "--decorate=full" "--no-color"
               (concat "-S" string)))
 
 (defconst egg-log-commit-base-map
@@ -5738,7 +5738,37 @@ Jump to line LINE if it's not nil."
     "\\[egg-log-diff-cmd-visit-file-other-window]:visit version/line\n")
    ))
 
-(defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map)
+(defun egg--log-parse-decoration-refs (dec-ref-start dec-ref-end repo-refs-prop-alist
+						     pseudo-ref &rest extras-properties)
+  (let ((pos dec-ref-start)
+	ref-full-name ref
+	short-ref-list decorated-refs 
+	full-ref-list 
+	ref-string)
+    (goto-char pos)
+    (while (> (skip-chars-forward "^ ,:" dec-ref-end) 0)
+      (setq ref-full-name (buffer-substring-no-properties pos (point)))
+      (forward-char 2)
+      (setq pos (point))
+      (unless (or (equal ref-full-name "HEAD") 
+		  (equal ref-full-name "tag")
+		  (equal (subseq ref-full-name -5) "/HEAD"))
+	(setq ref (assoc-default ref-full-name repo-refs-prop-alist))
+	(when ref
+	  (add-to-list 'decorated-refs ref)
+	  (add-to-list 'full-ref-list ref-full-name)
+	  (add-to-list 'short-ref-list (car (get-text-property 0 :ref ref))))))
+    (when decorated-refs
+      (setq ref-string (mapconcat 'identity (cons pseudo-ref decorated-refs) " "))
+      (add-text-properties 0 (length ref-string)
+			   (nconc (list :references short-ref-list
+					:full-references full-ref-list) 
+				  extras-properties)
+			   ref-string))
+    ref-string))
+
+(defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map
+				   sha1-pseudo-ref-alist)
   "Decorate a log buffer.
 LINE-MAP is used as local keymap for a commit line.
 HEAD-MAP is used as local keymap for the name of a head.
@@ -5759,15 +5789,10 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
         (ref-string-len 0)
         (dashes-len 0)
         (min-dashes-len 300)
-        separator ref-string refs full-refs sha1
+        separator ref-string sha1 pseudo-ref
         line-props graph-len beg end sha-beg sha-end subject-beg
-        refs-start refs-end ref-alist
+        refs-start refs-end
         head-line)
-    (setq ref-alist (mapcar (lambda (pair)
-                              (cons
-                               (substring-no-properties (cdr pair))
-                               (car pair)))
-                            dec-ref-alist))
     (save-excursion
       (while (re-search-forward "\\([0-9a-f]\\{40\\}\\) .+$" nil t)
         (setq sha-beg (match-beginning 1)
@@ -5778,54 +5803,35 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
               refs-start nil)
         (setq graph-len (if (= beg sha-beg) 0 (- sha-beg beg 1))
               sha1 (buffer-substring-no-properties sha-beg sha-end)
-              subject-beg (if (/= (char-after subject-beg) ?\()
+              subject-beg (if (or (/= (char-after subject-beg) ?\()
+				  (not (member (buffer-substring-no-properties 
+						subject-beg (+ subject-beg 6))
+					       '("(refs/" "(tag: " "(HEAD,"))))
                               subject-beg
                             (setq refs-start (1+ subject-beg))
                             (goto-char subject-beg)
-                            (skip-chars-forward "^)")
+			    (skip-chars-forward "^)")
                             (setq refs-end (point))
                             (+ (point) 2)))
-        (setq refs (when refs-start
-                     (save-match-data
-                       (delq nil
-			     (mapcar (lambda (lref)
-				       (if (and (>= (length lref) 5) 
-						(string-equal (substring lref 0 5) "tag: "))
-					   (substring lref 5)
-					 (if (and (>= (length lref) 6) 
-						  (string-equal (substring lref -5) "/HEAD"))
-					     nil
-					   lref)))
-				     (split-string
-				      (buffer-substring-no-properties (+ sha-end 2)
-								      refs-end)
-				      ", +" t))))))
-
-        (setq full-refs (mapcar (lambda (full-ref-name)
-                                  (cdr (assoc full-ref-name ref-alist)))
-                                refs))
-
+	(setq pseudo-ref (assoc-default sha1 sha1-pseudo-ref-alist))
+	(when pseudo-ref
+	  (set-text-properties 0 (length pseudo-ref) 
+			       (list 'face 'egg-branch-mono 'keymap remote-map 
+				     'help-echo (egg-tooltip-func))
+			       pseudo-ref))
+	(setq ref-string
+	      (when (and refs-start refs-end)
+		(egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist pseudo-ref
+						:navigation sha1 :commit sha1)))
         ;; common line decorations
-        (setq line-props (list :navigation sha1 :commit sha1))
-
-        (if line-map
-            (setq line-props (nconc (list 'keymap line-map)
-                                    line-props)))
-        (when refs
-          (setq line-props (nconc (list :references refs)
-                                  line-props)))
-
+        (setq line-props (nconc (list :navigation sha1 :commit sha1)
+				(if line-map (list 'keymap line-map))
+				(if ref-string 
+				    (list :references
+					  (get-text-property 0 :references ref-string)))))
+	
 
         (setq separator (apply 'propertize " " line-props))
-        (setq ref-string
-              (if full-refs
-                  (propertize
-                   (mapconcat (lambda (full-ref-name)
-                                (cdr (assoc full-ref-name
-                                            dec-ref-alist)))
-                              full-refs separator)
-                   :navigation sha1 :commit sha1
-                   :references refs)))
         (setq ref-string-len (if ref-string (length ref-string)))
 
         ;; entire line
@@ -5845,7 +5851,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                            'help-echo (egg-tooltip-func))
 
         (setq dashes-len (- 300 graph-len 1
-                            (if refs (1+ ref-string-len) 0)))
+                            (if ref-string (1+ ref-string-len) 0)))
         (setq min-dashes-len (min min-dashes-len dashes-len))
 
         (put-text-property sha-beg (1+ sha-beg)
@@ -5856,7 +5862,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                                          (nconc (list 'face 'egg-graph)
                                                 line-props))
                                   separator
-                                  (if refs
+                                  (if ref-string
                                       (list ref-string separator))))
 ;;; 	(when (string= sha1 head-sha1)
 ;;; 	  (overlay-put ov 'face 'egg-log-HEAD)
@@ -7341,12 +7347,12 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defsubst egg-run-git-file-log-HEAD (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
               "--graph" "--topo-order" "--no-color"
-              "--pretty=oneline" "--decorate" "--" file))
+              "--pretty=oneline" "--decorate=full" "--" file))
 
 (defsubst egg-run-git-file-log-all (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
               "--graph" "--topo-order" "--no-color"
-              "--pretty=oneline" "--decorate" "--all" "--" file))
+              "--pretty=oneline" "--decorate=full" "--all" "--" file))
 
 
 (defun egg-log-buffer-decorate-logs-simple-1 (log-insert-func arg
@@ -7477,7 +7483,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		     (lambda ()
                        (egg-git-ok t "log" "--max-count=10000" "--graph"
                                    "--topo-order" "--pretty=oneline" "--no-color"
-                                   "--decorate" ,head-name ,sha1))))))
+                                   "--decorate=full" ,head-name ,sha1))))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
@@ -7526,7 +7532,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		    (with-current-buffer log-buffer
 		      (funcall egg-buffer-refresh-func log-buffer))))
 		  (current-buffer) closure)
-	    (nconc (list "--no-pager" "log" "--pretty=oneline" "--decorate" "--no-color")
+	    (nconc (list "--no-pager" "log" "--pretty=oneline" 
+			 "--decorate=full" "--no-color")
 		   args)))
 
 	  ((stringp fetched-data)
@@ -7547,7 +7554,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 (defun egg-insert-n-decorate-pickaxed-logs (args)
   (let ((beg (point)))
     (egg-git-ok-args t 
-		     (nconc (list "log" "--pretty=oneline" "--decorate" "--no-color")
+		     (nconc (list "log" "--pretty=oneline" "--decorate=full" "--no-color")
 			    args))
     (goto-char beg)
     (egg-decorate-log egg-query:commit-commit-map
@@ -7685,7 +7692,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
 ;;; reflog
 ;;;========================================================
 (defsubst egg-run-reflog-branch (branch)
-  (egg-git-ok t "log" "-g" "--pretty=oneline" "--decorate" "--no-color"
+  (egg-git-ok t "log" "-g" "--pretty=oneline" "--decorate=full" "--no-color"
               (format "--max-count=%d" egg-log-HEAD-max-len)
               branch))
 
