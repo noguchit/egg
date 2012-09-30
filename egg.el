@@ -7519,6 +7519,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (let* ((mappings (egg-git-to-lines "--no-pager" "log" "-g" "--pretty=%H %gd%n" ref))
 	 (beg (point)) 
 	 (reflog-0 (concat ref "@{0}"))
+	 (head-name (egg-branch-or-HEAD))
 	 sha1-list sha1-reflog-alist sha1 reflog dup)
     (setq mappings (save-match-data (mapcar #'split-string mappings)))
     (dolist (map mappings)
@@ -7534,7 +7535,9 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 				    (format "--max-count=%d" egg-log-HEAD-max-len)
 				    "--graph" "--topo-order"
 				    "--pretty=oneline" "--decorate=full" "--no-color")
-			      (cons ref sha1-list)))
+			      (if (equal head-name ref)
+				  (cons ref sha1-list)
+				(nconc (list ref head-name) sha1-list))))
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
                       egg-log-local-ref-map
@@ -7543,14 +7546,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                       egg-log-remote-site-map
 		      sha1-reflog-alist)))
 
-(defun egg-yggdrasil ()
-  (interactive)
+(defun egg-yggdrasil (&optional ref-name)
+  (interactive (let ((head-name (egg-branch-or-HEAD)))
+		 (list (if current-prefix-arg
+			   (egg-read-rev "show the reflogs of: " 
+					 (or (egg-string-at-point) head-name))
+			 head-name))))
   (let* ((egg-internal-current-state
           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
          (default-directory (egg-work-tree-dir 
 			     (egg-git-dir (invoked-interactively-p))))
          (buf (egg-get-yggdrasil-buffer 'create))
-	 (head-name (egg-branch-or-HEAD))
+	 (ref-name (or ref-name (egg-branch-or-HEAD)))
          help)
     (with-current-buffer buf
       (when (memq :log egg-show-key-help-in-buffers)
@@ -7559,8 +7566,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
        (make-local-variable 'egg-internal-log-buffer-closure)
        (list :description (concat
                              (egg-text "the lives of: " 'egg-text-2)
-                             (egg-text head-name 'egg-term))
-               :closure `(lambda () (egg-yggdrasil-insert-logs ,head-name))))
+                             (egg-text ref-name 'egg-term))
+               :closure `(lambda () (egg-yggdrasil-insert-logs ,ref-name))))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
       (egg-log-buffer-redisplay buf 'init))
     (cond
