@@ -2809,7 +2809,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (set-keymap-parent map egg-diff-section-map)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
-    (define-key map (kbd "x") 'egg-diff-section-cmd-revert-to-head)
+    (define-key map (kbd "DEL") 'egg-diff-section-cmd-revert-to-head)
     (define-key map [C-down-mouse-2] 'egg-status-popup-staged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-staged-diff-menu)
 
@@ -2830,7 +2830,7 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-wdir-diff-section-map)
     (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
     (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
-    (define-key map (kbd "x") 'egg-diff-section-cmd-revert-to-head)
+    (define-key map (kbd "DEL") 'egg-diff-section-cmd-revert-to-head)
 
     (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-diff-menu)
     (define-key map [C-mouse-2] 'egg-status-popup-unstaged-diff-menu)
@@ -7622,50 +7622,44 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map)))
 
-;; (defun egg-search-changes (level &optional string-at-point)
-;;   (interactive (list (prefix-numeric-value current-prefix-arg)
-;; 		     (egg-string-at-point)))
-;;   (let* ((file-name (buffer-file-name))
-;; 	 (file-git-name (and file-name (egg-file-git-name file-name)))
-;; 	 (mark (egg-log-buffer-find-first-mark ?*))
-;; 	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
-;; 	 (revs (and start-rev (list (concat start-rev "..HEAD"))))
-;; 	 search-type term case-insensitive)
-;;     (cond ((< level 3) 			;; simple string search
-;; 	   (egg-do-search-changes string-at-point nil nil nil file-git-name level revs))
-;; 	  ((< level 15)			;; search posix regexp
-;; 	   (egg-do-search-changes string-at-point t nil nil file-git-name level revs))
-;; 	  ((< level 63)		       	;; search for line
-;; 	   (egg-do-search-changes string-at-point nil t nil file-git-name level revs))
-;; 	  (t				;; prompt
-;; 	   (setq search-type (read-key-sequence
-;; 			      "search type: (s)tring, (r)egex or (l)ine? "))
-;; 	   (setq search-type (string-to-char search-type))
-;; 	   (unless (memq search-type '(?s ?r ?l))
-;; 	     (error "Must be one of s, r or l (%c)!!!" search-type))
-;; 	   (if (eq search-type ?s)
-;; 	       (egg-do-search-changes nil string-at-point nil nil file-git-name level revs)
-;; 	     (setq case-insensitive (y-or-n-p "ignore case when search? "))
-;; 	     (egg-do-search-changes string-at-point (eq search-type ?r)
-;; 				    (eq search-type ?l) case-insensitive
-;; 				    file-git-name level revs))))))
 
-(defun egg-search-changes (level &optional string-at-point)
+(defun egg-search-file-changes (level &optional string-at-point)
+  "Search file's history from HEAD for changes introducing/removing a term.
+STRING-AT-POINT is the default term. If a BASE ref was marked, then 
+restrict the search to BASE..HEAD."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
+  (egg-search-changes level string-at-point (buffer-file-name)))
+
+(defun egg-search-changes (level &optional string-at-point file-name)
+  "Search history from HEAD for changes introducing/removing a term.
+STRING-AT-POINT is the default term. If a BASE ref was marked, then 
+restrict the search to BASE..HEAD."
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)
+		     nil))
   (let* ((mark (egg-log-buffer-find-first-mark ?*))
 	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 (revs (and start-rev (list (concat start-rev "..HEAD")))))
-    (egg-search-changes-1 level string-at-point revs)))
+    (egg-search-changes-1 level string-at-point revs file-name)))
 
-(defun egg-search-changes-all (level &optional string-at-point)
+(defun egg-search-file-changes-all (level &optional string-at-point)
+  "Search file's full history for changes introducing/removing a term.
+STRING-AT-POINT is the default term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (egg-search-changes-1 level string-at-point (list "--all")))
+  (egg-search-changes-all level string-at-point (buffer-file-name)))
 
-(defun egg-search-changes-1 (level initial-string revs)
-  (let* ((file-name (buffer-file-name))
-	 (file-git-name (and file-name (egg-file-git-name file-name)))
+(defun egg-search-changes-all (level &optional string-at-point file-name)
+  "Search entire history for changes introducing/removing a term.
+STRING-AT-POINT is the default term."
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)
+		     nil))
+  (egg-search-changes-1 level string-at-point (list "--all") file-name))
+
+(defun egg-search-changes-1 (level initial-string revs file-name)
+  (let ((file-git-name (and file-name (egg-file-git-name file-name)))
 	 search-type term case-insensitive)
     (cond ((< level 3) 			;; simple string search
 	   (egg-do-search-changes initial-string nil nil nil file-git-name level revs))
@@ -8525,15 +8519,6 @@ with the current contents in work-dir."
   (define-key egg-minor-mode-map (read-kbd-macro val) egg-file-cmd-map)
   (custom-set-default var val))
 
-;; (defun egg-file-log-pickaxe (level string)
-;;   "Search file's history for STRING.
-;; LEVEL is nil unless invoked as a command."
-;;   (interactive (list (prefix-numeric-value current-prefix-arg) 
-;; 		     (unless current-prefix-arg
-;; 		       (read-string "search history for: " (egg-string-at-point)))))
-;;   (egg-do-search-changes string (> level 3) (> level 15) buffer-file-name))
-(defalias 'egg-file-log-pickaxe 'egg-search-changes)
-
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
   (define-key map (kbd "b") 'egg-start-new-branch)
@@ -8551,7 +8536,8 @@ with the current contents in work-dir."
   (define-key map (kbd "u") 'egg-file-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
-  (define-key map (kbd "/") 'egg-file-log-pickaxe)
+  (define-key map (kbd "/") 'egg-search-file-changes)
+  (define-key map (kbd "?") 'egg-search-changes)
   (define-key map (kbd "=") 'egg-file-diff)
   (define-key map (kbd "~") 'egg-file-version-other-window))
 
