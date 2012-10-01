@@ -3544,6 +3544,7 @@ exit code ACCEPTED-CODE is considered a success."
   (let ((map (make-sparse-keymap "Egg:Buffer")))
     (define-key map (kbd "q") 'egg-quit-buffer)
     (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
+    (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     map)
@@ -5693,6 +5694,7 @@ Jump to line LINE if it's not nil."
 (defconst egg-log-buffer-base-map
   (let ((map (make-sparse-keymap "Egg:LogBufferBase")))
     (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map "G" 'egg-log-buffer-style-command)
     (define-key map "n" 'egg-log-buffer-next-ref)
     (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-log-buffer-prev-ref)
@@ -5711,6 +5713,11 @@ Jump to line LINE if it's not nil."
     (define-key map "s" 'egg-status)
     (define-key map "l" 'egg-log)
     map))
+
+(defun egg-log-buffer-style-command ()
+  (interactive)
+  (call-interactively (or (plist-get egg-internal-log-buffer-closure :command)
+			  #'egg-buffer-cmd-refresh)))
 
 (defun egg-log-style-buffer-mode (mode name &optional map hook)
   (kill-all-local-variables)
@@ -7279,6 +7286,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                              (egg-text ref-name 'egg-term))
                :closure `(lambda () (egg-yggdrasil-insert-logs ,ref-name)))))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
+      (plist-put egg-internal-log-buffer-closure :command 'egg-log)
       (egg-log-buffer-redisplay buf 'init))
     (cond
      (egg-switch-to-buffer (switch-to-buffer buf))
@@ -7286,19 +7294,6 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 ;;;========================================================
 ;;; file history
 ;;;========================================================
-;; (define-egg-buffer file-log "*%s-file-log@%s*"
-;;   (kill-all-local-variables)
-;;   (setq buffer-read-only t)
-;;   (setq major-mode 'egg-file-log-buffer-mode
-;;         mode-name  "Egg-FileHistory"
-;;         mode-line-process ""
-;;         truncate-lines t)
-;;   (use-local-map egg-log-buffer-mode-map)
-;;   (set (make-local-variable 'egg-buffer-refresh-func)
-;;        'egg-log-buffer-simple-redisplay)
-;;   (set (make-local-variable 'egg-log-buffer-comment-column) 0)
-;;   (setq buffer-invisibility-spec nil)
-;;   (run-mode-hooks 'egg-file-log-buffer-mode-hook))
 (define-egg-buffer file-log "*%s-file-log@%s*"
   (egg-log-style-buffer-mode 'egg-file-log-buffer-mode
 			     "Egg-FileHistory"
@@ -7502,22 +7497,18 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       :paths (list (egg-file-git-name file-name)))))
       (when (memq :file-log egg-show-key-help-in-buffers)
         (setq help egg-file-log-help-text))
-      (if help (plist-put egg-internal-log-buffer-closure :help help)))
+      (if help (plist-put egg-internal-log-buffer-closure :help help))
+      (plist-put egg-internal-log-buffer-closure :command
+		 `(lambda (&optional all)
+		    (interactive "P")
+		    (egg-file-log ,file-name all))))
+      
     (egg-log-buffer-simple-redisplay buffer 'init)
     (pop-to-buffer buffer)))
 
 ;;;========================================================
 ;;; commit search
 ;;;========================================================
-;; (defconst egg-query:commit-commit-map
-;;   (let ((map (make-sparse-keymap "Egg:LogQueryCommit")))
-;;     (set-keymap-parent map egg-hide-show-map)
-;;     (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
-;;     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
-;;     (define-key map (kbd "a") 'egg-log-buffer-attach-head)
-;;     (define-key map (kbd "RET") 'egg-log-locate-commit)
-;;     (define-key map (kbd "C-c C-c") 'egg-log-locate-commit)
-;;     map))
 (defconst egg-query:commit-commit-map
   (let ((map (make-sparse-keymap "Egg:LogQueryCommit")))
     (set-keymap-parent map egg-log-commit-simple-map)
@@ -7640,8 +7631,12 @@ restrict the search to BASE..HEAD."
 		     nil))
   (let* ((mark (egg-log-buffer-find-first-mark ?*))
 	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
-	 (revs (and start-rev (list (concat start-rev "..HEAD")))))
-    (egg-search-changes-1 level string-at-point revs file-name)))
+	 (revs (and start-rev (list (concat start-rev "..HEAD"))))
+	 (closure (egg-search-changes-1 level string-at-point revs file-name)))
+    (plist-put closure :command
+	       `(lambda (level)
+		  (interactive "p")
+		  (egg-search-changes level (egg-string-at-point) ,file-name)))))
 
 (defun egg-search-file-changes-all (level &optional string-at-point)
   "Search file's full history for changes introducing/removing a term.
@@ -7656,7 +7651,11 @@ STRING-AT-POINT is the default term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)
 		     nil))
-  (egg-search-changes-1 level string-at-point (list "--all") file-name))
+  (plist-put (egg-search-changes-1 level string-at-point (list "--all") file-name)
+	     :command 
+	     `(lambda (level)
+		(interactive "p")
+		(egg-search-changes-all level (egg-string-at-point) ,file-name))))
 
 (defun egg-search-changes-1 (level initial-string revs file-name)
   (let ((file-git-name (and file-name (egg-file-git-name file-name)))
@@ -7728,7 +7727,7 @@ non-nil then restrict the search to commits modifying FILE-NAME."
          (func `(lambda ()
                   (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
 		  ))
-	 help)
+	 help closure)
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
            (list :description desc :closure func
@@ -7740,8 +7739,10 @@ non-nil then restrict the search to commits modifying FILE-NAME."
       (when (memq :query egg-show-key-help-in-buffers)
         (setq help egg-log-style-help-text))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
+      (setq closure egg-internal-log-buffer-closure)
       (egg-query:commit-buffer-rerun buf 'init))
-    (pop-to-buffer buf)))
+    (pop-to-buffer buf)
+    closure))
 ;;;========================================================
 ;;; reflog
 ;;;========================================================
