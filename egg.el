@@ -3078,9 +3078,11 @@ positions of the sequence as well as the decorations.
          (conf-beg-no	8)
          (conf-div-no	9)
          (conf-end-no	10)
-         (del-no 	11)
-         (add-no 	12)
-         (none-no	13)
+         (cc-del-no 	11)
+         (cc-add-no 	12)
+         (del-no 	13)
+         (add-no 	14)
+         (none-no	15)
 
          (regexp
           (concat "^\\(?:"
@@ -3094,9 +3096,11 @@ positions of the sequence as well as the decorations.
                   "\\+\\+<<<<<<< \\(.+\\)\\(?::.+\\)\\|";8 conflict start
                   "\\(\\+\\+=======\\)\\|"		;9 conflict div
                   "\\+\\+>>>>>>> \\(.+\\)\\(?::.+\\)\\|";10 conflict end
-                  "\\(-.*\\)\\|"			;11 del
-                  "\\(\\+.*\\)\\|"			;12 add
-                  "\\( .*\\)"				;13 none
+                  "\\( -.*\\)\\|"			;11 cc-del
+                  "\\( \\+.*\\)\\|"			;12 cc-add
+                  "\\(-.*\\)\\|"			;13 del
+                  "\\(\\+.*\\)\\|"			;14 add
+                  "\\( .*\\)"				;15 none
                   "\\)$"))
 
          ;; where the hunk end?
@@ -3105,7 +3109,7 @@ positions of the sequence as well as the decorations.
          (diff-end-re "^diff ")
 
          sub-beg sub-end head-end m-b-0 m-e-0 m-b-x m-e-x
-         last-diff last-cc)
+         last-diff last-cc current-delta-is)
 
     (save-match-data
       (save-excursion
@@ -3114,10 +3118,12 @@ positions of the sequence as well as the decorations.
           (setq sub-beg (match-beginning 0)
                 m-b-0 sub-beg
                 m-e-0 (match-end 0))
-          (cond ((match-beginning del-no) ;; del
+          (cond ((or (match-beginning del-no)
+		     (and (match-beginning cc-del-no) (eq current-delta-is 'cc-diff))) ;; del
                  (put-text-property m-b-0 m-e-0 'face 'egg-diff-del))
 
-                ((match-beginning add-no) ;; add
+                ((or (match-beginning add-no)
+		     (and (match-beginning cc-add-no) (eq current-delta-is 'cc-diff))) ;; add
                  (put-text-property m-b-0 m-e-0 'face 'egg-diff-add))
 
                 ((match-beginning none-no) ;; unchanged
@@ -3208,7 +3214,9 @@ positions of the sequence as well as the decorations.
                               (egg-make-diff-info
                                (match-string-no-properties diff-no)
                                sub-beg sub-end head-end))
-                  sub-beg sub-end m-e-0 diff-map 'egg-compute-navigation))
+                  sub-beg sub-end m-e-0 diff-map 'egg-compute-navigation)
+		 
+		 (setq current-delta-is 'diff))
 
                 ((match-beginning cc-diff-no) ;; cc-diff
                  (setq m-b-x (match-beginning cc-diff-no)
@@ -3225,7 +3233,9 @@ positions of the sequence as well as the decorations.
                                (match-string-no-properties cc-diff-no)
                                sub-beg sub-end head-end))
                   sub-beg sub-end m-e-0 cc-diff-map
-                  'egg-compute-navigation))
+                  'egg-compute-navigation)
+
+		 (setq current-delta-is 'cc-diff))
 
                 ((match-beginning index-no) ;; index
                  (setq m-b-x (match-beginning index-no)
@@ -3516,15 +3526,19 @@ exit code ACCEPTED-CODE is considered a success."
   (goto-char (previous-single-property-change (point) nav-prop
                                               nil (point-min))))
 
-(defun egg-buffer-cmd-navigate-next ()
+(defun egg-buffer-cmd-navigate-next (&optional at-level)
   "Move to the next section."
-  (interactive)
-  (egg-buffer-cmd-next-block :navigation))
+  (interactive "P")
+  (egg-buffer-cmd-next-block
+   (if (not at-level) :navigation
+     (or (get-text-property (point) :sect-type) :navigation))))
 
-(defun egg-buffer-cmd-navigate-prev ()
+(defun egg-buffer-cmd-navigate-prev (&optional at-level)
   "Move to the previous section."
-  (interactive)
-  (egg-buffer-cmd-prev-block :navigation))
+  (interactive "P")
+  (egg-buffer-cmd-prev-block 
+   (if (not at-level) :navigation
+     (or (get-text-property (point) :sect-type) :navigation))))
 
 (defconst egg-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:Buffer")))
