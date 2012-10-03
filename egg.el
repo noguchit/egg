@@ -432,7 +432,7 @@ Many Egg faces inherit from this one by default."
   :type '(repeat (choice (const :tag "Repository Info" repo)
                          (const :tag "Unstaged Changes Section" unstaged)
                          (const :tag "Staged Changes Section" staged)
-                         (const :tag "Untracked/Uignored Files" untracked))))
+                         (const :tag "Untracked/Unignored Files" untracked))))
 
 
 (defcustom egg-commit-buffer-sections '(staged unstaged untracked)
@@ -440,7 +440,7 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type '(repeat (choice (const :tag "Unstaged Changes Section" unstaged)
                          (const :tag "Staged Changes Section" staged)
-                         (const :tag "Untracked/Uignored Files" untracked))))
+                         (const :tag "Untracked/Unignored Files" untracked))))
 
 
 (defcustom egg-refresh-index-in-backround nil
@@ -4918,6 +4918,7 @@ the source revision."
 						     (buffer-file-name)))))
 
 (defun egg-stage-all-files ()
+  "Stage all tracked files in the repository."
   (interactive)
   (let ((default-directory (egg-work-tree-dir))
 	(egg--do-no-output-message "staged all tracked files's modifications"))
@@ -8781,6 +8782,29 @@ egg in current buffer.\\<egg-minor-mode-map>
               (setq nav-point (point)
                     prev-point (point))))))
     nav-point))
+
+;; misc
+(defun egg-insert-texi-for-command ()
+  (interactive)
+  (let* ((func (symbol-at-point))
+	 (name (or (and func (symbol-name func)) (completing-read "function: " obarray 'fboundp t nil nil)))
+	 (doc (documentation (or func (intern name)))))
+    (forward-line 1)
+    (insert "@deffn Command " name "\n"
+	    "@anchor{" name "}\n"
+	    doc "\n"
+	    "@end deffn\n")))
+
+(defun egg-update-texi-command-doc ()
+  (interactive)
+  (let (fn)
+    (save-excursion
+      (goto-char (line-beginning-position))
+      (when (looking-at "@deffn Command \\(egg-.+\\)\\s-*$")
+	(setq fn (match-string-no-properties 1))
+	(forward-line 1)
+	(unless (looking-at "@anchor{")
+	  (insert "@anchor{" fn "}\n"))))))
 
 (run-hooks 'egg-load-hook)
 (provide 'egg)

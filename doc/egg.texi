@@ -46,7 +46,9 @@ compatibility however are welcome.
 * Diff::                        
 * Stash::                       
 * Blame::                       
+* Customizations::              
 * Commands::                    
+
 @end menu
 
 @node Rant, Acknowledgements, Top, Top
@@ -114,49 +116,50 @@ open a file in a git repo from within emacs. Et voila!
 When the @code{egg} library is loaded, @code{egg-minor-mode} would be
 activated when visiting a file in a git repository. Whether or not, the
 current file is tracked by git, @kbd{C-x v i}
-@ref{egg-file-stage-current-file} would stage the file, i.e. add its contents
+(@ref{egg-file-stage-current-file}) would stage the file, i.e. add its contents
 into the index. If you want to compare the current contents of the file
 and its staged contents in the index, type @kbd{C-x v =}
-@ref{egg-file-diff}. That key sequences open a @sc{Egg Diff} buffer to
+(@ref{egg-file-diff}). That key sequences open a @sc{Egg Diff} buffer to
 show the deltas, @xref{Diff}. With a prefix,
 i.e. @kbd{C-u C-x v =}, the command would prompt for a revision (instead
 of using the index) to compare with the file's current contents. If you
-prefer using ediff, then type @kbd{C-x v e},
-@ref{egg-file-ediff}. Again, with the @kbd{C-u} prefix, this command
+prefer using ediff, then type @kbd{C-x v e}
+(@ref{egg-file-ediff}). Again, with the @kbd{C-u} prefix, this command
 will also let the user specify the revision instead of using the
 index. After comparing the file's contents with the index, you might
-decide to throw all current modifications. @kbd{C-x v u},
-@ref{egg-file-cancel-modifications}, would revert the file's contents
+decide to throw all current modifications. @kbd{C-x v u}
+(@ref{egg-file-cancel-modifications}), would revert the file's contents
 back to its contents in the index. Some times, you just want to look a
 an older, revision of a file, and there's an egg command for that:
-@kbd{C-x v ~}, @ref{egg-file-version-other-window}. This command, by
+@kbd{C-x v ~} (@ref{egg-file-version-other-window}). This command, by
 default, show the contents of the current file from the index. With a
 prefix, @kbd{C-u C-x v ~}, the command would prompt for a git revision
 then show the file's contents from that revision. If you want, instead,
 replace the file's current contents with its contents from a revision,
-you can use @kbd{C-x v o}, @ref{egg-file-checkout-other-version}.
+you can use @kbd{C-x v o} (@ref{egg-file-checkout-other-version}).
 
 @unnumberedsec Other parts of Egg
 The rest of the minor-mode's key bindings are primarily for launching
-egg special buffers to perform various git related tasks.  @kbd{C-x v s}
-lauches the @sc{Status Buffer}, @sc{Egg}'s most important buffer, to
-examine the current state of HEAD, @xref{Status}. @kbd{C-x v l},
-launches the @sc{Log Buffer}, to view the commit DAG to also perform
-DAG-related operations such as branching, pushing, merging,
-etc. @xref{Log}. If you are an advanced git user, and has changes
-stashed away in the current repo, @kbd{C-x v S} will show the current
-stack of stashed WIPs, @xref{Stash}. Another advanced but oh so useful
-command is @ref{egg-search-file-changes}, bound to @kbd{C-x v /}. This
-command walks the commit DAG and find those which introduced or removed
-the @emph{search term}, @xref{Pickaxe}.
+egg special buffers to perform various git related tasks.  @kbd{C-x v
+s} (@ref{egg-status}) launches the @sc{Status Buffer}, @sc{Egg}'s most
+important buffer, to examine the current state of HEAD,
+@xref{Status}. @kbd{C-x v l} (@ref{egg-log}), launches the @sc{Log
+Buffer}, to view the commit DAG to also perform DAG-related operations
+such as branching, pushing, merging, etc. @xref{Log}. If you are an
+advanced git user, and has changes stashed away in the current repo,
+@kbd{C-x v S} (@ref{egg-stash}) will show the current stack of stashed
+WIPs, @xref{Stash}. Another advanced but oh so useful command is
+@ref{egg-search-file-changes}, bound to @kbd{C-x v /}. This command
+walks the commit DAG and find those which introduced or removed the
+@emph{search term}, @xref{Pickaxe}.
 
 @unnumberedsec Pointing Finger
-@kbd{C-x v a}, @xref{Blame}, would bring the current
-buffer in-or-out of annotation-mode, or more accurately, @emph{blame
-mode}. In blame-mode, editing is disabled (the buffer is in read-only
-mode). Block of lines are prefix with a header describing the
-@emph{last} commit that modified those lines, @xref{Blame}, for more
-details.
+@kbd{C-x v a} (@ref{egg-file-toggle-blame-mode}), would bring the
+current buffer in-or-out of annotation-mode, or more accurately,
+@emph{blame mode}. In blame-mode, editing is disabled (the buffer is
+in read-only mode). Block of lines are prefix with a header describing
+the @emph{last} commit that modified those lines, @xref{Blame}, for
+more details.
 
 @unnumberedsec Commiting Changes
 Once you're happy with your changes to the work tree and you've already
@@ -203,8 +206,95 @@ depending on prefix, i.e. the number of @kbd{C-u}s before @kbd{C-x v c}, @xref{C
 @end table
 
 @node Status, Commit, File, Top
-@unnumbered Status Buffer
-@anchor{egg-status}
+@unnumbered Status Buffer, 
+This special buffer is probably @sc{Egg}'s most important special buffer. It's launched by
+the @ref{egg-status}. This buffer is designed to work with the index and HEAD. As its name
+indicates, it show the current status of the repository. It's also the place where user goes,
+to resolve conflicts during merge or rebase.
+
+By default, the status buffer displays a @emph{lot} of informations. However, you can customize
+what and how it displays informations. For @emph{what}, @xref{egg-status-buffer-sections}, for
+@emph{how}, @xref{egg-buffer-hide-sub-blocks-on-start}, and @xref{egg-buffer-hide-sub-blocks-on-start}.
+
+By default, the status buffer display 4 sections. On the top is the @sc{Repo} section where it shows
+the current branch (or current commit if HEAD was detached), the sha1, the repository and optionally
+the @sc{Help} section (the Help section can be initally hidden @pxref{egg-buffer-hide-help-on-start}, 
+or simply omitted @pxref{egg-show-key-help-in-buffers}). Following the repo section is the @sc{Unstaged}
+section. This section shows a sequence of diffs, describing difference between the index and the
+work-tree. Next comes the @sc{Staged} section, this section also contains a sequence of diffs but they
+describe the difference between HEAD and the index. Last is the @sc{Untracked} section where the
+untracked files in the repository are listed.
+
+@unnumberedsec Sections in the Status Buffer
+@anchor{status-sections} There are several command to help with
+navigation within the @sc{Status Buffer}. @kbd{n}
+(@ref{egg-buffer-cmd-navigate-next}) and @kbd{p}
+(@ref{egg-buffer-cmd-navigate-prev}) will jump from one section (or
+subsection) to the next/previous (sub)section. If the cursor was on a
+diff header, then @kbd{n} would move the cursor to the first hunk of
+the diff. To move to the next/previous section of the @emph{same}
+type, use the @kbd{C-u} prefix. Thus, if your cursor was on a diff
+header, @kbd{C-u n} will move it to the next diff header.
+
+Sections and subsections can be hidden. @kbd{h}
+(@ref{egg-section-cmd-toggle-hide-show}) will toggle a section's
+hide/show state and @kbd{H}
+(@ref{egg-section-cmd-toggle-hide-show-children}) will hide/show all
+@emph{sub}-sections of a (sub)section. You can hide all sections in
+the buffer with @kbd{C-c C-h} (@ref{egg-buffer-hide-all}) or show them
+all with @kbd{C-u C-c C-h}.
+
+In sections that display diffs sequence, @key{RET} will relocate the
+relative position of the cursor back in the original file. If the
+cursor was on the diff header of the file @file{foo.h}, then @key{RET}
+(@ref{egg-diff-section-cmd-visit-file-other-window}) will open that
+file. If the cursor was on line 5 of a hunk displaying lines 112 to
+119 of @file{foo.h}, then @key{RET}
+(@ref{egg-hunk-section-cmd-visit-file-other-window}) will open
+@file{foo.h} and jump to line 117.  For fans of @sc{Ediff}, @kbd{=}
+(@ref{egg-diff-section-cmd-ediff}) will launch ediff comparing the 2
+operands in the diff under the cursor.
+
+@unnumberedsec Unstaged Changes
+The Unstaged section shows the difference between the index and the
+work-tree.  The diffs shown can be a the regular diff or combined diff
+in the case you have unmerged changes. Normally, the @kbd{=} key
+(@ref{egg-unstaged-section-cmd-ediff}) will launch @code{ediff2} but
+if it was an combined diff, then @code{ediff3} would be used
+intead. @xref{egg-unmerged-section-cmd-ediff3}. The order in
+@code{ediff3} is: @sc{Theirs}, @sc{Ours} and @sc{WorkTree} for
+conflicts during merge. For conflicts during rebase: @sc{Ours},
+@sc{Theirs} and @sc{WorkTree}.  The @kbd{s}
+(@ref{egg-diff-section-cmd-stage}) key is used to move contents into
+the index. If the cursor was on a diff header, then @kbd{s} would
+stage the entire file. If the cursor was on a hunk, the @kbd{s}
+(@ref{egg-hunk-section-cmd-stage}) would only stage that hunk. To
+stage all local modifications, use @kbd{S}
+(@ref{egg-stage-all-files}). If instead of staging, you want to throw
+away the local modifications, the use the @kbd{u} key. Again, if the
+cursor was on a hunk, then only that hunk would be thrown away
+(@pxref{egg-hunk-section-cmd-undo}). On the other hand, if the cursor
+was on a diff header, then all local modifications to that file would
+be thrown away (@pxref{egg-diff-section-cmd-undo}). To throw away all
+unstaged and @emph{staged} modifications of a file, put the cursor of
+the diff header and type @key{DEL}
+(@ref{egg-diff-section-cmd-revert-to-head}). This command will revert
+the file back to its contents in HEAD.
+
+@unnumberedsec Staged Changes
+The Staged section shows the difference between the index and HEAD.
+The key bindings in this section are very similar to the Unstaged
+section. All the navigation commands are the same. @kbd{=}
+(@ref{egg-staged-section-cmd-ediff3}) will launch @code{ediff3} to
+compare HEAD, the index and the work tree. @kbd{s} will unstage the
+hunk under the cursor (@ref{egg-hunk-section-cmd-unstage}) or the
+whole file of the diff header under the cursor
+(@ref{egg-diff-section-cmd-unstage}).
+
+@unnumberedsec The Untracked Section
+This simple section lists the untracked and @emph{unignored} files in
+the repository. The keybindings are very simple.
+
 
 @node Commit, Log, Status, Top
 @unnumbered Commit Buffer
@@ -226,12 +316,44 @@ depending on prefix, i.e. the number of @kbd{C-u}s before @kbd{C-x v c}, @xref{C
 @unnumbered Stash Buffer
 @anchor{egg-stash}
 
-@node Blame, Commands, Stash, Top
+@node Blame, Customizations, Stash, Top
 @unnumbered Blame Mode
 @anchor{egg-file-toggle-blame-mode}
 
+@node Customizations, Commands, Blame, Top
+@unnumbered Customizations
 
-@node Commands,  , Blame, Top
+@defopt egg-buffer-hide-sub-blocks-on-start
+@anchor{egg-buffer-hide-sub-blocks-on-start}
+For each type of egg special buffers, should its sub-blocks be initially hidden.
+@end defopt
+
+@defopt egg-buffer-hide-section-type-on-start
+@anchor{egg-buffer-hide-section-type-on-start}
+For each type of egg special buffers that show sequence of diffs, control the types of
+sub-block to be initially hidden.
+@end defopt
+
+@defopt egg-buffer-hide-help-on-start
+@anchor{egg-buffer-hide-help-on-start}
+For each type of egg special buffers has a help section, should the help section
+be initially hidden.
+@end defopt
+
+@defopt egg-status-buffer-sections
+@anchor{egg-status-buffer-sections}
+Select the sections that would be shown in the status buffer.
+@end defopt
+
+@defopt egg-show-key-help-in-buffers
+@anchor{egg-show-key-help-in-buffers}
+For each type of egg special buffers, should the Help section be displayed.
+@end defopt
+
+
+
+
+@node Commands,  , Customizations, Top
 @unnumbered Commands
 
 @unnumberedsec File
@@ -276,9 +398,122 @@ Revert the file to its contents in the index.
 Perform the @emph{next} action, whatever that is!
 @end deffn
 
+@deffn Command egg-status
+@anchor{egg-status}
+Show @sc{Egg Status} buffer in another window but do not select it. With prefix, select
+the status buffer, @xref{Status}.
+@end deffn
+
+@deffn Command egg-buffer-hide-all
+@anchor{egg-buffer-hide-all}
+Hide all sections in buffer. With prefix, show all sections.
+@end deffn
+
+@deffn Command egg-buffer-cmd-navigate-next
+@anchor{egg-buffer-cmd-navigate-next}
+Move cursor to the next section
+@end deffn
+
+@deffn Command egg-buffer-cmd-navigate-prev
+@anchor{egg-buffer-cmd-navigate-prev}
+Move cursor to the previous section
+@end deffn
+
+@deffn Command egg-section-cmd-toggle-hide-show
+@anchor{egg-section-cmd-toggle-hide-show}
+Toggle the visibility of the section under the cursor.
+@end deffn
+
+@deffn Command egg-diff-section-cmd-undo
+@anchor{egg-diff-section-cmd-undo}
+For the file of diff header under the cursor, remove its differences
+vs the source revision.  Usually, this command revert the file to its
+staged state in the index. However, in a diff special egg buffer, it
+can change the file's contents to the one of the source revision.
+@end deffn
+
+@deffn Command egg-hunk-section-cmd-undo
+@anchor{egg-hunk-section-cmd-undo}
+Remove the file's modification described by the hunk under the cursor.
+@end deffn
+
+@deffn Command egg-stage-all-files
+@anchor{egg-stage-all-files}
+Stage all tracked files in the repository.
+@end deffn
+
+@deffn Command egg-hunk-section-cmd-stage
+@anchor{egg-hunk-section-cmd-stage}
+Add the hunk under the cursor to the index.
+@end deffn
+
+@deffn Command egg-diff-section-cmd-stage
+@anchor{egg-diff-section-cmd-stage}
+Update the index with the file in the diff header under the cursor.
+If the file was deleted in the workdir then remove it from the index.
+@end deffn
+
+
+@deffn Command egg-staged-section-cmd-ediff3
+@anchor{egg-staged-section-cmd-ediff3}
+Compare the staged copy of FILE and the version in HEAD using ediff.
+@end deffn
+
+@deffn Command egg-unmerged-section-cmd-ediff3
+@anchor{egg-unmerged-section-cmd-ediff3}
+Run ediff3 to resolve merge conflicts in file of the combined diff
+section under the cursor.
+@end deffn
+
+@deffn Command egg-unstaged-section-cmd-ediff
+@anchor{egg-unstaged-section-cmd-ediff}
+For the file in the diff section under the cursor. Compare it with its
+staged copy using ediff.
+@end deffn
+
+@deffn Command egg-diff-section-cmd-ediff
+@anchor{egg-diff-section-cmd-ediff}
+Run ediff on src and dest versions of the file in the diff section under the cursor.
+@end deffn
+
+@deffn Command egg-hunk-section-cmd-visit-file-other-window
+@anchor{egg-hunk-section-cmd-visit-file-other-window}
+Visit the file in the diff section under the cursor, in the other window
+and goto the current line of the hunk.
+@end deffn
+
+@deffn Command egg-diff-section-cmd-visit-file-other-window
+@anchor{egg-diff-section-cmd-visit-file-other-window}
+Visit the file in the diff sction under the cursor, in the other window.
+@end deffn
 
 
 
+@deffn Command egg-diff-section-cmd-unstage
+@anchor{egg-diff-section-cmd-unstage}
+For the file in the diff header under the cursor, revert its stage in
+the index to original.  If the file was a newly created file, it will
+be removed from the index.  If the file was added after a merge
+resolution, it will reverted back to conflicted state. Otherwise, its
+stage will be reset to HEAD.
+@end deffn
+
+@deffn Command egg-hunk-section-cmd-unstage
+@anchor{egg-hunk-section-cmd-unstage}
+Remove the hunk under the cursor from the index.
+@end deffn 
+
+
+@deffn Command egg-diff-section-cmd-revert-to-head
+@anchor{egg-diff-section-cmd-revert-to-head}
+Revert the file in the diff section under the cursor and its slot in
+the index to its state in HEAD.
+@end deffn
+
+@deffn Command egg-section-cmd-toggle-hide-show-children
+@anchor{egg-section-cmd-toggle-hide-show-children}
+Toggle the visibility of the subsections of the section under the cursor.
+@end deffn
 
 @deffn Command egg-start-new-branch
 @anchor{egg-start-new-branch}
