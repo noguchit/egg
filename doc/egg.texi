@@ -1,0 +1,299 @@
+\input texinfo.tex    @c -*-texinfo-*-
+@c %**start of header
+@setfilename egg.info
+@settitle EEG (Draft) Manual
+@documentencoding utf-8
+@paragraphindent none
+@c %**end of header
+
+@dircategory Emacs
+@direntry
+* Egg: (egg).        Emacs Got Git
+@end direntry
+
+@copying
+Copyright @copyright{} 2009, 2010, 2011 Bogolisk <bogolisk@@gmail.com>.
+
+@quotation
+Permission is granted to copy, distribute and/or modify this document
+under the terms of the GNU Free Documentation License, Version 1.2 or
+any later version published by the Free Software Foundation; with no
+Invariant Sections, with no Front-Cover Texts, and with no Back-Cover
+Texts.
+@end quotation
+@end copying
+
+@node Top, Rant, (dir), (dir)
+@top Egg Manual
+
+@sc{Egg} is an attempt to provide a seamless integration of @sc{Git}
+within @sc{Emacs}.  @sc{Egg} is currently tested with @sc{Git} 1.7.12
+and @sc{Emacs} 23. It may work with other versions of @sc{Emacs} and
+@sc{Git} but the @sc{Egg}'s developer does not have time to investigate
+and fix bugs that only appear in versions or platforms that he doesn't
+use. Patches to fix bugs in other emacsen or volunteers to maintain
+compatibility however are welcome.
+
+@menu
+* Rant::                        
+* Acknowledgements::            
+* Overview::                    
+* File::                        
+* Status::                      
+* Commit::                      
+* Log::                         
+* Pickaxe::                     
+* Diff::                        
+* Stash::                       
+* Blame::                       
+* Commands::                    
+@end menu
+
+@node Rant, Acknowledgements, Top, Top
+@unnumbered Rant
+
+@sc{Egg} wasn't designed to replace the @sc{Git} excellent official
+porcelain layer, especially when used with the @t{bash_completion}
+package. In the @sc{Egg}'s developer's opinion: it's pointless to write
+a @t{git-mode} in emacs to let user type @kbd{M-x git-reset} when he/she
+can do exactly the same thing in @sc{Bash}. An emacs interface to
+@sc{Git} should provide the conveniences that would make it easier to
+accomplish the same task than the @sc{Git}'s porcelain. @sc{Egg}, thus,
+was designed to perform the same goal as @sc{Git Aliases}. Make it more
+convenient to accomplish common git operations.
+
+One example:
+
+The in @sc{Egg's} status buffer, when the user @emph{unstages} a file,
+@sc{Egg} would invoke different git operations depend on the
+origin/status of the file: it was an existing file, it was new file or
+it was a file with merge conflicts which were just resolved in the
+index.
+
+Again, @sc{Egg} was design to help you accomplish many git common
+operations in very convenient @sc{Emacs} way.
+
+As with @sc{Git Aliases}, @sc{Egg} won't save you from learning
+@sc{Git}. Instead it expects its user to be familiar with @sc{Git}. This
+manual tries to document all @sc{Egg} functionalities and explain the
+design of some of the commands.
+
+@node Acknowledgements, Overview, Rant, Top
+@unnumbered Acknowledgements
+
+In the beginning, @sc{Egg} was a fork of @sc{Marius Vollmer}'s excellent
+@sc{Magit}. While @sc{Egg} was later completely rewritten, it still
+keeps the genius @emph{staging/unstaging} metaphor in the @emph{status
+buffer}.
+
+@sc{ByPlayer} gracefully picked up the maintainership when Bogolisk went
+hiatus for several... years!!! He's the current maintainer of @sc{Egg}
+and his repo is at: @file{https://github.com/byplayer/egg}
+
+@node Overview, File, Acknowledgements, Top
+@unnumbered Overview
+
+Using @sc{Egg} is simple:
+@itemize
+@item
+download @file{egg.el} and put in your @sc{Emacs}'s @code{loadpath}.
+@item
+add @code{(require 'egg)} in your @file{.emacs}
+@item
+very important: disable @sc{Vc}'s git backend.
+Do @kbd{M-x customize-option RET vc-handled-backends}.
+Then @key{DEL} the Git option.
+@item
+open a file in a git repo from within emacs. Et voila!
+@end itemize
+
+@node File, Status, Overview, Top
+@unnumbered The Egg Minor Mode
+
+@unnumberedsec The Basics
+When the @code{egg} library is loaded, @code{egg-minor-mode} would be
+activated when visiting a file in a git repository. Whether or not, the
+current file is tracked by git, @kbd{C-x v i}
+@ref{egg-file-stage-current-file} would stage the file, i.e. add its contents
+into the index. If you want to compare the current contents of the file
+and its staged contents in the index, type @kbd{C-x v =}
+@ref{egg-file-diff}. That key sequences open a @sc{Egg Diff} buffer to
+show the deltas, @xref{Diff}. With a prefix,
+i.e. @kbd{C-u C-x v =}, the command would prompt for a revision (instead
+of using the index) to compare with the file's current contents. If you
+prefer using ediff, then type @kbd{C-x v e},
+@ref{egg-file-ediff}. Again, with the @kbd{C-u} prefix, this command
+will also let the user specify the revision instead of using the
+index. After comparing the file's contents with the index, you might
+decide to throw all current modifications. @kbd{C-x v u},
+@ref{egg-file-cancel-modifications}, would revert the file's contents
+back to its contents in the index. Some times, you just want to look a
+an older, revision of a file, and there's an egg command for that:
+@kbd{C-x v ~}, @ref{egg-file-version-other-window}. This command, by
+default, show the contents of the current file from the index. With a
+prefix, @kbd{C-u C-x v ~}, the command would prompt for a git revision
+then show the file's contents from that revision. If you want, instead,
+replace the file's current contents with its contents from a revision,
+you can use @kbd{C-x v o}, @ref{egg-file-checkout-other-version}.
+
+@unnumberedsec Other parts of Egg
+The rest of the minor-mode's key bindings are primarily for launching
+egg special buffers to perform various git related tasks.  @kbd{C-x v s}
+lauches the @sc{Status Buffer}, @sc{Egg}'s most important buffer, to
+examine the current state of HEAD, @xref{Status}. @kbd{C-x v l},
+launches the @sc{Log Buffer}, to view the commit DAG to also perform
+DAG-related operations such as branching, pushing, merging,
+etc. @xref{Log}. If you are an advanced git user, and has changes
+stashed away in the current repo, @kbd{C-x v S} will show the current
+stack of stashed WIPs, @xref{Stash}. Another advanced but oh so useful
+command is @ref{egg-search-file-changes}, bound to @kbd{C-x v /}. This
+command walks the commit DAG and find those which introduced or removed
+the @emph{search term}, @xref{Pickaxe}.
+
+@unnumberedsec Pointing Finger
+@kbd{C-x v a}, @xref{Blame}, would bring the current
+buffer in-or-out of annotation-mode, or more accurately, @emph{blame
+mode}. In blame-mode, editing is disabled (the buffer is in read-only
+mode). Block of lines are prefix with a header describing the
+@emph{last} commit that modified those lines, @xref{Blame}, for more
+details.
+
+@unnumberedsec Commiting Changes
+Once you're happy with your changes to the work tree and you've already
+staged all those modifications, the next step is to commit the changes.
+Before actually commiting into git, use @ref{egg-commit-log-edit} (bound to
+@kbd{C-x v c}) to compose a commit message. This command has different behaviours
+depending on prefix, i.e. the number of @kbd{C-u}s before @kbd{C-x v c}, @xref{Commit}.
+
+
+@unnumberedsec Minor Mode's Key Bindings
+@table @kbd
+@item C-x v a
+@ref{egg-file-toggle-blame-mode}
+@item C-x v b
+@ref{egg-start-new-branch}
+@item C-x v c
+@ref{egg-commit-log-edit}
+@item C-x v e
+@ref{egg-file-ediff}
+@item C-x v g
+@ref{egg-grep}
+@item C-x v i
+@ref{egg-file-stage-current-file}
+@item C-x v l
+@ref{egg-log}
+@item C-x v h
+@ref{egg-file-log}
+@item C-x v o
+@ref{egg-file-checkout-other-version}
+@item C-x v s
+@ref{egg-status}
+@item C-x v S
+@ref{egg-stash}
+@item C-x v u
+@ref{egg-file-cancel-modifications}
+@item C-x v v
+@ref{egg-next-action}
+@item C-x v /
+@ref{egg-search-file-changes}
+@item C-x v =
+@ref{egg-file-diff}
+@item C-x v ~
+@ref{egg-file-version-other-window}
+@end table
+
+@node Status, Commit, File, Top
+@unnumbered Status Buffer
+@anchor{egg-status}
+
+@node Commit, Log, Status, Top
+@unnumbered Commit Buffer
+@anchor{egg-commit-log-edit}
+
+@node Log, Pickaxe, Commit, Top
+@unnumbered Log Buffer
+@anchor{egg-log} @anchor{egg-file-log} @anchor{egg-reflog}
+
+@node Pickaxe, Diff, Log, Top
+@unnumbered Querry Buffer
+@anchor{egg-search-changes}
+
+@node Diff, Stash, Pickaxe, Top
+@unnumbered Diff Buffer
+@anchor{egg-log-buffer-diff-revs} @anchor{egg-diff-ref}
+
+@node Stash, Blame, Diff, Top
+@unnumbered Stash Buffer
+@anchor{egg-stash}
+
+@node Blame, Commands, Stash, Top
+@unnumbered Blame Mode
+@anchor{egg-file-toggle-blame-mode}
+
+
+@node Commands,  , Blame, Top
+@unnumbered Commands
+
+@unnumberedsec File
+
+@deffn Command egg-file-stage-current-file
+@anchor{egg-file-stage-current-file}
+Add the contents of the current file into the index.
+@end deffn
+
+@deffn Command egg-file-diff
+@anchor{egg-file-diff}
+Compare the file's current contents vs its contents in the index. With
+prefix, prompt for a revision to compare (instead of using the index)
+with the file's current contents. @xref{Diff}.
+@end deffn
+
+@deffn Command egg-file-ediff
+@anchor{egg-file-ediff}
+Compare the file's current contents vs its contents in the index. With
+prefix, prompt for a revision to compare (instead of using the index)
+with the file's current contents.
+@end deffn
+
+@deffn Command egg-file-version-other-window
+@anchor{egg-file-version-other-window}
+Show the contents of the current file from the index. With prefix,
+prompt for a git revision and show the file's contents from that revision.
+@end deffn
+
+@deffn Command egg-file-checkout-other-version
+@anchor{egg-file-checkout-other-version}
+Replace the file's current contents with its contents from a revision.
+@end deffn
+
+@deffn Command egg-file-cancel-modifications
+@anchor{egg-file-cancel-modifications}
+Revert the file to its contents in the index.
+@end deffn
+
+@deffn Command egg-next-action
+@anchor{egg-next-action}
+Perform the @emph{next} action, whatever that is!
+@end deffn
+
+
+
+
+
+@deffn Command egg-start-new-branch
+@anchor{egg-start-new-branch}
+start a new branch from HEAD, keeping local modifications.
+@end deffn
+
+@deffn Command egg-search-file-changes
+@anchor{egg-search-file-changes}
+search in the DAG for commits that introduced or removed the @emph{search term}.
+@end deffn
+
+@deffn Command egg-grep
+@anchor{egg-grep}
+run grep on files tracked by git.
+@end deffn
+
+  
+@bye

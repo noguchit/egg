@@ -1216,6 +1216,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                        ;; head
                        (cons full-name
                              (apply 'propertize name
+				    :full-name full-name
                                     :ref (cons name :head)
 				    (if (and head-properties-HEAD
 					     (string-equal name
@@ -1226,6 +1227,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                        ;; tag
                        (cons full-name
                              (apply 'propertize name
+				    :full-name full-name
                                     :ref (cons name :tag)
                                     (if (member full-name annotated-tags)
                                         atag-properties
@@ -1241,6 +1243,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                                 ;; svn has no remote name
                                 "")
                               (apply 'propertize (substring name (length remote))
+				     :full-name full-name
                                      :ref (cons name :remote)
                                      remote-ref-properties)))))))
             refs-desc-list)))
@@ -3547,6 +3550,7 @@ exit code ACCEPTED-CODE is considered a success."
     (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
+    (define-key map (kbd "C-c C-h") 'egg-buffer-hide-all)
     map)
   "Common map for an egg special buffer.\\{egg-buffer-mode-map}" )
 
@@ -4439,6 +4443,18 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
       (egg-status-buffer-do-co-rev name "-f")
     (egg-status-buffer-do-co-rev name)))
 
+(defun egg-buffer-hide-all (&optional show-all)
+  "Hide all sections in current special egg buffer."
+  (interactive "P")
+  (if show-all
+      (setq buffer-invisibility-spec nil) ;; show all
+    (let ((pos (point-min)) nav)
+      (while (setq pos (next-single-property-change (1+ pos) :navigation))
+	(setq nav (get-text-property pos :navigation))
+	(add-to-invisibility-spec (cons nav t)))))
+  (if (invoked-interactively-p)
+      (force-window-update (current-buffer))))
+
 (defsubst egg-buffer-show-all ()
   "UnHide all hidden sections in the current special egg buffer."
   (interactive)
@@ -4446,15 +4462,7 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
   (if (invoked-interactively-p)
       (force-window-update (current-buffer))))
 
-(defsubst egg-buffer-hide-all ()
-  "Hide all sections in current special egg buffer."
-  (interactive)
-  (let ((pos (point-min)) nav)
-    (while (setq pos (next-single-property-change (1+ pos) :navigation))
-      (setq nav (get-text-property pos :navigation))
-      (add-to-invisibility-spec (cons nav t))))
-  (if (invoked-interactively-p)
-      (force-window-update (current-buffer))))
+
 
 (defsubst egg-buffer-hide-section-type (sect-type)
   "Hide sections of SECT-TYPE in current special egg buffer."
@@ -7398,6 +7406,13 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (interactive)
   (when (egg-commit-at-point)
     (egg-file-log-walk-show-buffer)))
+
+;; (defun egg-log-buffer-desc-ref (pos)
+;;   (interactive "d")
+;;   (let ((ref (get-text-property pos :ref))
+;; 	(type (and ref (cdr ref)))
+;; 	(ref-full-name (and ref (get-text-property pos :full-name))))
+;;     (cond ((eq type :head)))))
 
 (defsubst egg-run-git-file-log-HEAD (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
