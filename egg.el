@@ -3909,7 +3909,9 @@ adding the contents."
     (define-key map (kbd "DEL") 'egg-ignore-pattern-from-string-at-point)
     (define-key map "s" 'egg-status-buffer-stage-untracked-file)
     (define-key map "i" 'egg-status-buffer-stage-untracked-file)
-    map))
+    map)
+  "Keymap for a section of untracked file.
+\\{egg-untracked-file-map}")
 
 (defun egg-sb-insert-untracked-section ()
   "Insert the untracked files section into the status buffer."
@@ -4931,6 +4933,7 @@ the source revision."
   (egg-buffer-do-move-head reset-mode rev 'status))
 
 (defun egg-unstage-all-files ()
+  "Unstage all files in the index."
   (interactive)
   (let ((default-directory (egg-work-tree-dir)))
     (when (egg-status-buffer-do-move-head "--mixed" "HEAD")
@@ -7262,6 +7265,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 		      sha1-reflog-alist)))
 
 (defun egg-log (ref-name)
+  "Show the commit DAG of REF-NAME."
   (interactive (list (let ((level (prefix-numeric-value current-prefix-arg))
 			   (head-name (egg-branch-or-HEAD))
 			   (pickup (egg-string-at-point)))
@@ -7485,6 +7489,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    ))
 
 (defun egg-file-log (file-name &optional all)
+  "Show the commits in the current branch's DAG that modified FILE-NAME.
+if ALL is not-nil, then do not restrict the commits to the current branch's DAG."
   (interactive (list (buffer-file-name) current-prefix-arg))
   (unless (and file-name (file-exists-p file-name))
     (error "File does not exist: %s" file-name))
@@ -7765,6 +7771,8 @@ non-nil then restrict the search to commits modifying FILE-NAME."
 
 
 (defun egg-reflog (branch)
+  "Show commit DAG of BRANCH and its reflogs.
+This is just an alternative way to launch `egg-log'"
   (interactive (let ((head-name (egg-branch-or-HEAD)))
 		 (list (if current-prefix-arg
 			   (egg-read-rev "show history of ref: " head-name)
@@ -7877,6 +7885,9 @@ non-nil then restrict the search to commits modifying FILE-NAME."
       (egg-stash-buffer-do-unstash "apply" "--index" stash))))
 
 (defun egg-status-buffer-stash-wip (msg &optional include-untracked)
+  "Stash current work-in-progress in workdir and the index.
+MSG is the is the description for the WIP. Also stash untracked/unignored files
+if INCLUDE-UNTRACKED is non-nil."
   (interactive "sshort description of this work-in-progress: \nP")
   (let ((default-directory (egg-work-tree-dir))
 	(include-untracked (and include-untracked
@@ -8805,6 +8816,30 @@ egg in current buffer.\\<egg-minor-mode-map>
 	(forward-line 1)
 	(unless (looking-at "@anchor{")
 	  (insert "@anchor{" fn "}\n"))))))
+
+(defun egg-insert-texi-for-map ()
+  (interactive)
+  (let* ((map (symbol-at-point))
+	 (map-name (or (and map (symbol-name map))
+		       (completing-read "map: " obarray 'boundp t nil nil)))
+	 (doc (documentation-property (or map (intern map-name))
+				      'variable-documentation))
+	 key command key-cmd-alist)
+    (save-excursion
+      (with-temp-buffer
+	(insert doc)
+	(goto-char (point-min))
+	(while (re-search-forward "^\\([^\t\n]+\\)\t+\\(\\S-+\\)$" nil t)
+	  (setq key (match-string-no-properties 1)
+		command (match-string-no-properties 2))
+	  (add-to-list 'key-cmd-alist (cons key command)))))
+    (forward-line 1)
+    (insert "@table @kbd\n")
+    (dolist (pair (nreverse key-cmd-alist))
+      (setq key (car pair)
+	    command (cdr pair))
+      (insert "@item " key "\n" "@ref{" command "}\n"))
+    (insert "@end table")))
 
 (run-hooks 'egg-load-hook)
 (provide 'egg)
