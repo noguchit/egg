@@ -690,7 +690,9 @@ See also `with-temp-file' and `with-output-to-string'."
                      prop))
     `(propertize ,text ,@prop)))
 
-(defalias 'egg-string-at-point 'ffap-string-at-point)
+(defsubst egg-string-at-point () (current-word t))
+
+;;(defalias 'egg-string-at-point 'ffap-string-at-point)
 (defalias 'egg-find-file-at-point 'find-file-at-point)
 
 (defsubst egg-prepend (str prefix &rest other-properties)
@@ -5602,7 +5604,7 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
     (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
     (define-key map (kbd "T") 'egg-log-buffer-atag-commit)
-    (define-key map (kbd "a") 'egg-log-buffer-attach-head)
+    (define-key map (kbd "a") 'egg-log-buffer-anchor-head)
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
     (define-key map (kbd "c") 'egg-log-buffer-pick-1cherry)
@@ -5765,7 +5767,7 @@ Jump to line LINE if it's not nil."
     "\\[egg-log-buffer-insert-commit]:load details  "
     "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
     "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks\n"
-    "\\[egg-log-buffer-attach-head]:anchor HEAD  "
+    "\\[egg-log-buffer-anchor-head]:anchor HEAD  "
     "\\[egg-log-buffer-checkout-commit]:checkout  "
     "\\[egg-log-buffer-tag-commit]:new tag  "
     "\\[egg-log-buffer-atag-commit]:new annotated tag\n"
@@ -6087,20 +6089,21 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (egg-log-buffer-do-unmark-all)
     (egg-log-buffer-do-mark pos nil t)))
 
-(defun egg-log-buffer-get-marked-alist ()
+(defun egg-log-buffer-get-marked-alist (&rest types)
   (let ((pos (point-min))
         marker subject alist)
     (save-excursion
       (while (setq pos (next-single-property-change (1+ pos) :mark))
-        (goto-char pos)
-        (setq marker (point-marker))
-        (move-to-column egg-log-buffer-comment-column)
-        (setq subject (buffer-substring-no-properties
-                       (point) (line-end-position)))
-        (setq alist (cons (list (get-text-property pos :commit)
-                                (get-text-property pos :mark)
-                                subject marker)
-                          alist))))
+	(when (or (null types) (memq (get-text-property pos :mark) types))
+	  (goto-char pos)
+	  (setq marker (point-marker))
+	  (move-to-column egg-log-buffer-comment-column)
+	  (setq subject (buffer-substring-no-properties
+			 (point) (line-end-position)))
+	  (setq alist (cons (list (get-text-property pos :commit)
+				  (get-text-property pos :mark)
+				  subject marker)
+			    alist)))))
     alist))
 
 
@@ -6253,6 +6256,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
              (message "Automatic rebase failed!"))))))
 
 (defun egg-log-buffer-merge (pos &optional level)
+  "Merge to HEAD the path starting from the commit at POS.
+With C-u prefix, do not auto commit the merge result.
+With C-u C-u prefix, prompt the user for the type of merge to perform."
   (interactive "d\np")
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
 	(merge-options-alist '((?c "(c)ommit" "" "--commit")
@@ -6304,6 +6310,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 				   "--squash" t))
 
 (defun egg-log-buffer-rebase (pos)
+  "Rebase HEAD using the commit under POS as upstream.
+If there was a commit marked as BASE, then rebase HEAD onto the commit under the
+cursor using the BASE commit as upstream."
   (interactive "d")
   (let* ((mark (egg-log-buffer-find-first-mark ?*))
          (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
@@ -6326,13 +6335,14 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (unless (egg-buffer-do-rebase upstream onto)
       (egg-status nil t))))
 
-(defun egg-log-buffer-rebase-interactive (pos &optional move)
-  (interactive "d\nP")
+(defun egg-log-buffer-rebase-interactive (pos)
+  (interactive "d")
   (let* ((state (egg-repo-state :staged :unstaged))
          (rebase-dir (concat (plist-get state :gitdir) "/"
                              egg-git-rebase-subdir "/"))
-         (todo-alist (egg-log-buffer-get-marked-alist))
+         (todo-alist (egg-log-buffer-get-marked-alist ?+ ?. ?~))
          (commits (mapcar 'car todo-alist))
+	 (r-commits (reverse commits))
          (upstream (egg-commit-at pos))
          (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
                                 (concat upstream "..HEAD"))))
@@ -6344,11 +6354,23 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                      commit upstream)))
           commits)
 
+;;    (unless (equal sha1 (car r-commits)) (error "HEAD (%s) was not marked!" sha1))
+
+    (setq all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick" (concat (car commits) "^..HEAD")))
+
+    (mapc (lambda (commit)
+            (unless (member commit commits)
+              (error "unmarked commit %s between %s and HEAD."
+                     commit (car commits))))
+          all)
+    
     (egg-setup-rebase-interactive rebase-dir upstream nil
                                   state todo-alist)
     (egg-status nil t)))
 
 (defun egg-log-buffer-checkout-commit (pos &optional force)
+  "Checkout the commit at POS.
+With prefix, force the checkout even if the index was different from the new commit."
   (interactive "d\nP")
   (let ((ref (egg-read-rev "checkout: "
 	      (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
@@ -6357,6 +6379,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (egg-log-buffer-do-co-rev ref))))
 
 (defun egg-log-buffer-tag-commit (pos &optional force)
+  "Tag the commit at POS.
+With prefix, force the creation of the tag even if it replace an
+existing one with the same name."
   (interactive "d\nP")
   (let* ((rev (egg-log-buffer-get-rev-at pos))
 	 (name (read-string (format "tag %s with name: " rev)))
@@ -6365,6 +6390,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (egg-log-buffer-do-tag-commit name rev force)))
 
 (defun egg-log-buffer-atag-commit (pos &optional sign-tag)
+  "Start composing the message for an annotated tag on the commit at POS.
+With prefix, the tag will be gpg-signed."
   (interactive "d\np")
   (let* ((commit (get-text-property pos :commit))
 	 (name (read-string (format "create annotated tag on %s with name: "
@@ -6406,7 +6433,14 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (egg-log-buffer-handle-result
      (egg--git-co-rev-cmd t rev force name track))))
 
-(defun egg-log-buffer-attach-head (pos &optional strict-level)
+(defun egg-log-buffer-anchor-head (pos &optional strict-level)
+  "Move the current branch or the detached HEAD to the commit at POS.
+The index will be reset and files will in worktree updated. If a file that is
+different between the original commit and the new commit, the git command will
+abort. This is basically git reset --keep. With C-u prefix, HEAD will be moved,
+index will be reset and the work tree updated by throwing away all local
+modifications (this is basically git reset --hard). With C-u C-u prefix,
+the command will prompt for the git reset mode to perform."
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
          (commit (egg-commit-at-point pos))
@@ -6776,6 +6810,7 @@ would be a pull (by default --ff-only)."
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
+  "Load and show the details of the commit at POS."
   (interactive "d")
   (let* ((next (next-single-property-change pos :diff))
          (sha1 (and next (get-text-property next :commit)))
@@ -6883,13 +6918,13 @@ C-u \\[egg-log-buffer-tag-commit] create a new lightweight tag pointing at the c
   replacing the old tag with the same name.
 \\[egg-log-buffer-atag-commit] create a new annotated tag pointing at the current commit.
 C-u \\[egg-log-buffer-atag-commit] create a new gpg-signed tag pointing at the current commit.
-\\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) as well as
+\\[egg-log-buffer-anchor-head] move HEAD (and maybe the current branch tip) as well as
 the index to the current commit if it's safe to do so
  (the underlying git command is `reset --keep'.)
-C-u \\[egg-log-buffer-attach-head] move HEAD (and maybe the current branch tip) and
+C-u \\[egg-log-buffer-anchor-head] move HEAD (and maybe the current branch tip) and
 the index to the current commit, the work dir will also be updated,
 uncommitted changes will be lost (the underlying git command is `reset --hard').
-C-u C-u \\[egg-log-buffer-attach-head] will let the user specify a mode to run git-reset.
+C-u C-u \\[egg-log-buffer-anchor-head] will let the user specify a mode to run git-reset.
 \\[egg-log-buffer-merge] will merge the current commit into HEAD.
 C-u \\[egg-log-buffer-merge] will merge the current commit into HEAD but will not
 auto-commit if the merge was successful.
@@ -6929,7 +6964,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 (defun egg-log-commit-line-menu-attach-head-ignore-changes (pos)
   (interactive "d")
-  (egg-log-buffer-attach-head pos 4))
+  (egg-log-buffer-anchor-head pos 4))
 
 (defun egg-log-make-commit-line-menu (&optional heading)
   (let ((map (make-sparse-keymap heading)))
@@ -7005,7 +7040,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                  'egg-log-commit-line-menu-attach-head-ignore-changes
                                  :visible '(egg-commit-at-point)))
     (define-key map [rh-0] (list 'menu-item "Anchor HEAD"
-                                 'egg-log-buffer-attach-head
+                                 'egg-log-buffer-anchor-head
                                  :visible '(egg-commit-at-point)))
     (define-key map [sp2] '("--"))
     (define-key map [reflog] (list 'menu-item "Show Ref History (Reflog)"
@@ -7156,7 +7191,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  "
     "\\[egg-log-buffer-checkout-commit]:checkout  "
     "\\[egg-log-buffer-start-new-branch]:start new branch\n"
-    "\\[egg-log-buffer-attach-head]:anchor HEAD  "
+    "\\[egg-log-buffer-anchor-head]:anchor HEAD  "
     "\\[egg-log-buffer-tag-commit]:new tag  "
     "\\[egg-log-buffer-atag-commit]:new annotated tag  "
     "\\[egg-log-buffer-create-new-branch]:create branch  "
@@ -7475,7 +7510,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-insert-commit]:load details  "
     "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
     "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks\n"
-    "\\[egg-log-buffer-attach-head]:anchor HEAD  "
+    "\\[egg-log-buffer-anchor-head]:anchor HEAD  "
     "\\[egg-log-buffer-checkout-commit]:checkout  "
     "\\[egg-log-buffer-start-new-branch]:start new branch  "
     "\\[egg-log-buffer-create-new-branch]:create branch\n"
@@ -8699,7 +8734,7 @@ egg in current buffer.\\<egg-minor-mode-map>
     (egg-log-buffer-mark-pick egg-commit-at "mark %s to be picked in upcoming rebase")
     (egg-log-buffer-mark egg-commit-at "mark %s as BASE")
     (egg-log-buffer-rebase egg-commit-at "rebase HEAD to %s")
-    (egg-log-buffer-attach-head egg-ref-or-commit-at "anchor HEAD at %s")
+    (egg-log-buffer-anchor-head egg-ref-or-commit-at "anchor HEAD at %s")
     (egg-log-buffer-atag-commit egg-commit-at "create new annotated-tag at %s")
     (egg-log-buffer-tag-commit egg-commit-at "create new tag at %s")
     (egg-log-buffer-checkout-commit egg-ref-or-commit-at "checkout %s")

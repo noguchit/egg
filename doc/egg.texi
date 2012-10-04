@@ -48,6 +48,7 @@ compatibility however are welcome.
 * Blame::                       
 * Customizations::              
 * Commands::                    
+
 @end menu
 
 @node Rant, Acknowledgements, Top, Top
@@ -325,6 +326,7 @@ a different way of launching the Log Buffer is bound into the key
 stash the current work-in-progress and @kbd{W} (@ref{egg-stash}) will
 shows the stack of stashed-away WIPs, @xref{Stash}.
 
+@anchor{rebase-keys}
 During @sc{Rebase}, @key{RET}
 (@ref{egg-buffer-selective-rebase-continue}) will continue the rebase,
 @kbd{u} (@ref{egg-buffer-selective-rebase-skip}) will skip the current
@@ -462,24 +464,149 @@ messages into the editing area. @kbd{M-TAB} is conveniently bound to
 @code{ispell-complete-buffer} to help with editing text. 
 
 @node Log, Pickaxe, Commit, Top
-@unnumbered Log Buffer, messing with HIstory
-@ref{egg-log}, @ref{egg-file-log} and @ref{egg-reflog} are three of the
-different way of launching the @sc{Log Buffer}. The Log Buffer show a
-list of commits, usually forming a DAG. In the regular cycle:
+@unnumbered Log Buffer, messing with History
+@ref{egg-log}, @ref{egg-file-log} and @ref{egg-reflog} are three of
+the different way of launching the @sc{Log Buffer}. The Log Buffer
+show a list of commits, usually forming a DAG. In the regular cycle:
 edit-add-commit, commits are added to the current branch in a linear
-fashion. However, with rebase, amending and reset, the branch's head can
-move in a non-linear manner and previous commits where it used to point
-at might no longer reachable from the latest commit. Thus, that why
-git's @sc{Reflog} is so important, it shows the previous incarnations of
-a ref without needing without walking history from the latest
-commit. Realizing that importance, @sc{Egg}'s @sc{Log Buffer} was
-designed to show both the DAG and the reflogs of the branch.
+fashion. However, with rebase, amending and reset, the branch's head
+can move in a non-linear manner and previous commits where it used to
+point at might no longer reachable from the latest commit. That's why
+git's @sc{Reflog} is so important, it shows the previous incarnations
+of a ref. Those previous incarnations are commits that might not be
+reachable by walking history from the latest commit. Realizing that
+importance, @sc{Egg}'s @sc{Log Buffer} was designed to show both the
+combined DAG and branch (or a ref) and its reflogs.
 
 When launch without any prefix, @code{egg-log} will show the combined
-DAT of the current branch (or HEAD) and its reflogs. With @kbd{C-u}
+DAG of the current branch (or HEAD) and its reflogs. With @kbd{C-u}
 prefix, the buffer will show the combined DAG of all the refs in the
-repoistory (without the reflogs). With @kbd{C-u C-u} prefix, the command
-will 
+repoistory (without the reflogs). With @kbd{C-u C-u} prefix, the
+command will prompt for a ref then show the combined DAG of that ref
+and its reflogs.
+
+The buffer is composed of the repo section including the help
+subsection and the DAG section where almost every line describes a
+commit. The refs that point at the commit are listed on the commit's
+line. The details of a commit, i.e. the diffs, can be loaded with
+@key{SPC} (@ref{egg-log-buffer-insert-commit}). As with the Status
+Buffer, the hide/show and the naviguation commands work the same way
+here @xref{status-sections}. The @sc{Status Buffer} was designed
+primarily to deal with the index, the @sc{Log Buffer}, on the other
+hand, was intended for actions that operate on the DAG. Most commands
+in the Log Buffer are context sensitive. Their behaviour depends on
+the current location of the cursor. In the DAG section of buffer,
+almost everyline described a commit (Egg calls it a commit line.)
+Thus, most commands in the buffer act upon the commit described on the
+line under the cursor.  However, if the cursor was on a ref name (a
+branch, a tag, a remote or a reflog), many commands will operate upon
+the ref instead of the commit.
+
+@unnumberedsec Moving HEAD
+In the Log Buffer, it's very easy to move the current branch (or the
+detached HEAD) to different commit in the DAG. Move the cursor on any
+commit line and type @kbd{a} (@ref{egg-log-buffer-attach-head}). This
+command, however, will abort if there was local modifications to a file
+that is different between the original commit and the new commit. To
+unconditionally move to another commit by throwing away all local
+modifications, prefix the command with @kbd{C-u} (i.e. @kbd{C-u a}). With
+double prefix (@kbd{C-u C-u a}), the command will prompt the user
+for advanced modes of moving HEAD.
+
+@unnumberedsec Checking Out
+If the cursor was on any commit line, @kbd{o}
+(@ref{egg-log-buffer-checkout-commit}) will checkout that commit. This
+action would detach HEAD, unless the cursor was on a @emph{branch
+name}. In this case, @kbd{o} will checkout the branch (i.e. HEAD will point
+to the new branch.) The command will abort if you checkout a new commit while
+having local modifications. To force the checkout action in that case, just 
+prefix the command with @kbd{C-u}, (@kbd{C-u o}).
+
+To checkout a commit and create a new branch as well, use @kbd{b}
+(@ref{egg-log-buffer-start-new-branch}). This will create a new branch
+starting at the commit of the line under the cursor and then check out
+that new branch. This command can also be used when you have some
+modifications to keep but don't want to commit them into a the current
+branch. Use this command to start a new branch from the same commit as
+the current branch then commit the local changes into this newly
+created branch, keeping the original branch as it was.  If you want to
+create a new branch without checking it out, use @kbd{B}
+(@ref{egg-log-buffer-create-new-branch}). Again, this command create
+a new branch at the commit of the line under the cursor.
+
+@unnumberedsec Pushing Refs Around
+Let's say that upstream @code{origin/master} is ahead of your
+currently checked out local @code{master} and you want to update
+yours. Move the cursor on top of @code{origin/master} then type
+@kbd{u} (@ref{egg-log-buffer-push-to-local}). The command will ask for
+confirmation and push the ref under the cursor onto HEAD. @kbd{C-u u},
+will prompt for another ref name, then push the commit of the line
+under the cursor onto that ref. @kbd{C-u C-u u} will perform the same
+operation but will @emph{not} abort even if the move was @emph{non
+fast-forward}.
+
+@unnumberedsec Tagging your Stuffs
+Tagging commit is very easy in the Log Buffer. @kbd{t}
+(@ref{egg-log-buffer-tag-commit}) will create a @emph{lightweight} tag
+pointing at the commit of the line under the cursor. To create an
+@emph{annotated} tag, use @kbd{T}
+(@ref{egg-log-buffer-atag-commit}). This command will open
+the... Commit Buffer to let the user composing the message for the new
+tag. Similar to commiting, after composing the message in the Commit
+Buffer, @kbd{C-c C-c} will then actually create the tag with message
+from the Commit Buffer. @xref{Commit}. To prepare a message for a
+@emph{gpg-signed} tag, add a prefix to the command (@kbd{C-u T}).
+
+@unnumberedsec Merging your heads
+To merge any path in the displayed DAG to HEAD, put the cursor on the
+head commit of the path. To merge a branch to head, just put the
+cursor on the commit that the branch head point to. @kbd{m}
+(@ref{egg-log-buffer-merge}) will then merge that path in the DAG into
+HEAD. @kbd{C-u m} will perform the same merge, but do not auto commit
+the merge result. @kbd{C-u C-u m} will prompt the user for the type of
+merge operation to perform. Among the choices are the option of
+squashing all merge metadata while keeping the merge result and the
+option of restricting the merge to @emph{fast-forward only}.
+
+@unnumberedsec Rebasing
+@anchor{Rebase}
+Commands like rebase can operate on more than just one commit. The ability
+to mark commits in the Log Buffer make it more flexible to use rebase
+within Egg.  The marking commands and their key bindings are:
+@table @kbd
+@item *
+mark the commit as @emph{base}
+@item +
+mark the commit to be @emph{picked} for the upcoming interactive rebase
+@item .
+mark the commit to be @emph{squashed} for the upcoming interactive rebase
+@item ~
+mark the commit to be @emph{edited} for the upcoming interactive rebase
+@item DEL
+unmark the commit
+@item C-u DEL
+unmark all marked commits
+@end table
+
+@heading Non-interactive Rebase
+The normal rebase operation is very simple. If there was a commit
+marked as @emph{base}, then @kbd{r} (@ref{egg-log-buffer-rebase}) will
+rebase the current branch @emph{onto} the commit under the
+cursor. using the @emph{base} commit as @emph{upstream}. If there was
+no marked base commit, then @kbd{r} would just rebase HEAD using the
+commit under the cursor as upstream. Egg always use @code{git rebase}
+with merge strategy. If there were conflicts during rebase, the user
+should go to the Status Buffer to inspect and resolv the conflicts,
+@xref{Status}. To go the Status Buffer from the Log Buffer, just type
+@kbd{s}. The Status Buffer has commands to skip commit and continue
+the halted rebase, @xref{rebase-keys}
+
+@heading Interactive Rebase
+This is the most complex (and fragile) operation in Egg.
+
+
+
+
 
 @node Pickaxe, Diff, Log, Top
 @unnumbered Querry Buffer
@@ -830,6 +957,77 @@ This is just an alternative way to launch `egg-log'
 @anchor{egg-file-log}
 Show the commits in the current branch's DAG that modified the current file.
 With prefix,do not restrict the commits to the current branch's DAG.
+@end deffn
+
+
+@deffn Command egg-log-buffer-attach-head
+@anchor{egg-log-buffer-attach-head}
+Move the current branch or the detached HEAD to the commit at POS.
+The index will be reset and files will in worktree updated. If a file that is
+different between the original commit and the new commit, the git command will
+abort. This is basically git reset --keep. With C-u prefix, HEAD will be moved,
+index will be reset and the work tree updated by throwing away all local
+modifications (this is basically git reset --hard). With C-u C-u prefix,
+the command will prompt for the git reset mode to perform.
+@end deffn
+
+
+
+@deffn Command egg-log-buffer-checkout-commit
+@anchor{egg-log-buffer-checkout-commit} Checkout the commit at
+POS. With prefix, force the checkout even if the index was different
+from the new commit.
+@end deffn
+
+
+@deffn Command egg-log-buffer-start-new-branch
+@anchor{egg-log-buffer-start-new-branch}
+Create a new branch, and make it a new HEAD
+@end deffn
+
+
+@deffn Command egg-log-buffer-create-new-branch
+@anchor{egg-log-buffer-create-new-branch}
+Create a new branch, without checking it out.
+@end deffn
+
+
+@deffn Command egg-log-buffer-push-to-local
+@anchor{egg-log-buffer-push-to-local}
+Push a ref or a commit under the cursor onto HEAD.
+With C-u, instead of HEAD, prompt for another ref as destination.
+With C-u C-u, will force the push evel if it would be non-ff.
+When the destination of the push is HEAD, the underlying git command
+would be a pull (by default --ff-only).
+@end deffn
+
+
+@deffn Command egg-log-buffer-insert-commit
+@anchor{egg-log-buffer-insert-commit}
+Load and show the details of the commit at POS.
+@end deffn
+
+
+@deffn Command egg-log-buffer-tag-commit
+@anchor{egg-log-buffer-tag-commit}
+Tag the commit at POS.
+With prefix, force the creation of the tag even if it replace an
+existing one with the same name.
+@end deffn
+
+
+@deffn Command egg-log-buffer-atag-commit
+@anchor{egg-log-buffer-atag-commit} Start composing the message for an
+annotated tag on the commit at the cursor.  With prefix, the tag will
+be gpg-signed.
+@end deffn
+
+
+@deffn Command egg-log-buffer-merge
+@anchor{egg-log-buffer-merge}
+Merge to HEAD the path starting from the commit under the cursor.
+With C-u prefix, do not auto commit the merge result.
+With C-u C-u prefix, prompt the user for the type of merge to perform.
 @end deffn
 
 @bye
