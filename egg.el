@@ -1375,6 +1375,9 @@ this is for rebase -i variant."
             (length (egg-pick-file-records (concat rebase-dir "done")
                                            "^[pes]" "$"))
           0)
+	:rebase-stopped
+	(if (file-exists-p (concat rebase-dir "stopped-sha"))
+	    (egg-pick-file-contents (concat rebase-dir "stopped-sha") "^[0-9a-f]+$"))
         :rebase-cherry
         (if (file-exists-p (concat rebase-dir "done"))
             (car (egg-pick-file-records
@@ -3807,6 +3810,7 @@ rebase session."
          (map egg-section-map)
          (rebase-step (plist-get state :rebase-step))
          (rebase-num (plist-get state :rebase-num))
+	 (rebase-stopped-sha (plist-get state :rebase-stopped))
          inv-beg help-beg help-inv-beg rebase-beg)
 
     (unless (and sha1 state)
@@ -3822,7 +3826,12 @@ rebase session."
     (setq inv-beg (1- (point)))
     (when rebase-step
       ;; Rebase info and keybindings
-      (insert (format "Rebase: commit %s of %s\n" rebase-step rebase-num))
+      (insert (format "Rebase: commit %s of %s" rebase-step rebase-num))
+      (when rebase-stopped-sha
+	(insert " (" (egg-git-to-string "log" "--no-walk" "--pretty=%h:%s" 
+					rebase-stopped-sha)
+		")"))
+      (insert "\n")
       (setq map egg-status-buffer-rebase-map))
     (when (memq :status egg-show-key-help-in-buffers)
       ;; Help
@@ -6469,7 +6478,7 @@ the command will prompt for the git reset mode to perform."
 	(setq mode-key (string-to-char mode-key))
 	(setq reset-mode (cdr (assq mode-key key-mode-alist)))
 	(unless (stringp reset-mode)
-	  (error "Invalid choice: %c (must be of of s,h,x,k,m)" mode-key)))
+	  (error "Invalid choice: %c (must be one of s,h,x,k,m)" mode-key)))
       (egg-log-buffer-do-move-head reset-mode rev))))
 
 
