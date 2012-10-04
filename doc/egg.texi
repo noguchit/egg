@@ -465,7 +465,21 @@ messages into the editing area. @kbd{M-TAB} is conveniently bound to
 @unnumbered Log Buffer, messing with HIstory
 @ref{egg-log}, @ref{egg-file-log} and @ref{egg-reflog} are three of the
 different way of launching the @sc{Log Buffer}. The Log Buffer show a
-list of commits, usually forming a DAG.
+list of commits, usually forming a DAG. In the regular cycle:
+edit-add-commit, commits are added to the current branch in a linear
+fashion. However, with rebase, amending and reset, the branch's head can
+move in a non-linear manner and previous commits where it used to point
+at might no longer reachable from the latest commit. Thus, that why
+git's @sc{Reflog} is so important, it shows the previous incarnations of
+a ref without needing without walking history from the latest
+commit. Realizing that importance, @sc{Egg}'s @sc{Log Buffer} was
+designed to show both the DAG and the reflogs of the branch.
+
+When launch without any prefix, @code{egg-log} will show the combined
+DAT of the current branch (or HEAD) and its reflogs. With @kbd{C-u}
+prefix, the buffer will show the combined DAG of all the refs in the
+repoistory (without the reflogs). With @kbd{C-u C-u} prefix, the command
+will 
 
 @node Pickaxe, Diff, Log, Top
 @unnumbered Querry Buffer
