@@ -5657,7 +5657,8 @@ Jump to line LINE if it's not nil."
     (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
 
-    map))
+    map)
+  "Keymap for a commit line in the log buffer.\\{egg-log-commit-map}}")
 
 (defconst egg-log-ref-map
   (let ((map (make-sparse-keymap "Egg:LogRef")))
@@ -5675,7 +5676,8 @@ Jump to line LINE if it's not nil."
     (define-key map [C-down-mouse-2] 'egg-log-popup-local-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-local-ref-menu)
 
-    map))
+    map)
+  "\\{egg-log-local-ref-map}")
 
 (defconst egg-log-remote-ref-map
   (let ((map (make-sparse-keymap "Egg:LogRemoteRef")))
@@ -5685,7 +5687,8 @@ Jump to line LINE if it's not nil."
     (define-key map [C-down-mouse-2] 'egg-log-popup-remote-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-remote-ref-menu)
 
-    map))
+    map)
+  "\\{egg-log-remote-ref-map}")
 
 (defconst egg-log-remote-site-map
   (let ((map (make-sparse-keymap "Egg:LogRef")))
@@ -5728,7 +5731,8 @@ Jump to line LINE if it's not nil."
     (set-keymap-parent map egg-log-buffer-base-map)
     (define-key map "L" 'egg-reflog)
     (define-key map "/" 'egg-search-changes)
-    map))
+    map)  
+  "Keymap for the log buffer.\\{egg-log-buffer-mode-map}")
 
 (defconst egg-log-style-buffer-map
   (let ((map (make-sparse-keymap "Egg:LogBuffer")))
@@ -5738,6 +5742,7 @@ Jump to line LINE if it's not nil."
     map))
 
 (defun egg-log-buffer-style-command ()
+  "Re-run the command that create the buffer."
   (interactive)
   (call-interactively (or (plist-get egg-internal-log-buffer-closure :command)
 			  #'egg-buffer-cmd-refresh)))
@@ -6351,6 +6356,8 @@ cursor using the BASE commit as upstream."
       (egg-status nil t))))
 
 (defun egg-log-buffer-rebase-interactive (pos)
+  "Start an interactive rebase session using the marked commits.
+The commit at POS is the where the chain of marked commits will rebased onto."
   (interactive "d")
   (let* ((state (egg-repo-state :staged :unstaged))
          (rebase-dir (concat (plist-get state :gitdir) "/"
@@ -6489,6 +6496,7 @@ the command will prompt for the git reset mode to perform."
 
 
 (defun egg-log-buffer-rm-ref (pos &optional force)
+  "Remove the ref at POS."
   (interactive "d\nP")
   (let ((refs (egg-references-at-point pos))
         (candidate (egg-ref-at-point pos))
@@ -6522,6 +6530,8 @@ the command will prompt for the git reset mode to perform."
        (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))
 
 (defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
+  "Pick one cherry at POS and put on HEAD.
+With prefix, will not auto-commit but let the user re-compose the message."
   (interactive "d\nP")
   
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic))
@@ -6572,6 +6582,7 @@ the command will prompt for the git reset mode to perform."
        t 'log))))
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
+  "Download and update the remote tracking branch at POS."
   (interactive "d")
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
@@ -6643,6 +6654,7 @@ would be a pull (by default --ff-only)."
       (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-head-to-local (pos &optional non-ff)
+  "WTF."
   (interactive "d\nP")
   (let* ((dst (egg-ref-at-point pos)))
     (unless dst
@@ -6653,6 +6665,10 @@ would be a pull (by default --ff-only)."
       (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
+  "Upload the ref at POS to a remote repository.
+If the ref track a remote tracking branch, then the repo to
+upload to is the repo of the remote tracking branch. Otherwise,
+prompt for a remote repo."
   (interactive "d\nP")
   (let* ((ref-at-point (get-text-property pos :ref))
          (lref (car ref-at-point))
@@ -7617,6 +7633,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
     (recenter)))
 
 (defun egg-log-locate-commit (pos)
+  "Relocate the commit at POS back to the full history in the log buffer."
   (interactive "d")
   (egg-do-locate-commit (get-text-property pos :commit)))
 
@@ -7830,6 +7847,7 @@ This is just an alternative way to launch `egg-log'"
   (egg-log branch))
 
 (defun egg-log-buffer-reflog-ref (pos)
+  "Show reflogs for the ref at POS"
   (interactive "d")
   (egg-reflog (egg-ref-at-point pos)))
 
