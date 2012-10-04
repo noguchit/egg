@@ -6192,19 +6192,21 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
         (proc egg-async-process)
+	(case-fold-search nil)
         state buffer res msg rebase-dir)
     (goto-char (point-min))
     (save-match-data
       (re-search-forward
        (eval-when-compile
          (concat "\\<\\(?:"
-                 "\\(please commit in egg.+$\\)"                             "\\|"
-                 "\\(Successfully rebased and updated.+$\\)"  		     "\\|"
-                 "\\(You can amend the commit now\\)" 	     		     "\\|"
-                 "\\(Automatic cherry-pick failed\\)"	     		     "\\|"
-                 "\\(nothing added to commit\\)"	             	     "\\|"
-                 "\\(nothing to commit (working directory clean)\\)"	     "\\|"
-                 "\\(If you wish to commit it anyway\\)"     		     "\\|"
+                 "\\(please commit in egg.+$\\)"                             "\\|" ;; 1
+                 "\\(Successfully rebased and updated.+$\\)"  		     "\\|" ;; 2
+                 "\\(You can amend the commit now\\)" 	     		     "\\|" ;; 3
+                 "\\(Automatic cherry-pick failed\\)"	     		     "\\|" ;; 4
+                 "\\(nothing added to commit\\)"	             	     "\\|" ;; 5
+                 "\\(nothing to commit (working directory clean)\\)"	     "\\|" ;; 6
+                 "\\(If you wish to commit it anyway\\)"     		     "\\|" ;; 7
+		 "\\(When you have resolved this problem\\)"		     "\\|" ;; 8
                  "\\(\\(?:Cannot\\|Could not\\).+\\)" "\\)")) nil t)
       (setq msg (match-string-no-properties 0))
       (setq res (cond ((match-beginning 1) :rebase-commit)
@@ -6214,7 +6216,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                       ((match-beginning 5) :rebase-empty)
                       ((match-beginning 6) :rebase-empty)
                       ((match-beginning 7) :rebase-empty)
-                      ((match-beginning 8) :rebase-fail))))
+                      ((match-beginning 8) :rebase-conflict)
+                      ((match-beginning 9) :rebase-fail))))
     (setq buffer (process-get proc :orig-buffer))
     (with-current-buffer buffer
       (egg-run-buffers-update-hook)
@@ -6237,7 +6240,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                            'egg-text-3)))
               (egg-log-msg-mk-closure-input #'egg-sentinel-commit-n-continue-rebase
 					    rebase-dir buffer orig-sha1 #'egg-log-msg-commit)
-              (egg-file-as-string (concat rebase-dir "message"))))
+              (egg-file-as-string (concat rebase-dir "message")))
+
+	     (message "please commit the changes to continue with rebase."))
 
 
             ((eq res :rebase-edit)
@@ -6249,7 +6254,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                                           'egg-text-3))
 	      (egg-log-msg-mk-closure-input #'egg-sentinel-commit-n-continue-rebase
 					    rebase-dir buffer orig-sha1 #'egg-log-msg-amend-commit)
-              (egg-commit-message "HEAD")))
+              (egg-commit-message "HEAD"))
+	     (message "please re-edit the message and commit the changes to continue with rebase."))
 
             ((eq res :rebase-conflict)
              (egg-status nil t :sentinel)
