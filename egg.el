@@ -1830,8 +1830,7 @@ EXIT-INFO should be the return value of `egg--do-git' or `egg--do'."
 	(goto-char (point-min))
 	(setq pp-results (funcall post-proc-func ret))))
     (cond ((bufferp buffer-to-update)
-	   (with-current-buffer buffer-to-update
-	     (funcall egg-buffer-refresh-func buffer-to-update)))
+	   (egg-refresh-buffer buffer-to-update))
 	  ((memq buffer-to-update '(t all))
 	   (egg-run-buffers-update-hook))
 	  (t nil))
@@ -3527,13 +3526,49 @@ exit code ACCEPTED-CODE is considered a success."
          (or newly-read-state (egg-get-repo-state))))
     (run-hooks 'egg-buffers-refresh-hook)))
 
+(defun egg-refresh-buffer (buffer)
+  (when (and (bufferp buffer) (buffer-live-p buffer))
+    (with-current-buffer buffer
+	(when (and (egg-git-dir)
+		   (functionp egg-buffer-refresh-func))
+	  (let ((line (count-lines (point-min) (point)))
+		(column (current-column))
+		(anchor (get-text-property (point) :navigation))
+		(offset (egg-section-relative-pos (point)))
+		(win-anchor-off-line-col-alist
+		 (mapcar (lambda (win)
+			   (let* ((win-pos (window-point win))
+				  (win-anchor (get-text-property win-pos :navigation))
+				  (win-off (egg-section-relative-pos win-pos))
+				  (win-line (count-lines (point-min) win-pos))
+				  (win-col (save-excursion
+					     (goto-char win-pos)
+					     (current-column))))
+			     (list win win-anchor win-off win-line win-col)))
+			 (get-buffer-window-list))))
+	    (funcall egg-buffer-refresh-func (current-buffer))
+	    (if anchor
+		(egg-buffer-goto-section anchor)
+	      (goto-line line)
+	      (goto-char (+ (line-beginning-position) column)))
+	    (dolist (win-anchor-off-line-col win-anchor-off-line-col-alist)
+	      (let ((win (nth 0 win-anchor-off-line-col))
+		    (anchor (nth 1 win-anchor-off-line-col))
+		    (offset (nth 2 win-anchor-off-line-col))
+		    (line (nth 3 win-anchor-off-line-col))
+		    (col (nth 4 win-anchor-off-line-col)))
+		(with-selected-window win
+		  (if anchor
+		      (egg-buffer-goto-section anchor offset)
+		    (goto-line line)
+		    (goto-char (+ (line-beginning-position) column)))))))))))
+
 (defun egg-buffer-cmd-refresh ()
   "Refresh the current egg special buffer."
   (interactive)
   (when (and (egg-git-dir)
              (functionp egg-buffer-refresh-func))
-    (funcall egg-buffer-refresh-func (current-buffer))
-    (recenter)))
+    (funcall egg-buffer-refresh-func (current-buffer))))
 
 (defun egg-buffer-cmd-next-block (nav-prop)
   "Move to the next block indentified by text property NAV-PROP."
@@ -3626,9 +3661,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
              (defun ,update-buffer-no-create-sym ()
                (let ((buf (,get-buffer-sym)))
                  (when (bufferp buf)
-                   (with-current-buffer buf
-                     (when (functionp egg-buffer-refresh-func)
-                       (funcall egg-buffer-refresh-func buf))))))
+		   (egg-refresh-buffer buf))))
              (add-hook 'egg-buffers-refresh-hook ',update-buffer-no-create-sym))))))
 
 
@@ -7015,41 +7048,12 @@ prompt for a remote repo."
 (defun egg-log-buffer-redisplay (buffer &optional init)
   (with-current-buffer buffer
     (let* ((state (egg-repo-state))
-           (sha1 (plist-get state :sha1))
-	   (line (count-lines (point-min) (point)))
-	   (column (current-column))
-	   (commit (egg-commit-at-point))
-	   (win-commit-line-col-alist
-	    (unless init
-	      (mapcar (lambda (win)
-			(let* ((win-pos (window-point win))
-			       (win-commit (egg-commit-at-point win-pos))
-			       (win-line (count-lines (point-min) win-pos))
-			       (win-col (save-excursion
-					  (goto-char win-pos)
-					  (current-column))))
-			  (list win win-commit win-line win-col)))
-		      (get-buffer-window-list)))))
+           (sha1 (plist-get state :sha1)))
       (plist-put egg-internal-log-buffer-closure :title
                  (egg-text (egg-pretty-head-string state) 'egg-branch))
       (plist-put egg-internal-log-buffer-closure :subtitle
                  (egg-text sha1 'font-lock-string-face))
-      (egg-generic-display-logs egg-internal-log-buffer-closure init)
-      (unless init
-	(if commit 
-	    (egg-log-buffer-goto-commit commit)
-	  (goto-line line)
-	  (goto-char (+ (line-beginning-position) column)))
-	(dolist (win-commit-line-col win-commit-line-col-alist)
-	  (let ((win (nth 0 win-commit-line-col))
-		(commit (nth 1 win-commit-line-col))
-		(line (nth 2 win-commit-line-col))
-		(col (nth 3 win-commit-line-col)))
-	    (with-selected-window win
-	      (if commit
-		  (egg-log-buffer-goto-commit commit)
-		(goto-line line)
-		(goto-char (+ (line-beginning-position) column))))))))))
+      (egg-generic-display-logs egg-internal-log-buffer-closure init))))
 
 (defun egg-log-buffer-redisplay-from-command (buffer)
   ;; in process buffer
@@ -7790,14 +7794,20 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
     ;;
     map))
 
-(defun egg-log-buffer-goto-commit (sha1)
+(defun egg-section-relative-pos (pos)
+  (cond ((equal (point-min) pos) 0)
+	((equal (get-text-property (1- pos) :navigation)
+		(get-text-property pos :navigation))
+	 (- (point)
+	    (previous-single-property-change pos :navigation nil (point-min))))
+	(t 0)))
+
+(defun egg-buffer-goto-section (section &optional offset)
   (let ((pos (point-min)))
     (while (and pos
-		(not (equal (get-text-property pos :commit) sha1)))
-      (setq pos (next-single-property-change pos :commit)))
-    (when pos
-      (goto-char pos)
-      (goto-char (+ (line-beginning-position) egg-log-buffer-comment-column -10)))))
+		(not (equal (get-text-property pos :navigation) section)))
+      (setq pos (next-single-property-change pos :navigation)))
+    (when pos (goto-char (if offset (+ offset pos) pos)))))
 
 (defun egg-do-locate-commit (sha1)
   (let ((buf (egg-get-log-buffer 'create))
@@ -7865,8 +7875,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
 						  "\n" t))))
 		      (plist-put closure :fetched-data
 				 (if output output "Nothing found!!!"))
-		    (with-current-buffer log-buffer
-		      (funcall egg-buffer-refresh-func log-buffer))))
+		      (egg-refresh-buffer log-buffer)))
 		  (current-buffer) closure)
 	    (nconc (list "--no-pager" "log" "--pretty=oneline" 
 			 "--decorate=full" "--no-color")
