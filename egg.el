@@ -891,6 +891,15 @@ if BUF was nil then use current-buffer"
                   (cons (cadr tmp) (car tmp))))
               lst))))
 
+(defun egg-upstream (branch)
+  (and (egg-git-ok nil "config" (concat "branch." branch ".merge"))
+       (let ((upstream (egg-git-to-string "name-rev" "--name-only" 
+					  (concat branch "@{upstream}"))))
+	 (if (and (> (length upstream) 8)
+		  (string-equal (substring upstream 0 8) "remotes/"))
+	     (substring upstream 8)
+	   upstream))))
+
 (defsubst egg-rbranch-to-remote (rbranch)
   "Return the remote name in the remote-branch RBRANCH.
 E.g: `foo' in `foo/bar'"
@@ -3316,6 +3325,8 @@ This is built by `egg-build-diff-info'")
            (setq src (egg-describe-rev (concat commit "^"))
                  dst (egg-describe-rev commit)))
           ((setq src (plist-get diff-info :src-revision))
+	   (when (consp src)
+	     (setq src (egg-git-to-string "merge-base" (car src) (cdr src))))
            (setq src (egg-describe-rev src)))
           ((setq src (and diff-info ":0"))
            (setq src-name "INDEX")))
@@ -4908,9 +4919,14 @@ the source revision."
         (src-rev (get-text-property pos :src-revision)))
     
     (egg-revert-visited-files 
-     (plist-get (if (stringp src-rev)
-		  (egg--git-co-files-cmd t file src-rev)
-		(egg--git-co-files-cmd t file)) :files))))
+     (plist-get (cond ((stringp src-rev)
+		       (egg--git-co-files-cmd t file src-rev))
+		      ((consp src-rev)
+		       (egg--git-co-files-cmd 
+			t file (egg-git-to-string "merge-base" 
+						  (car src-rev) (cdr src-rev))))
+		      (t (egg--git-co-files-cmd t file)))
+		:files))))
 
 (defun egg-diff-section-cmd-revert-to-head (pos)
   "Revert the file and its slot in the index to its state in HEAD."
@@ -5347,7 +5363,19 @@ using git's default msg."
 (defconst egg-diff-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:DiffBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
-    map))
+    (define-key map "G"       'egg-diff-buffer-run-command)
+    (define-key map "s"       'egg-status)
+    (define-key map "l"       'egg-log)
+    (define-key map "/"       'egg-search-changes)
+    (define-key map "C-c C-/" 'egg-search-changes-all)
+    map)
+  "\\{egg-diff-buffer-mode-map}")
+
+(defun egg-diff-buffer-run-command ()
+  "Re-run the command that create the buffer."
+  (interactive)
+  (call-interactively (or (plist-get egg-diff-buffer-info :command)
+			  #'egg-buffer-cmd-refresh)))
 
 (defun egg-diff-buffer-insert-diffs (buffer)
   "Insert contents from `egg-diff-buffer-info' into BUFFER.
@@ -5359,8 +5387,16 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
           (src-prefix (plist-get egg-diff-buffer-info :src))
           (dst-prefix (plist-get egg-diff-buffer-info :dst))
           (help (plist-get egg-diff-buffer-info :help))
+	  (pickaxed (plist-get egg-diff-buffer-info :pickaxed))
+	  
           (inhibit-read-only t)
+	  pickaxe-term
           pos beg inv-beg help-beg help-end help-inv-beg err-code)
+
+      (setq pickaxe-term (and pickaxed (if (consp pickaxed)
+					   (car pickaxed)
+					 pickaxed)))
+      
       (erase-buffer)
       (insert (egg-text title 'egg-section-title) "\n")
       (insert prologue "\n")
@@ -5378,7 +5414,11 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (setq err-code (apply 'call-process egg-git-command nil t nil "diff" args))
       (egg-cmd-log (format "RET:%d\n" err-code))
       (unless (> (point) beg)
-        (insert (egg-text "No difference!\n" 'egg-text-4)))
+        (if pickaxed
+	    (insert (egg-text "No difference containing: " 'egg-text-4)
+		    (egg-text pickaxe-term 'egg-text-4)
+		    (egg-text "!\n" 'egg-text-4))
+	  (insert (egg-text "No difference!\n" 'egg-text-4))))
       (egg-delimit-section :section 'file (point-min) (point) inv-beg
                            egg-section-map 'file)
       (egg-delimit-section :help 'help help-beg help-end help-inv-beg
@@ -5466,7 +5506,65 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (egg-diff-buffer-insert-diffs buf))
     buf))
 
-(defun egg-build-diff-info (src dst &optional file pickaxe)
+(defun egg-buffer-ask-pickaxe-mode (search-scope search-code &optional default-term)
+  (let* ((key-type-alist '((?s "string" identity)
+			   (?r "posix regex" (lambda (s) (list s :regex)))
+			   (?l "line matching regex" (lambda (s) (list s :line)))))
+	 (search-info (assq search-code key-type-alist))
+	 (search-type (nth 1 search-info))
+	 (make-term-func (nth 2 search-info))
+	 key term)
+    (while (not (stringp search-type))
+      (setq key (read-key-sequence "search type: (s)tring, (r)egex, (l)line or (q)uit? "))
+      (setq key (string-to-char key))
+      (setq search-info (assq key key-type-alist))
+      (when (= key ?q) (error "Abort searching %s" search-scope))
+      (setq search-type (nth 1 search-info))
+      (setq make-term-func (nth 2 search-info))
+      (unless (consp search-info)
+	(message "invalid choice: %c! (must be of of s,r,l or q)" key)
+	(ding)
+	(sit-for 1)))
+    (setq term (read-string (format "search %s for %s: " search-scope search-type)
+			    default-term))    
+    (unless (> (length term) 1)
+      (error "Cannot search for %s: %s!!" (nth 1 key) term))
+    (funcall make-term-func term)))
+
+(defun egg-buffer-prompt-pickaxe (search-scope default-search default-term
+						  &optional ask-mode ask-regexp ask-term)
+  "Prompt for pickaxe.
+SEARCH-SCOPE is a string such as \"diffs\" or \"history\"
+DEFAULT-SEARCH-CODE is used asking the term and is one of: :string,:regexp or :line
+DEFAULT-TERM is used a the initial value when reading user's input.
+If ASK-MODE is non-nil then ask for the mode (string, regexp or line) then ask for the term.
+Else if ASK-REGEXP is non-nil then ask for a regexp (the term).
+Else if ASK-TERM is non-nil then ask for the term using DEFAULT-SEARCH as search type."
+  (cond (ask-mode
+	 (egg-buffer-ask-pickaxe-mode search-scope nil default-term))
+	(ask-regexp
+	 (egg-buffer-ask-pickaxe-mode search-scope ?r default-term))
+	(ask-term
+	 (egg-buffer-ask-pickaxe-mode search-scope (assoc-default default-search
+								  '((:string . ?s)
+								    (:regexp . ?r)
+								    (:line   . ?l)))
+				      default-term))
+	(t nil)))
+
+(defun egg-re-do-diff (file-name pickaxe only-dst-path)
+  (let* ((dst (egg-read-rev "Compare rev: " (plist-get egg-diff-buffer-info :dst-revision)))
+	 (old-src (plist-get egg-diff-buffer-info :src-revision))
+	 (src (egg-read-rev (format "Compare %s vs %s: " dst 
+				    (if only-dst-path "upstream" "base revision"))
+			    (if (consp old-src) (car old-src) old-src)))
+	 (command (plist-get egg-diff-buffer-info :command))
+	 (info (egg-build-diff-info src dst file-name pickaxe only-dst-path)))
+    (when command
+      (plist-put info :command command))
+    (egg-do-diff info)))
+
+(defun egg-build-diff-info (src dst &optional file pickaxe only-dst-path)
   "Build the data for the diff buffer.
 This data is based on the delta between SRC and DST. The delta is restricted
 to FILE if FILE is non-nil. SRC and DST should be valid git revisions.
@@ -5506,10 +5604,16 @@ nil then compare the index and the work-dir."
                        :diff-map egg-staged-diff-section-map
                        :hunk-map egg-staged-hunk-section-map))
                 ((and (stringp src) (stringp dst))
-                 (list :args (nconc options (list (concat src ".." dst)))
-                       :title (format "%sfrom %s to %s" search-string src dst)
-                       :prologue (format "a: %s\nb: %s" src dst)
-                       :src-revision src
+                 (list :args (nconc options (list (concat src 
+							  (if only-dst-path "..." "..") 
+							  dst)))
+                       :title (format "%sfrom %s to %s" search-string 
+				      (if only-dst-path (concat dst "@" src) src)
+				      dst)
+                       :prologue (format "a: %s\nb: %s" 
+					 (if only-dst-path (concat dst "@" src) src) 
+					 dst)
+                       :src-revision (if only-dst-path (cons src dst) src)
                        :dst-revision dst
                        :diff-map egg-diff-section-map
                        :hunk-map egg-hunk-section-map))
@@ -5529,14 +5633,18 @@ nil then compare the index and the work-dir."
       (setq tmp (cons "-M" tmp))
       (plist-put info :args tmp))
     (when pickaxe
+      (plist-put info :pickaxed pickaxe)
       (setq tmp (plist-get info :args))
       (setq tmp (nconc (cond ((stringp pickaxe)
+			      (plist-put info :highlight (regexp-quote pickaxe))
 			      (list "-S" pickaxe))
 			     ((and (consp pickaxe) (stringp (car pickaxe))
 				   (memq :line pickaxe))
+			      (plist-put info :highlight (car pickaxe))
 			      (list "-G" (car pickaxe)))
 			     ((and (consp pickaxe) (stringp (car pickaxe))
 				   (memq :regex pickaxe))
+			      (plist-put info :highlight (car pickaxe))
 			      (list "--pickaxe-regex" "-S" (car pickaxe)))
 			     (t nil))
 		       tmp))
@@ -5554,10 +5662,27 @@ nil then compare the index and the work-dir."
     info))
 
 (defun egg-diff-ref (&optional default)
-  "Prompt a revision compare against worktree."
+  "Prompt a revision to compare against worktree."
   (interactive (list (egg-ref-at-point)))
   (let* ((src (egg-read-rev "diff: " default))
-         (buf (egg-do-diff (egg-build-diff-info src nil))))
+	 (diff-info (egg-build-diff-info src nil))
+         (buf (progn (plist-put diff-info :command 'egg-diff-ref)
+		     (egg-do-diff diff-info))))
+    (pop-to-buffer buf)))
+
+(defun egg-diff-upstream (ref &optional prompt)
+  "Prompt compare upstream to REF."
+  (interactive (list (if current-prefix-arg
+			 (egg-read-local-ref "ref to compare: " (egg-branch-or-HEAD))
+		       (egg-branch-or-HEAD))
+		     current-prefix-arg))
+  (let* ((branch-upstream (egg-upstream ref))
+	 (upstream (if prompt 
+		       (egg-read-ref (format "upstream of %s: " ref) branch-upstream)
+		     branch-upstream))
+	 (diff-info (egg-build-diff-info upstream ref nil nil t))
+         (buf (progn (plist-put diff-info :command 'egg-diff-upstream)
+		     (egg-do-diff diff-info))))
     (pop-to-buffer buf)))
 
 (defun egg-buffer-pop-to-file (file sha1 &optional other-win use-wdir-file line)
@@ -5672,6 +5797,7 @@ Jump to line LINE if it's not nil."
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
     (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
+    (define-key map (kbd "C-c C-=") 'egg-log-buffer-diff-upstream)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-local-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-local-ref-menu)
@@ -7265,6 +7391,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    (egg-text "  HEAD  " 'egg-log-HEAD-name) " "
    "\n"))
 
+
 (defun egg-log-buffer-diff-revs (pos &optional do-pickaxe)
   "Compare HEAD against the rev at POS."
   (interactive "d\np")
@@ -7272,32 +7399,63 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
          (mark (egg-log-buffer-find-first-mark ?*))
 	 (head-name (egg-branch-or-HEAD))
          (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) head-name))
-	 (key-type-alist '((?s "string" identity)
-			   (?r "posix regex" (lambda (s) (list s :regex)))
-			   (?l "line matching regex" (lambda (s) (list s :line)))))
-	 pickaxe buf key pickaxe-type term)
+	 pickaxe buf diff-info)
     (unless (and rev (stringp rev))
       (error "No commit here to compare against %s!" base))
     (when (string-equal rev base)
       (error "It's pointless to compare %s vs %s!" rev base))
     (setq pickaxe
-	  (cond ((> do-pickaxe 15)
-		 (setq key (read-key-sequence "Search type: (s)tring, (r)egex or (l)line? "))
-		 (setq key (string-to-char key))
-		 (unless (assq key key-type-alist)
-		   (error "Invalid choice: %c (must be of of s,r or l)!" key))
-		 (setq key (assq key key-type-alist))
-		 (setq term (read-string (format "Search diffs for %s:" (nth 1 key))
-					 (egg-string-at-point)))
-		 (unless (> (length term) 1)
-		   (error "Cannot search for %s: %s" (nth 1 key) term))
-		 (funcall (nth 2 key) term))
-		((> do-pickaxe 3)
-		 (read-string "Search diffs for string: " (egg-string-at-point)))
-		(t nil)))
-    (setq buf (egg-do-diff 
-	       (egg-build-diff-info rev base nil pickaxe)))
+	  (egg-buffer-prompt-pickaxe "diffs" :string (egg-string-at-point)
+				     (> do-pickaxe 63)
+				     (> do-pickaxe 15)
+				     (> do-pickaxe 3)))
+    (setq diff-info (egg-build-diff-info rev base nil pickaxe))
+    (plist-put diff-info :command 
+	       (lambda (prefix)
+		 (interactive "p")
+		 (egg-re-do-diff nil
+				 (egg-buffer-prompt-pickaxe "diffs" :string
+							    (egg-string-at-point)
+							    (> prefix 63)
+							    (> prefix 15)
+							    (> prefix 3))
+				 nil)))
+    (setq buf (egg-do-diff diff-info))
     (pop-to-buffer buf)))
+
+(defun egg-log-buffer-diff-upstream (pos &optional do-pickaxe)
+  "Compare REF at POS against its upstream."
+  (interactive "d\np")
+  (let* ((ref (egg-ref-at-point pos :head))
+         (mark (egg-log-buffer-find-first-mark ?*))
+         (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+	 pickaxe buf diff-info)
+    (unless (and ref (stringp ref))
+      (error "No ref here to compare"))
+    (when (equal ref upstream)
+      (error "It's pointless to compare %s vs %s!" ref upstream))
+    (unless (stringp upstream)
+      (setq upstream (egg-read-ref (format "upstream of %s: " ref)
+				    (egg-upstream ref))))
+    (setq pickaxe
+	  (egg-buffer-prompt-pickaxe "diffs" :string (egg-string-at-point)
+				     (> do-pickaxe 63)
+				     (> do-pickaxe 15)
+				     (> do-pickaxe 3)))
+    (setq diff-info (egg-build-diff-info upstream ref nil pickaxe t))
+    (plist-put diff-info :command 
+	       (lambda (prefix)
+		 (interactive "p")
+		 (egg-re-do-diff nil
+				 (egg-buffer-prompt-pickaxe "diffs" :string
+							    (egg-string-at-point)
+							    (> prefix 63)
+							    (> prefix 15)
+							    (> prefix 3))
+				 t)))
+    (setq buf (egg-do-diff diff-info))
+    (pop-to-buffer buf)))
+
 
 (defun egg-yggdrasil-insert-logs (ref)
   (let* ((mappings (egg-git-to-lines "--no-pager" "log" "-g" "--pretty=%H %gd%n" ref))
