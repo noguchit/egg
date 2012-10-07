@@ -7015,12 +7015,41 @@ prompt for a remote repo."
 (defun egg-log-buffer-redisplay (buffer &optional init)
   (with-current-buffer buffer
     (let* ((state (egg-repo-state))
-           (sha1 (plist-get state :sha1)))
+           (sha1 (plist-get state :sha1))
+	   (line (count-lines (point-min) (point)))
+	   (column (current-column))
+	   (commit (egg-commit-at-point))
+	   (win-commit-line-col-alist
+	    (unless init
+	      (mapcar (lambda (win)
+			(let* ((win-pos (window-point win))
+			       (win-commit (egg-commit-at-point win-pos))
+			       (win-line (count-lines (point-min) win-pos))
+			       (win-col (save-excursion
+					  (goto-char win-pos)
+					  (current-column))))
+			  (list win win-commit win-line win-col)))
+		      (get-buffer-window-list)))))
       (plist-put egg-internal-log-buffer-closure :title
                  (egg-text (egg-pretty-head-string state) 'egg-branch))
       (plist-put egg-internal-log-buffer-closure :subtitle
                  (egg-text sha1 'font-lock-string-face))
-      (egg-generic-display-logs egg-internal-log-buffer-closure init))))
+      (egg-generic-display-logs egg-internal-log-buffer-closure init)
+      (unless init
+	(if commit 
+	    (egg-log-buffer-goto-commit commit)
+	  (goto-line line)
+	  (goto-char (+ (line-beginning-position) column)))
+	(dolist (win-commit-line-col win-commit-line-col-alist)
+	  (let ((win (nth 0 win-commit-line-col))
+		(commit (nth 1 win-commit-line-col))
+		(line (nth 2 win-commit-line-col))
+		(col (nth 3 win-commit-line-col)))
+	    (with-selected-window win
+	      (if commit
+		  (egg-log-buffer-goto-commit commit)
+		(goto-line line)
+		(goto-char (+ (line-beginning-position) column))))))))))
 
 (defun egg-log-buffer-redisplay-from-command (buffer)
   ;; in process buffer
@@ -7760,6 +7789,15 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
     (set-keymap-parent map egg-log-commit-simple-map)
     ;;
     map))
+
+(defun egg-log-buffer-goto-commit (sha1)
+  (let ((pos (point-min)))
+    (while (and pos
+		(not (equal (get-text-property pos :commit) sha1)))
+      (setq pos (next-single-property-change pos :commit)))
+    (when pos
+      (goto-char pos)
+      (goto-char (+ (line-beginning-position) egg-log-buffer-comment-column -10)))))
 
 (defun egg-do-locate-commit (sha1)
   (let ((buf (egg-get-log-buffer 'create))
