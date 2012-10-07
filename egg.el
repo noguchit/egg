@@ -5415,6 +5415,24 @@ using git's default msg."
   (call-interactively (or (plist-get egg-diff-buffer-info :command)
 			  #'egg-buffer-cmd-refresh)))
 
+(defun egg-buffer-highlight-pickaxe (highlight-regexp beg end &optional is-cc-diff)
+  (when (stringp highlight-regexp)
+    (when (eq (aref highlight-regexp 0) ?^)
+      (setq highlight-regexp
+	    (concat "^" (make-string (if is-cc-diff 2 1) ?.)
+		    (substring highlight-regexp 1))))
+    (goto-char beg)
+    (while (re-search-forward highlight-regexp end t)
+      (unless (or (not (get-text-property (match-beginning 0) :hunk))
+		  (if is-cc-diff 
+		      (string-equal (buffer-substring-no-properties 
+				     (line-beginning-position) 
+				     (+ (line-beginning-position) 2))
+				    "  ")
+		    (eq (char-after (line-beginning-position)) ? ))
+		  (eq (char-after (line-beginning-position)) ?@))
+	(put-text-property (match-beginning 0) (match-end 0) 'face 'highlight)))))
+
 (defun egg-diff-buffer-insert-diffs (buffer)
   "Insert contents from `egg-diff-buffer-info' into BUFFER.
 egg-diff-buffer-info is built using `egg-build-diff-info'."
@@ -5428,12 +5446,17 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
 	  (pickaxed (plist-get egg-diff-buffer-info :pickaxed))
 	  
           (inhibit-read-only t)
-	  pickaxe-term
-          pos beg inv-beg help-beg help-end help-inv-beg err-code)
+	  pickaxe-term highlight-regexp is-cc-diff is-line-pickaxed
+          pos beg end inv-beg help-beg help-end help-inv-beg err-code)
 
-      (setq pickaxe-term (and pickaxed (if (consp pickaxed)
-					   (car pickaxed)
-					 pickaxed)))
+      (cond ((stringp pickaxed)
+	     (setq pickaxe-term pickaxed)
+	     (setq highlight-regexp (regexp-quote pickaxed)))
+	    ((consp pickaxed)
+	     (setq pickaxe-term (car pickaxed))
+	     (setq highlight-regexp pickaxe-term)
+	     (setq is-line-pickaxed (eq (cdr pickaxed) :line)))
+	    (t nil))
       
       (erase-buffer)
       (insert (egg-text title 'egg-section-title) "\n")
@@ -5451,7 +5474,8 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (egg-cmd-log "RUN: git diff" (mapconcat #'identity args " ") "\n")
       (setq err-code (apply 'call-process egg-git-command nil t nil "diff" args))
       (egg-cmd-log (format "RET:%d\n" err-code))
-      (unless (> (point) beg)
+      (setq end (point))
+      (unless (> end beg)
         (if pickaxed
 	    (insert (egg-text "No difference containing: " 'egg-text-4)
 		    (egg-text pickaxe-term 'egg-text-4)
@@ -5462,11 +5486,17 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (egg-delimit-section :help 'help help-beg help-end help-inv-beg
                            egg-section-map 'egg-compute-navigation)
       (apply 'egg-decorate-diff-section
-             :begin (point-min)
-             :end (point)
+             ;; :begin (point-min)
+             :begin beg
+             :end end
              :src-prefix src-prefix
              :dst-prefix dst-prefix
              egg-diff-buffer-info)
+      (egg-buffer-highlight-pickaxe highlight-regexp beg end
+				    (save-excursion
+				      (goto-char beg)
+				      (save-match-data
+					(re-search-forward "^@@@" end t))))
       (goto-char pos))))
 
 (define-egg-buffer diff "*%s-diff@%s*"
@@ -6994,21 +7024,7 @@ prompt for a remote repo."
       ;; (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
 
       (when (stringp highlight-regexp)
-	(when (eq (aref highlight-regexp 0) ?^)
-	  (setq highlight-regexp
-		(concat "^" (make-string (if is-cc-diff 2 1) ?.)
-			(substring highlight-regexp 1))))
-	(goto-char diff-beg)
-	(while (re-search-forward highlight-regexp diff-end t)
-	  (unless (or (not (get-text-property (match-beginning 0) :hunk))
-		      (if is-cc-diff 
-			  (string-equal (buffer-substring-no-properties 
-					 (line-beginning-position) 
-					 (+ (line-beginning-position) 2))
-					"  ")
-			(eq (char-after (line-beginning-position)) ? ))
-		      (eq (char-after (line-beginning-position)) ?@))
-	    (put-text-property (match-beginning 0) (match-end 0) 'face 'highlight))))
+	(egg-buffer-highlight-pickaxe highlight-regexp diff-beg diff-end is-cc-diff))
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
