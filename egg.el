@@ -1276,7 +1276,34 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 		    (format "refs/heads/%s*" prefix)
 		    (format "refs/tags/%s*" prefix)))
 
-(defun egg-complete-ref (string &optional func all)
+(defun egg-complete-get-all-refs (prefix &optional matches)
+  (if matches
+      (try-completion prefix matches)
+    (egg-get-all-refs prefix)))
+
+(defun egg-complete-get-local-refs (prefix &optional matches)
+  (if matches
+      (try-completion prefix matches)
+    (egg-get-local-refs prefix)))
+
+(defun egg-get-match-files-substring (sub &optional matches)
+  (if matches
+      (try-completion sub (mapcar #'file-name-nondirectory matches))
+    (let ((default-directory (egg-work-tree-dir))
+	  files name-matched-files full-match)
+      (setq files (egg-git-to-lines "--no-pager" "ls-files" 
+				    (concat sub "*")
+				    (concat "*/" sub "*")))
+      (dolist (file files)
+	(if (string-equal file sub)
+	    (setq full-match file))
+	(if (string-equal (file-name-nondirectory file) sub)
+	    (add-to-list 'name-matched-files file)))
+      (or (and full-match (list full-match))
+	  name-matched-files
+	  files))))
+
+(defun egg-do-completion (string &optional func all)
   "Do ref name completion"
   (let* ((matches (funcall func string))
 	 (single (= (length matches) 1))
@@ -1284,8 +1311,8 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	 prefix)
 
     (if all matches
-      (unless matches
-	(setq prefix (try-completion string matches)))
+      (when matches
+	(setq prefix (funcall func string matches)))
       (cond ((null matches) nil)
 	    (perfect t)
 	    (single (car matches))
@@ -1294,10 +1321,34 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	    (t string)))))
 
 (defsubst egg-read-ref (prompt &optional default no-match-ok)
-  (completing-read prompt #'egg-complete-ref #'egg-get-all-refs (not no-match-ok) default))
+  (completing-read prompt #'egg-do-completion #'egg-complete-get-all-refs (not no-match-ok) default))
 
 (defsubst egg-read-local-ref (prompt &optional default no-match-ok)
-  (completing-read prompt #'egg-complete-ref #'egg-get-local-refs (not no-match-ok) default))
+  (completing-read prompt #'egg-do-completion #'egg-complete-get-local-refs (not no-match-ok) default))
+
+(defun egg-read-tracked-filename (prompt &optional default no-match-ok)
+  (concat (egg-work-tree-dir)
+	  (completing-read prompt #'egg-do-completion
+			   #'egg-get-match-files-substring
+			   (not no-match-ok) default)))
+
+(defun egg-find-tracked-file (file-name)
+  (interactive (list (egg-read-tracked-filename "Find tracked file: ")))
+  (switch-to-buffer (find-file-noselect file-name)))
+
+;; (defun egg-complete-filename (string &optional func all)
+;;   (let* ((matches (egg-git-to-lines "--no-pager" "ls-files" (concat "*" string "*")))
+;; 	 (single (null (cdr matches)))
+;; 	 (perfect (and single (equal (car matches) string)))
+;; 	 prefix)
+;;     (if all matches
+;;       (unless (null matches)
+;; 	(setq prefix (try-completion string matches)))
+;;       (cond ((null matches) nil)
+;; 	    (perfect t)
+;; 	    ((stringp prefix) prefix)
+;; 	    ((null prefix) nil)
+;; 	    (t string)))))
 
 ;;(egg-read-local-ref "gimme a lref: ")
 
@@ -8858,6 +8909,7 @@ with the current contents in work-dir."
   (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
   (define-key map (kbd "e") 'egg-file-ediff)
+  (define-key map (kbd "f") 'egg-find-tracked-file)
   (define-key map (kbd "g") 'egg-grep)
   (define-key map (kbd "i") 'egg-file-stage-current-file)
   (define-key map (kbd "l") 'egg-log)
@@ -8872,7 +8924,8 @@ with the current contents in work-dir."
   (define-key map (kbd "/") 'egg-search-file-changes)
   (define-key map (kbd "?") 'egg-search-changes)
   (define-key map (kbd "=") 'egg-file-diff)
-  (define-key map (kbd "~") 'egg-file-version-other-window))
+  (define-key map (kbd "~") 'egg-file-version-other-window)
+  )
 
 (defconst egg-minor-mode-menu (make-sparse-keymap "Egg (Git)"))
 (define-key egg-minor-mode-map [menu-bar egg-minor-mode-menu]
