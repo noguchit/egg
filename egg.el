@@ -416,6 +416,11 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'integer)
 
+(defcustom egg-max-reflogs 10
+  "Maximum number of reflogs displayed in the log buffer."
+  :group 'egg
+  :type 'integer)
+
 (defcustom egg-confirm-next-action t
   "Always prompt for confirmation while guessing the next logical action ."
   :group 'egg
@@ -6995,8 +7000,15 @@ prompt for a remote repo."
 			(substring highlight-regexp 1))))
 	(goto-char diff-beg)
 	(while (re-search-forward highlight-regexp diff-end t)
-	  (put-text-property (match-beginning 0) (match-end 0) 'face 'highlight)))
-
+	  (unless (or (not (get-text-property (match-beginning 0) :hunk))
+		      (if is-cc-diff 
+			  (string-equal (buffer-substring-no-properties 
+					 (line-beginning-position) 
+					 (+ (line-beginning-position) 2))
+					"  ")
+			(eq (char-after (line-beginning-position)) ? ))
+		      (eq (char-after (line-beginning-position)) ?@))
+	    (put-text-property (match-beginning 0) (match-end 0) 'face 'highlight))))
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
@@ -7491,7 +7503,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 
 (defun egg-yggdrasil-insert-logs (ref)
-  (let* ((mappings (egg-git-to-lines "--no-pager" "log" "-g" "--pretty=%H %gd%n" ref))
+  (let* ((mappings 
+	  (egg-git-to-lines 
+	   "--no-pager" "log" "-g" "--pretty=%H %gd%n" 
+	   (format "--max-count=%d" (1+ egg-max-reflogs))
+	   ref))
 	 (beg (point)) 
 	 (reflog-0 (concat ref "@{0}"))
 	 (head-name (egg-branch-or-HEAD))
