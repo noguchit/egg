@@ -5590,7 +5590,7 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
 
 (defun egg-buffer-ask-pickaxe-mode (pickaxe-action search-code &optional default-term)
   (let* ((key-type-alist '((?s "string" identity)
-			   (?r "posix regex" (lambda (s) (list s :regex)))
+			   (?r "posix regex" (lambda (s) (list s :regexp)))
 			   (?l "line matching regex" (lambda (s) (list s :line)))))
 	 (search-info (assq search-code key-type-alist))
 	 (search-type (nth 1 search-info))
@@ -5605,6 +5605,7 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (when (= key ?q) (error "%s: aborted" pickaxe-action))
       (setq search-type (nth 1 search-info))
       (setq make-term-func (nth 2 search-info))
+      (setq search-code key)
       (unless (consp search-info)
 	(message "invalid choice: %c! (must be of of s,r,l or q)" key)
 	(ding)
@@ -5614,7 +5615,11 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
 		default-term))    
     (unless (> (length term) 1)
       (error "Cannot match %s: %s!!" (nth 1 key) term))
-    (funcall make-term-func term)))
+    (setq term (funcall make-term-func term))
+    (when (and (memq search-code '(?r ?l))
+	       (y-or-n-p "ignore case when matching regexp? "))
+      (setq term (append term (list :ignore-case))))
+    term))
 
 (defun egg-buffer-prompt-pickaxe (pickaxe-action default-search default-term
 					       &optional ask-mode ask-regexp ask-term)
@@ -5728,7 +5733,7 @@ nil then compare the index and the work-dir."
 			      (plist-put info :highlight (car pickaxe))
 			      (list "-G" (car pickaxe)))
 			     ((and (consp pickaxe) (stringp (car pickaxe))
-				   (memq :regex pickaxe))
+				   (memq :regexp pickaxe))
 			      (plist-put info :highlight (car pickaxe))
 			      (list "--pickaxe-regex" "-S" (car pickaxe)))
 			     (t nil))
@@ -7930,18 +7935,16 @@ or removed the term, then mark the commit as EDIT for the up-comming interactive
 rebase. Otherwise mark the commit as PICK."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (let* ((mark (egg-log-buffer-find-first-mark ?*))
-	 (end-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)
-		      (egg-branch-or-HEAD)))
+  (let* ((end-rev (egg-branch-or-HEAD))
 	 (start-rev (egg-commit-at-point))
 	 (revs (concat start-rev ".." end-rev))
 	 (all-commits (egg-git-to-lines "--no-pager" "log" "--pretty=%H" revs))
 	 (pickaxe-term (egg-buffer-prompt-pickaxe "mark commits" :string default-search-term
 						  (> level 15) (> level 3) t))
 	 (args (cond ((stringp pickaxe-term) (list "-S" pickaxe-term))
-		     ((and (consp pickaxe-term) (eq (cdr pickaxe-term) :regexp))
+		     ((and (consp pickaxe-term) (memq :regexp pickaxe-term))
 		      (list  "--pickaxe-regex" "-S" (car pickaxe-term)))
-		     ((and (consp pickaxe-term) (eq (cdr pickaxe-term) :line))
+		     ((and (consp pickaxe-term) (memq :line pickaxe-term))
 		      (list "-G" (car pickaxe-term))))))
     (setq args (nconc args (list revs)))
     (egg-async-mark-log-buffer-commits args (current-buffer)
@@ -7999,118 +8002,142 @@ rebase. Otherwise mark the commit as PICK."
                       egg-query:commit-commit-map)))
 
 
-(defun egg-search-file-changes (level &optional string-at-point)
-  "Search file's history from HEAD for changes introducing/removing a term.
-STRING-AT-POINT is the default term. If a BASE ref was marked, then 
-restrict the search to BASE..HEAD."
+(defun egg-search-file-changes (prefix &optional default-term file-name)
+  "Search file's history in the current branch for changes introducing or removing a term.
+TERM is the default search term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (egg-search-changes level string-at-point (buffer-file-name)))
-
-(defun egg-search-changes (level &optional string-at-point file-name)
-  "Search history from HEAD for changes introducing/removing a term.
-STRING-AT-POINT is the default term. If a BASE ref was marked, then 
-restrict the search to BASE..HEAD."
-  (interactive (list (prefix-numeric-value current-prefix-arg)
-		     (egg-string-at-point)
-		     nil))
-  (let* ((mark (egg-log-buffer-find-first-mark ?*))
-	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
-	 (revs (and start-rev (list (concat start-rev "..HEAD"))))
-	 (closure (egg-search-changes-1 level string-at-point revs file-name)))
+  (let* ((head-name (egg-branch-or-HEAD))
+	 (file-name (or file-name (buffer-file-name)))
+	 (short-name (file-name-nondirectory file-name))
+	 (search-action (format "search %s's history in %s" short-name head-name))
+	 closure) 
+    (setq closure
+	  (egg-search-changes nil nil file-name
+			      (egg-buffer-prompt-pickaxe search-action :string default-term
+							 (> prefix 15) (> prefix 3) t)))
     (plist-put closure :command
-	       `(lambda (level)
-		  (interactive "p")
-		  (egg-search-changes level (egg-string-at-point) ,file-name)))))
+	       `(lambda (prefix default-term)
+		  (interactive (list (prefix-numeric-value current-prefix-arg)
+				     (egg-string-at-point)))
+		  (egg-search-file-changes prefix default-term ,file-name)))))
 
-(defun egg-search-file-changes-all (level &optional string-at-point)
-  "Search file's full history for changes introducing/removing a term.
-STRING-AT-POINT is the default term."
+(defun egg-search-changes (prefix default-term &optional file-name pickaxe)
+  "Search the current branch's history for changes introducing/removing a term.
+DEFAULT-TERM is the default search term.
+If called non-interactively, the caller can provide ready-made PICKAXE info
+and a FILE-NAME. If FILE-NAME is non-nil then restrict the search to FILE-NAME's
+history."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (egg-search-changes-all level string-at-point (buffer-file-name)))
+  (let* ((mark (egg-log-buffer-find-first-mark ?*))
+	 (head-name (egg-branch-or-HEAD))
+	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+	 (revs (and start-rev (list (concat start-rev "^.." head-name))))
+	 (pickaxe (or pickaxe
+		      (egg-buffer-prompt-pickaxe 
+		       (if revs (concat "search " (car revs))
+			 (format "search %s'shistory" head-name))
+		       :string default-term 
+		       (> prefix 15) (> prefix 3) t)))
+	 closure)
+    (setq closure
+	  (egg-do-search-changes (if (stringp pickaxe) pickaxe (car pickaxe))
+				 (unless (stringp pickaxe) (nth 1 pickaxe))
+				 (if (consp pickaxe) (memq :ignore-case pickaxe))
+				 file-name revs))
+    (plist-put closure :command
+	       (lambda (prefix default-term)
+		 (interactive (list (prefix-numeric-value current-prefix-arg)
+				    (egg-string-at-point)))
+		 (egg-search-changes prefix default-term)))
+    closure))
 
-(defun egg-search-changes-all (level &optional string-at-point file-name)
-  "Search entire history for changes introducing/removing a term.
-STRING-AT-POINT is the default term."
+(defun egg-search-file-changes-all (prefix &optional default-term file-name)
+  "Search file's full history for changes introducing or removing a term.
+TERM is the default search term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
-		     (egg-string-at-point)
-		     nil))
-  (plist-put (egg-search-changes-1 level string-at-point (list "--all") file-name)
-	     :command 
-	     `(lambda (level)
-		(interactive "p")
-		(egg-search-changes-all level (egg-string-at-point) ,file-name))))
+		     (egg-string-at-point)))
+  (let* ((file-name (or file-name (buffer-file-name)))
+	 (short-name (file-name-nondirectory file-name))
+	 (search-action (format "search %s's full history" short-name))
+	 closure) 
+    (setq closure
+	  (egg-search-changes-all nil nil file-name
+				  (egg-buffer-prompt-pickaxe search-action :string 
+							     default-term
+							     (> prefix 15) (> prefix 3) t)))
+    (plist-put closure :command
+	       `(lambda (prefix default-term)
+		  (interactive (list (prefix-numeric-value current-prefix-arg)
+				     (egg-string-at-point)))
+		  (egg-search-file-changes-all prefix default-term ,file-name)))))
 
-(defun egg-search-changes-1 (level initial-string revs file-name)
-  (let ((file-git-name (and file-name (egg-file-git-name file-name)))
-	 search-type term case-insensitive)
-    (cond ((< level 3) 			;; simple string search
-	   (egg-do-search-changes initial-string nil nil nil file-git-name level revs))
-	  ((< level 15)			;; search posix regexp
-	   (egg-do-search-changes initial-string t nil nil file-git-name level revs))
-	  ((< level 63)		       	;; search for line
-	   (egg-do-search-changes initial-string nil t nil file-git-name level revs))
-	  (t				;; prompt
-	   (setq search-type (read-key-sequence
-			      "search type: (s)tring, (r)egex or (l)ine? "))
-	   (setq search-type (string-to-char search-type))
-	   (unless (memq search-type '(?s ?r ?l))
-	     (error "Must be one of s, r or l (%c)!!!" search-type))
-	   (if (eq search-type ?s)
-	       (egg-do-search-changes nil initial-string nil nil file-git-name level revs)
-	     (setq case-insensitive (y-or-n-p "ignore case when search? "))
-	     (egg-do-search-changes initial-string (eq search-type ?r)
-				    (eq search-type ?l) case-insensitive
-				    file-git-name level revs))))))
+(defun egg-search-changes-all (prefix default-term &optional file-name pickaxe)
+  "Search entire history for changes introducing/removing a term.
+DEFAULT-TERM is the default search term.
+If called non-interactively, the caller can provide ready-made PICKAXE info
+and a FILE-NAME. If FILE-NAME is non-nil then restrict the search to FILE-NAME's
+history."
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)))
+  (let* ((pickaxe (or pickaxe
+		      (egg-buffer-prompt-pickaxe "search entire history"
+						 :string default-term 
+						 (> prefix 15) (> prefix 3) t)))
+	 closure)
+    (setq closure
+	  (egg-do-search-changes (if (stringp pickaxe) pickaxe (car pickaxe))
+				 (unless (stringp pickaxe) (nth 1 pickaxe))
+				 (if (consp pickaxe) (memq :ignore-case pickaxe))
+				 file-name (list "--all")))
+    (plist-put closure :command
+	       (lambda (prefix default-term)
+		 (interactive (list (prefix-numeric-value current-prefix-arg)
+				    (egg-string-at-point)))
+		 (egg-search-changes-all prefix default-term)))
+    closure))
 
-(defun egg-do-search-changes (term is-regexp do-line-search case-insensitive file-name
-				   &optional prompt-for-term extras)
+(defun egg-do-search-changes (term pickaxe-type case-insensitive file-name &optional extras)
   "Pickaxe history for TERM.
-LEVEL is nil unless invoked as a command. TERM is a posix regexp if IS-REGEXP is non-nil.
-if DO-LINE-SEARCH is not nil, then search for lines matching TERM. If FILE-NAME was
-non-nil then restrict the search to commits modifying FILE-NAME."
+TERM is specified by PICKAXE-TYPE to be either a string, a regexp or a line-matching regexp.
+If CASE-INSENSITIVE is non nil, then regexp matching will ignore case.
+If FILE-NAME is non nil then only search the file history instead of the repo's history.
+EXTRAS is what ever arguments should be added to the git log command."
   (let* ((default-directory (egg-work-tree-dir (egg-git-dir t)))
 	 (git-file-name (if file-name (file-relative-name file-name)))
-	 (search-prompt-prefix (concat "search "
-				       (if git-file-name (concat git-file-name "'s "))))
 	 (label-prefix (if git-file-name
 			   (concat git-file-name "'s commits")
 			 "Commits "))
-	 (term (if (or (null term) prompt-for-term)
-		   (read-string (cond (do-line-search
-				       (concat search-prompt-prefix
-					       "history for line matching (posix regexp) : "))
-				      (is-regexp
-				       (concat search-prompt-prefix
-					       "history for changes containing (posix regexp): "))
-				      (t (concat search-prompt-prefix
-						 "history for changes containing: ")))
-				(or term (egg-string-at-point)))))
-	 (label (concat label-prefix
-			(cond (do-line-search " with lines matching: ")
-			      (is-regexp " containing regexp: ")
-			      (t " containing: "))))
-	 (pickaxed (cond (do-line-search (list "-G" term))
-			 (is-regexp (list "--pickaxe-regex" "-S" term))
-			 (t (list "-S" term))))
-	 (args (append pickaxed 
-		       (when (and (or is-regexp do-line-search) case-insensitive)
-			 (list "--regexp-ignore-case"))
-		       extras
-		       (when git-file-name (list "--" git-file-name))))
          (buf (egg-get-query:commit-buffer 'create))
-         (desc (concat (egg-text label 'egg-text-2)
-                       (egg-text term 'egg-term)))
-         (func `(lambda ()
-                  (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
-		  ))
+	 label pickaxed args desc func highlight
 	 help closure)
+
+    (cond ((eq pickaxe-type :line)
+	   (setq label (concat label-prefix " with lines matching: "))
+	   (setq pickaxed (nconc (if case-insensitive (list "--regexp-ignore-case"))
+				 (list "-G" term)))
+	   (setq highlight (egg-unquote-posix-regexp term)))
+	  ((eq pickaxe-type :regexp)
+	   (setq label (concat label-prefix " containing regexp: "))
+	   (setq pickaxed (nconc (if case-insensitive (list "--regexp-ignore-case"))
+				 (list "--pickaxe-regex" "-S" term)))
+	   (setq highlight (egg-unquote-posix-regexp term)))
+	  (t
+	   (setq label (concat label-prefix " containing: "))
+	   (setq pickaxed (list "-S" term))
+	   (setq highlight (regexp-quote term))))
+
+    (setq args (append pickaxed extras (if git-file-name (list "--" git-file-name))))
+    (setq desc (concat (egg-text label 'egg-text-2) (egg-text term 'egg-term)))
+    (setq func `(lambda ()
+		  (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
+		  ))
+
     (with-current-buffer buf
       (set (make-local-variable 'egg-internal-log-buffer-closure)
            (list :description desc :closure func
-		 :highlight (if is-regexp (egg-unquote-posix-regexp term)
-			      (concat "\\<" term "\\>"))
+		 :highlight highlight
 		 :pickaxed pickaxed
 		 :ignore-case case-insensitive
 		 :paths (when git-file-name (list "--" git-file-name))))
@@ -8121,6 +8148,65 @@ non-nil then restrict the search to commits modifying FILE-NAME."
       (egg-query:commit-buffer-rerun buf 'init))
     (pop-to-buffer buf)
     closure))
+
+;; (defun egg-do-search-changes (term is-regexp do-line-search case-insensitive file-name
+;; 				   &optional prompt-for-term extras)
+;;   "Pickaxe history for TERM.
+;; LEVEL is nil unless invoked as a command. TERM is a posix regexp if IS-REGEXP is non-nil.
+;; if DO-LINE-SEARCH is not nil, then search for lines matching TERM. If FILE-NAME was
+;; non-nil then restrict the search to commits modifying FILE-NAME."
+;;   (let* ((default-directory (egg-work-tree-dir (egg-git-dir t)))
+;; 	 (git-file-name (if file-name (file-relative-name file-name)))
+;; 	 (search-prompt-prefix (concat "search "
+;; 				       (if git-file-name (concat git-file-name "'s "))))
+;; 	 (label-prefix (if git-file-name
+;; 			   (concat git-file-name "'s commits")
+;; 			 "Commits "))
+;; 	 (term (if (or (null term) prompt-for-term)
+;; 		   (read-string (cond (do-line-search
+;; 				       (concat search-prompt-prefix
+;; 					       "history for line matching (posix regexp) : "))
+;; 				      (is-regexp
+;; 				       (concat search-prompt-prefix
+;; 					       "history for changes containing (posix regexp): "))
+;; 				      (t (concat search-prompt-prefix
+;; 						 "history for changes containing: ")))
+;; 				(or term (egg-string-at-point)))))
+;; 	 (label (concat label-prefix
+;; 			(cond (do-line-search " with lines matching: ")
+;; 			      (is-regexp " containing regexp: ")
+;; 			      (t " containing: "))))
+;; 	 (pickaxed (cond (do-line-search (list "-G" term))
+;; 			 (is-regexp (list "--pickaxe-regex" "-S" term))
+;; 			 (t (list "-S" term))))
+;; 	 (args (append pickaxed 
+;; 		       (when (and (or is-regexp do-line-search) case-insensitive)
+;; 			 (list "--regexp-ignore-case"))
+;; 		       extras
+;; 		       (when git-file-name (list "--" git-file-name))))
+;;          (buf (egg-get-query:commit-buffer 'create))
+;;          (desc (concat (egg-text label 'egg-text-2)
+;;                        (egg-text term 'egg-term)))
+;;          (func `(lambda ()
+;;                   (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
+;; 		  ))
+;; 	 help closure)
+;;     (with-current-buffer buf
+;;       (set (make-local-variable 'egg-internal-log-buffer-closure)
+;;            (list :description desc :closure func
+;; 		 :highlight (if is-regexp (egg-unquote-posix-regexp term)
+;; 			      (concat "\\<" term "\\>"))
+;; 		 :pickaxed pickaxed
+;; 		 :ignore-case case-insensitive
+;; 		 :paths (when git-file-name (list "--" git-file-name))))
+;;       (when (memq :query egg-show-key-help-in-buffers)
+;;         (setq help egg-log-style-help-text))
+;;       (if help (plist-put egg-internal-log-buffer-closure :help help))
+;;       (setq closure egg-internal-log-buffer-closure)
+;;       (egg-query:commit-buffer-rerun buf 'init))
+;;     (pop-to-buffer buf)
+;;     closure))
+
 ;;;========================================================
 ;;; reflog
 ;;;========================================================
