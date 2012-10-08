@@ -7006,7 +7006,7 @@ prompt for a remote repo."
       (save-excursion
 	(save-match-data
 	  (goto-char beg)
-	  (while (re-search-forward "^gpg:" end t)
+	  (while (re-search-forward "^\\(gpg\\|Signed-off-by\\):" end t)
 	    (save-excursion
 	      (goto-char (match-beginning 0))
 	      (insert indent-spaces)))
@@ -7025,17 +7025,19 @@ prompt for a remote repo."
       (setq end (or (next-single-property-change beg :diff) end)
 	    diff-beg end)
 
-      (while (and (< (point) end) (< (line-beginning-position) (line-end-position)))
-	(setq face-end (+ (line-beginning-position) indent-column))
-	(if (>= face-end (line-end-position))
-	    ;; merge conflicts
-	    (put-text-property (line-beginning-position) (line-end-position) 
-			       'face 'egg-text-2)
-	  (put-text-property (line-beginning-position) 
-			     (+ (line-beginning-position) indent-column) 
-			     'face 'egg-diff-none)
-	  (put-text-property (+ (line-beginning-position) indent-column)
-			     (line-end-position) 'face 'egg-text-2))
+      (while (< (point) diff-beg)
+	(if (equal (buffer-substring-no-properties (line-beginning-position)
+						   (+ (line-beginning-position)
+						      indent-column))
+		   indent-spaces)
+	    (progn
+	      (put-text-property (line-beginning-position) 
+				 (+ (line-beginning-position) indent-column) 
+				 'face 'egg-diff-none)
+	      (put-text-property (+ (line-beginning-position) indent-column)
+				 (line-end-position) 'face 'egg-text-2))
+	  (put-text-property (line-beginning-position) (line-end-position) 
+			     'face 'egg-text-2))
 	(forward-line 1)
 	(goto-char (line-end-position)))
       ;; (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
