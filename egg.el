@@ -1336,23 +1336,6 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
   (interactive (list (egg-read-tracked-filename "Find tracked file: ")))
   (switch-to-buffer (find-file-noselect file-name)))
 
-;; (defun egg-complete-filename (string &optional func all)
-;;   (let* ((matches (egg-git-to-lines "--no-pager" "ls-files" (concat "*" string "*")))
-;; 	 (single (null (cdr matches)))
-;; 	 (perfect (and single (equal (car matches) string)))
-;; 	 prefix)
-;;     (if all matches
-;;       (unless (null matches)
-;; 	(setq prefix (try-completion string matches)))
-;;       (cond ((null matches) nil)
-;; 	    (perfect t)
-;; 	    ((stringp prefix) prefix)
-;; 	    ((null prefix) nil)
-;; 	    (t string)))))
-
-;;(egg-read-local-ref "gimme a lref: ")
-
-
 (defun egg-complete-rev (string &optional ignored all)
   "Do revision completion"
   (save-match-data
@@ -3824,12 +3807,6 @@ rebase session."
   (message "skip rebase's current commit")
   (egg-buffer-selective-rebase-action :skip))
 
-;; (defun egg-buffer-rebase-skip ()
-;;   (interactive)
-;;   (message "skip rebase's current commit")
-;;   (unless (egg-buffer-do-rebase :skip)
-;;     (egg-status)))
-
 (defun egg-buffer-rebase-abort ()
   (interactive)
   (message "abort current rebase")
@@ -4842,10 +4819,6 @@ If INIT was not nil, then perform 1st-time initializations as well."
   "Set to nonnil for egg-status to switch to the status buffer in the same window.")
 
 
-;; (defun foo (a b)
-;;   (interactive "p\nP")
-;;   (message "a=%s b=%s" a b))
-
 (defun egg-status (called-interactively select &optional caller)
   "Show the status of the current repo."
   (interactive "p\nP")
@@ -5097,16 +5070,6 @@ in HEAD. Otherwise, reset the work-tree to its staged state in the index."
 	(egg--do-git-quiet t))
     (when (egg--git-add-cmd t "-v" ".")
       (message "staged all untracked files"))))
-
-;; (defun egg-do-tag (&optional rev prompt force)
-;;   (let ((all-refs (egg-all-refs))
-;;         (name (read-string (or prompt "new tag name: ")))
-;;         (rev (or rev "HEAD")))
-;;     (when (and (not force) (member name all-refs))
-;;       (error "referene %s already existed!" name))
-;;     (if force
-;;         (egg-git-ok nil "tag" "-f" name rev)
-;;       (egg-git-ok nil "tag" name rev))))
 
 (defun egg-buffer-do-move-head (reset-mode rev &optional ignored-action)
   "Move (reset) HEAD to REV using RESET-MODE.
@@ -5625,7 +5588,7 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (egg-diff-buffer-insert-diffs buf))
     buf))
 
-(defun egg-buffer-ask-pickaxe-mode (search-scope search-code &optional default-term)
+(defun egg-buffer-ask-pickaxe-mode (pickaxe-action search-code &optional default-term)
   (let* ((key-type-alist '((?s "string" identity)
 			   (?r "posix regex" (lambda (s) (list s :regex)))
 			   (?l "line matching regex" (lambda (s) (list s :line)))))
@@ -5634,24 +5597,27 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
 	 (make-term-func (nth 2 search-info))
 	 key term)
     (while (not (stringp search-type))
-      (setq key (read-key-sequence "search type: (s)tring, (r)egex, (l)line or (q)uit? "))
+      (setq key (read-key-sequence 
+		 (format "match type to %s: (s)tring, (r)egex, (l)line or (q)uit? "
+			 pickaxe-action)))
       (setq key (string-to-char key))
       (setq search-info (assq key key-type-alist))
-      (when (= key ?q) (error "Abort searching %s" search-scope))
+      (when (= key ?q) (error "%s: aborted" pickaxe-action))
       (setq search-type (nth 1 search-info))
       (setq make-term-func (nth 2 search-info))
       (unless (consp search-info)
 	(message "invalid choice: %c! (must be of of s,r,l or q)" key)
 	(ding)
 	(sit-for 1)))
-    (setq term (read-string (format "search %s for %s: " search-scope search-type)
-			    default-term))    
+    (setq term (read-string 
+		(format "%s with changes containing %s: " pickaxe-action search-type)
+		default-term))    
     (unless (> (length term) 1)
-      (error "Cannot search for %s: %s!!" (nth 1 key) term))
+      (error "Cannot match %s: %s!!" (nth 1 key) term))
     (funcall make-term-func term)))
 
-(defun egg-buffer-prompt-pickaxe (search-scope default-search default-term
-						  &optional ask-mode ask-regexp ask-term)
+(defun egg-buffer-prompt-pickaxe (pickaxe-action default-search default-term
+					       &optional ask-mode ask-regexp ask-term)
   "Prompt for pickaxe.
 SEARCH-SCOPE is a string such as \"diffs\" or \"history\"
 DEFAULT-SEARCH-CODE is used asking the term and is one of: :string,:regexp or :line
@@ -5660,11 +5626,11 @@ If ASK-MODE is non-nil then ask for the mode (string, regexp or line) then ask f
 Else if ASK-REGEXP is non-nil then ask for a regexp (the term).
 Else if ASK-TERM is non-nil then ask for the term using DEFAULT-SEARCH as search type."
   (cond (ask-mode
-	 (egg-buffer-ask-pickaxe-mode search-scope nil default-term))
+	 (egg-buffer-ask-pickaxe-mode pickaxe-action nil default-term))
 	(ask-regexp
-	 (egg-buffer-ask-pickaxe-mode search-scope ?r default-term))
+	 (egg-buffer-ask-pickaxe-mode pickaxe-action ?r default-term))
 	(ask-term
-	 (egg-buffer-ask-pickaxe-mode search-scope (assoc-default default-search
+	 (egg-buffer-ask-pickaxe-mode pickaxe-action (assoc-default default-search
 								  '((:string . ?s)
 								    (:regexp . ?r)
 								    (:line   . ?l)))
@@ -5780,26 +5746,35 @@ nil then compare the index and the work-dir."
       (plist-put info :args tmp))
     info))
 
-(defun egg-diff-ref (&optional default)
+(defun egg-diff-ref (&optional default do-pickaxe)
   "Prompt a revision to compare against worktree."
-  (interactive (list (egg-ref-at-point)))
-  (let* ((src (egg-read-rev "diff: " default))
-	 (diff-info (egg-build-diff-info src nil))
+  (interactive (list (egg-ref-at-point) (prefix-numeric-value current-prefix-arg)))
+  (let* ((src (egg-read-rev "compare work tree vs revision: " default))
+	 (diff-info (egg-build-diff-info src nil nil
+					 (egg-buffer-prompt-pickaxe "restrict diffs" 
+								    :string nil
+								    (> do-pickaxe 15)
+								    nil
+								    (> do-pickaxe 3))))
          (buf (progn (plist-put diff-info :command 'egg-diff-ref)
 		     (egg-do-diff diff-info))))
     (pop-to-buffer buf)))
 
-(defun egg-diff-upstream (ref &optional prompt)
+(defun egg-diff-upstream (ref &optional prefix)
   "Prompt compare upstream to REF."
   (interactive (list (if current-prefix-arg
 			 (egg-read-local-ref "ref to compare: " (egg-branch-or-HEAD))
 		       (egg-branch-or-HEAD))
-		     current-prefix-arg))
+		     (prefix-numeric-value current-prefix-arg)))
   (let* ((branch-upstream (egg-upstream ref))
-	 (upstream (if prompt 
-		       (egg-read-ref (format "upstream of %s: " ref) branch-upstream)
-		     branch-upstream))
-	 (diff-info (egg-build-diff-info upstream ref nil nil t))
+	 (upstream (egg-read-ref (format "upstream of %s: " ref) branch-upstream))
+	 (diff-info (egg-build-diff-info upstream ref nil 
+					 (egg-buffer-prompt-pickaxe "restrict diffs"
+								    :string nil
+								    (> prefix 63)
+								    nil
+								    (> prefix 15)) 
+					 t))
          (buf (progn (plist-put diff-info :command 'egg-diff-upstream)
 		     (egg-do-diff diff-info))))
     (pop-to-buffer buf)))
@@ -5878,10 +5853,6 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "M-p") 'egg-file-log-walk-rev-prev)
     map))
 
-
-;; (defconst egg-log-popup-commit-menu
-;;   (let ((map (make-sparse-keymap "Commit")))
-;;     (define-key )))
 
 (defconst egg-log-commit-map
   (let ((map (make-sparse-keymap "Egg:LogCommit")))
@@ -6225,18 +6196,6 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                       egg-log-remote-ref-map
                       egg-log-remote-site-map
 		      sha1-name-alist)))
-
-;; (defun egg-log-pop-to-file (file sha1 &optional other-win use-wdir-file line)
-;;   (pop-to-buffer (if (or (equal (egg-current-sha1) sha1)
-;; 			 use-wdir-file)
-;; 		     (progn
-;; 		       (message "file:%s dir:%s" file default-directory)
-;; 		       (find-file-noselect file))
-;; 		   (egg-file-get-other-version file sha1 nil t))
-;; 		 other-win)
-;;   (when (numberp line)
-;;     (goto-char (point-min))
-;;     (forward-line (1- line))))
 
 (defalias 'egg-log-pop-to-file 'egg-buffer-pop-to-file)
 
@@ -7517,7 +7476,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     (when (string-equal rev base)
       (error "It's pointless to compare %s vs %s!" rev base))
     (setq pickaxe
-	  (egg-buffer-prompt-pickaxe "diffs" :string (egg-string-at-point)
+	  (egg-buffer-prompt-pickaxe "restrict diffs" :string (egg-string-at-point)
 				     (> do-pickaxe 63)
 				     (> do-pickaxe 15)
 				     (> do-pickaxe 3)))
@@ -7526,7 +7485,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       (lambda (prefix)
 		 (interactive "p")
 		 (egg-re-do-diff nil
-				 (egg-buffer-prompt-pickaxe "diffs" :string
+				 (egg-buffer-prompt-pickaxe "restrict diffs" :string
 							    (egg-string-at-point)
 							    (> prefix 63)
 							    (> prefix 15)
@@ -7550,7 +7509,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
       (setq upstream (egg-read-ref (format "upstream of %s: " ref)
 				    (egg-upstream ref))))
     (setq pickaxe
-	  (egg-buffer-prompt-pickaxe "diffs" :string (egg-string-at-point)
+	  (egg-buffer-prompt-pickaxe "restrict diffs" :string (egg-string-at-point)
 				     (> do-pickaxe 63)
 				     (> do-pickaxe 15)
 				     (> do-pickaxe 3)))
@@ -7559,7 +7518,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 	       (lambda (prefix)
 		 (interactive "p")
 		 (egg-re-do-diff nil
-				 (egg-buffer-prompt-pickaxe "diffs" :string
+				 (egg-buffer-prompt-pickaxe "restrict diffs" :string
 							    (egg-string-at-point)
 							    (> prefix 63)
 							    (> prefix 15)
@@ -7752,13 +7711,6 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
   (when (egg-commit-at-point)
     (egg-file-log-walk-show-buffer)))
 
-;; (defun egg-log-buffer-desc-ref (pos)
-;;   (interactive "d")
-;;   (let ((ref (get-text-property pos :ref))
-;; 	(type (and ref (cdr ref)))
-;; 	(ref-full-name (and ref (get-text-property pos :full-name))))
-;;     (cond ((eq type :head)))))
-
 (defsubst egg-run-git-file-log-HEAD (file)
   (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
               "--graph" "--topo-order" "--no-color"
@@ -7939,7 +7891,63 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
   (setq egg-buffer-refresh-func #'egg-query:commit-buffer-rerun)
   (run-mode-hooks 'egg-query:commit-buffer-mode-hook))
 
+(defun egg-async-mark-log-buffer-commits (args log-buffer closure)
+  "Run pickaxe as specified in ARGS asynchronously then mark the commits in LOG-BUFFER.
+CLOSURE specifies how the commits will be marked."
+  (egg-async-0-args
+   (list (lambda (log-buffer closure)
+	   (let ((all-commits (plist-get closure :commits))
+		 (matched-mark (plist-get closure :matched-mark))
+		 (unmatched-mark (plist-get closure :unmatched-mark))
+		 (commits (save-match-data 
+			   (goto-char (point-min))
+			   (re-search-forward "EGG-GIT-OUTPUT:\n")
+			   (split-string (buffer-substring-no-properties 
+					  (match-end 0)
+					  (point-max))
+					 "\n" t)))
+		 pos wins)
+	     (with-current-buffer log-buffer
+	       (dolist (commit all-commits)
+		 (egg-buffer-goto-section commit)
+		 (egg-log-buffer-do-mark (point) (if (member commit commits) 
+						     matched-mark
+						   unmatched-mark)))
+	       (setq pos (point)))
+	     (setq wins (get-buffer-window-list log-buffer))
+	     (when (consp wins)
+	       (dolist (win wins)
+		 (set-window-point win pos)))))
+	 log-buffer closure)
+   (nconc (list "--no-pager" "log" "--pretty=%H" "--no-color")
+	  args)))
 
+(defun egg-log-buffer-mark-commits-matching (level &optional default-search-term)
+  "Mark commits between HEAD and the commit under POINT for rebase.
+Prompt user for a search term and the type of match (string, regex or line).
+For each commits between the commit under POINT and HEAD, if the commit introduced
+or removed the term, then mark the commit as EDIT for the up-comming interactive
+rebase. Otherwise mark the commit as PICK."
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)))
+  (let* ((mark (egg-log-buffer-find-first-mark ?*))
+	 (end-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)
+		      (egg-branch-or-HEAD)))
+	 (start-rev (egg-commit-at-point))
+	 (revs (concat start-rev ".." end-rev))
+	 (all-commits (egg-git-to-lines "--no-pager" "log" "--pretty=%H" revs))
+	 (pickaxe-term (egg-buffer-prompt-pickaxe "mark commits" :string default-search-term
+						  (> level 15) (> level 3) t))
+	 (args (cond ((stringp pickaxe-term) (list "-S" pickaxe-term))
+		     ((and (consp pickaxe-term) (eq (cdr pickaxe-term) :regexp))
+		      (list  "--pickaxe-regex" "-S" (car pickaxe-term)))
+		     ((and (consp pickaxe-term) (eq (cdr pickaxe-term) :line))
+		      (list "-G" (car pickaxe-term))))))
+    (setq args (nconc args (list revs)))
+    (egg-async-mark-log-buffer-commits args (current-buffer)
+				       (list :matched-mark ?~
+					     :unmatched-mark ?+
+					     :commits all-commits))))
 
 (defun egg-async-insert-n-decorate-pickaxed-logs (args)
   (let* ((closure egg-internal-log-buffer-closure)
@@ -8055,13 +8063,6 @@ STRING-AT-POINT is the default term."
 	     (egg-do-search-changes initial-string (eq search-type ?r)
 				    (eq search-type ?l) case-insensitive
 				    file-git-name level revs))))))
-
-;; (defun egg-search-changes (level &optional term is-regexp do-line-search file-name)
-;;   (interactive "p")
-;;   (egg-do-search-changes term 
-;; 			 (or is-regexp (> level 3))
-;; 			 (or do-line-search (> level 15))
-;; 			 nil file-name))
 
 (defun egg-do-search-changes (term is-regexp do-line-search case-insensitive file-name
 				   &optional prompt-for-term extras)
