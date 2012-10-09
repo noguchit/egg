@@ -814,6 +814,13 @@ Return the output lines as a list of strings."
     (split-string (or (egg-cmd-to-string-1 egg-git-command args) "")
                   "[\n]+" t)))
 
+(defsubst egg-git-to-string-list (&rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
+  (save-match-data
+    (split-string (or (egg-cmd-to-string-1 egg-git-command args) "")
+                  "[\n\t ]+" t)))
+
 (defun egg-git-lines-matching (re idx &rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
@@ -908,6 +915,90 @@ if BUF was nil then use current-buffer"
 		  (string-equal (substring upstream 0 8) "remotes/"))
 	     (substring upstream 8)
 	   upstream))))
+
+(defun egg-show-branch (branch)
+  (interactive (list (egg-head-at-point)))
+  (let* ((info (and (stringp branch)
+		    (egg-git-to-string-list "for-each-ref"
+					    "--format=%(refname:short) %(refname) %(upstream:short)"
+					    (concat "refs/heads/" branch))))
+	 (name (nth 0 info))
+	 (full (nth 1 info))
+	 (upstream (nth 2 info)))
+    (when (stringp name)
+      (message "local-branch:%s full-name:%s upstream:%s" 
+	       (egg-text name 'bold) 
+	       (egg-text full 'bold)
+	       (if upstream (egg-text upstream 'bold) "none")))))
+
+(defvar egg-atag-info-buffer (get-buffer-create "*tag-info*"))
+
+(defun egg-show-atag (tag)
+  (interactive (list (egg-tag-at-point)))
+  (let ((dir (egg-work-tree-dir))
+	(buf egg-atag-info-buffer)
+	(new-buf-name (concat "*tag@" (egg-repo-name) ":" tag "*"))
+	(inhibit-read-only t)
+	target-type sig-beg sig-end verify pos)
+    (with-current-buffer buf
+      (setq default-directory dir)
+      (setq target-type (egg-git-to-string "for-each-ref" "--format=%(objecttype)"
+					   (concat "refs/tags/" tag)))
+      (unless (equal target-type "tag")
+	(error "Not an annotated tag: %s" tag))
+      (unless (string-equal (buffer-name) new-buf-name)
+	(rename-buffer new-buf-name))
+      (erase-buffer)
+      (unless (egg-git-ok t "show" "-s" tag)
+	(error "Failed to show tag %s" tag))
+      (save-match-data
+	(goto-char (point-min))
+	(re-search-forward "^tag ")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-branch)
+	(re-search-forward "^Tagger:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(re-search-forward "^Date:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(setq pos (line-end-position))
+	(when (re-search-forward "-----BEGIN PGP SIGNATURE-----" nil t)
+	  (setq sig-beg (match-beginning 0))
+	  (re-search-forward "-----END PGP SIGNATURE-----\n")
+	  (setq sig-end (match-end 0))
+	  (goto-char sig-beg)
+	  (delete-region sig-beg sig-end)
+	  (with-temp-buffer
+	    (egg-git-ok t "tag" "-v" tag)
+	    (goto-char (point-min))
+	    (re-search-forward "^gpg:")
+	    (setq verify (buffer-substring-no-properties (match-beginning 0)
+							 (point-max))))
+	  (insert verify "\n"))
+	(goto-char pos)
+	(re-search-forward "^\\(commit\\|gpg:\\)")
+	(put-text-property pos (match-beginning 0) 'face 'egg-text-1)
+	(re-search-forward "^Author:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(re-search-forward "^Date:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(put-text-property (line-end-position) (point-max) 'face 'egg-text-1))
+      (set-buffer-modified-p nil))
+    (pop-to-buffer buf)))
+
+(defun egg-show-remote-branch (branch)
+  (interactive (list (egg-remote-at-point)))
+  (let* ((info (and (stringp branch)
+		    (egg-git-to-string-list "for-each-ref"
+					    "--format=%(refname:short) %(refname)"
+					    (concat "refs/remotes/" branch))))
+	 (name (nth 0 info))
+	 (full (nth 1 info))
+	 (site (and (stringp name) (egg-rbranch-to-remote name)))
+	 (url (and site (egg-git-to-string "ls-remote" "--get-url" site))))
+    (when (stringp name)
+      (message "remote-tracking-branch:%s full-name:%s site:%s" 
+	       (egg-text name 'bold) 
+	       (egg-text full 'bold)
+	       (egg-text url 'bold)))))
 
 (defsubst egg-rbranch-to-remote (rbranch)
   "Return the remote name in the remote-branch RBRANCH.
@@ -5916,7 +6007,7 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "c") 'egg-log-buffer-pick-1cherry)
     map))
 
-(defconst egg-log-commit-simple-map
+(defconst egg-secondary-log-commit-map
   (let ((map (make-sparse-keymap "Egg:LogCommitSimple")))
     (set-keymap-parent map egg-log-commit-base-map)
     (define-key map (kbd "RET") 'egg-log-locate-commit)
@@ -5925,7 +6016,7 @@ Jump to line LINE if it's not nil."
 
 (defconst egg-file-log-commit-map
   (let ((map (make-sparse-keymap "Egg:FileLogCommit")))
-    (set-keymap-parent map egg-log-commit-simple-map)
+    (set-keymap-parent map egg-secondary-log-commit-map)
     (define-key map (kbd "M-SPC") 'egg-file-log-walk-current-rev)
     (define-key map (kbd "M-n") 'egg-file-log-walk-rev-next)
     (define-key map (kbd "M-p") 'egg-file-log-walk-rev-prev)
@@ -5960,12 +6051,18 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
     map))
 
+(defconst egg-secondary-log-ref-map
+  (let ((map (make-sparse-keymap "Egg:SecondaryLogRef")))
+    (set-keymap-parent map egg-secondary-log-commit-map)
+    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
+    (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
+    map))
+
 (defconst egg-log-local-ref-map
   (let ((map (make-sparse-keymap "Egg:LogLocalRef")))
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
     (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
-    (define-key map (kbd "C-c C-=") 'egg-log-buffer-diff-upstream)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-local-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-local-ref-menu)
@@ -5973,16 +6070,32 @@ Jump to line LINE if it's not nil."
     map)
   "\\{egg-log-local-ref-map}")
 
-(defconst egg-log-remote-ref-map
+(defconst egg-log-local-branch-map
+  (let ((map (make-sparse-keymap "Egg:LogLocalBranch")))
+    (set-keymap-parent map egg-log-local-ref-map)
+    (define-key map (kbd "C-c C-=") 'egg-log-buffer-diff-upstream)
+    (define-key map (kbd "RET") 'egg-show-branch)
+    map)
+  "\\{egg-log-local-branch-map}")
+
+(defconst egg-log-tag-map
+  (let ((map (make-sparse-keymap "Egg:LogTag")))
+    (set-keymap-parent map egg-log-local-ref-map)
+    (define-key map (kbd "RET") 'egg-show-atag)
+    map)
+  "\\{egg-log-local-branch-map}")
+
+(defconst egg-log-remote-branch-map
   (let ((map (make-sparse-keymap "Egg:LogRemoteRef")))
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "D") 'egg-log-buffer-fetch-remote-ref)
+    (define-key map (kbd "RET") 'egg-show-remote-branch)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-remote-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-remote-ref-menu)
 
     map)
-  "\\{egg-log-remote-ref-map}")
+  "\\{egg-log-remote-branch-map}")
 
 (defconst egg-log-remote-site-map
   (let ((map (make-sparse-keymap "Egg:LogRef")))
@@ -6070,7 +6183,7 @@ Jump to line LINE if it's not nil."
     "\\[egg-quit-buffer]:quit\n" )
    (egg-text "Extra Key Bindings for a Commit line:" 'egg-help-header-2) "\n"
    (egg-pretty-help-text
-    "\\<egg-log-commit-simple-map>"
+    "\\<egg-secondary-log-commit-map>"
     "\\[egg-log-locate-commit]:locate commit in history  "
     "\\[egg-log-buffer-insert-commit]:load details  "
     "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
@@ -6269,9 +6382,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (funcall log-insert-func)
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
-                      egg-log-local-ref-map
-                      egg-log-local-ref-map
-                      egg-log-remote-ref-map
+                      egg-log-local-branch-map
+                      egg-log-tag-map
+                      egg-log-remote-branch-map
                       egg-log-remote-site-map
 		      sha1-name-alist)))
 
@@ -7252,7 +7365,7 @@ Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-l
    of the ref to the remote repository.
 \\[egg-log-buffer-push-head-to-local] update the local ref under the cursor with the current HEAD.
 
-Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-ref-map>
+Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-remote-branch-map>
 \\[egg-log-buffer-fetch-remote-ref] download the new value of the ref from the remote repo.
 ."
   (kill-all-local-variables)
@@ -7526,7 +7639,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-push-to-local]:update HEAD (or a local ref) with ref  "
     "\\[egg-log-buffer-push-head-to-local]:update this ref with HEAD\n"
     "\\[egg-log-buffer-push-to-remote]:upload to remote  "
-    "\\<egg-log-remote-ref-map>"
+    "\\<egg-log-remote-branch-map>"
     "\\[egg-log-buffer-fetch-remote-ref]:download this ref from remote\n")
    (egg-text "Extra Key Bindings for a Diff Block:" 'egg-help-header-2)
    "\n"
@@ -7640,9 +7753,9 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 				(nconc (list ref head-name) sha1-list))))
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
-                      egg-log-local-ref-map
-                      egg-log-local-ref-map
-                      egg-log-remote-ref-map
+                      egg-log-local-branch-map
+                      egg-log-tag-map
+                      egg-log-remote-branch-map
                       egg-log-remote-site-map
 		      sha1-reflog-alist)))
 
@@ -7817,10 +7930,10 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 
 (defsubst egg-log-buffer-decorate-logs-simple (log-insert-func arg)
   (egg-log-buffer-decorate-logs-simple-1 log-insert-func arg
-					 egg-log-commit-simple-map
-					 egg-log-commit-simple-map
-					 egg-log-commit-simple-map
-					 egg-log-commit-simple-map))
+					 egg-secondary-log-commit-map
+					 egg-secondary-log-commit-map
+					 egg-secondary-log-commit-map
+					 egg-secondary-log-commit-map))
 
 (defsubst egg-file-log-buffer-decorate-logs (log-insert-func arg)
   (egg-log-buffer-decorate-logs-simple-1 log-insert-func arg
@@ -7845,7 +7958,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     "\\[egg-quit-buffer]:quit\n" )
    (egg-text "Extra Key Bindings for a Commit line:" 'egg-help-header-2) "\n"
    (egg-pretty-help-text
-    "\\<egg-log-commit-simple-map>"
+    "\\<egg-secondary-log-commit-map>"
     "\\[egg-log-locate-commit]:locate commit in history  "
     "\\[egg-log-buffer-insert-commit]:load details  "
     "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
@@ -7908,7 +8021,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
 ;;;========================================================
 (defconst egg-query:commit-commit-map
   (let ((map (make-sparse-keymap "Egg:LogQueryCommit")))
-    (set-keymap-parent map egg-log-commit-simple-map)
+    (set-keymap-parent map egg-secondary-log-commit-map)
     (define-key map (kbd "=") 'egg-query:commit-buffer-diff-revs)
     ;;
     map))
