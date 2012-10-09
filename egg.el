@@ -8170,7 +8170,7 @@ rebase. Otherwise mark the commit as PICK."
 					     :unmatched-mark ?+
 					     :commits all-commits))))
 
-(defun egg-async-insert-n-decorate-pickaxed-logs (args)
+(defun egg-async-insert-n-decorate-query-logs (args)
   (let* ((closure egg-internal-log-buffer-closure)
 	 (fetched-data (and closure (plist-get closure :fetched-data)))
 	 (beg (point)))
@@ -8323,7 +8323,7 @@ EXTRAS is what ever arguments should be added to the git log command."
     (setq args (append pickaxe-args extras (if git-file-name (list "--" git-file-name))))
     (setq desc (concat (egg-text label 'egg-text-2) (egg-text term 'egg-term)))
     (setq func `(lambda ()
-		  (egg-async-insert-n-decorate-pickaxed-logs (list ,@args))
+		  (egg-async-insert-n-decorate-query-logs (list ,@args))
 		  ))
 
     (with-current-buffer buf
@@ -8340,6 +8340,84 @@ EXTRAS is what ever arguments should be added to the git log command."
       (egg-query:commit-buffer-rerun buf 'init))
     (pop-to-buffer buf)
     closure))
+
+(defun egg-do-grep-commit (grep-info revs)
+  "Grep commit's for words.
+REVS are revision to search for or '--all'.
+GREP-INFO is plist with
+:regexp posix regular-expression to search for.
+:author regular-expression to match the author's name.
+:committer regular-expression to match the commiter's name.
+:match-all if non-nil, then limits the commits to the ones which match all regexps instead
+of at least one."
+  (let* ((default-directory (egg-work-tree-dir (egg-git-dir t)))
+         (buf (egg-get-query:commit-buffer 'create))
+	 (desc "")
+	 (op-name "or")
+	 (first-criterion t)
+	 regex args func help closure)
+    
+    (when (plist-get grep-info :match-all)
+      (add-to-list 'args "--all-match")
+      (setq op-name "and"))
+    (when (setq regex (plist-get grep-info :author))
+      (add-to-list 'args (concat "--author=" regex))
+      (setq desc (concat desc (if first-criterion
+				  (egg-text "Commits" 'egg-text-2) 
+				(egg-text op-name 'egg-text-2))			 
+			 (egg-text " with author: " 'egg-text-2)
+			 (egg-text regex 'egg-term) "\n"))
+      (setq first-criterion nil))
+    (when (setq regex (plist-get grep-info :committer))
+      (add-to-list 'args (concat "--committer=" regex))
+      (setq desc (concat desc (if first-criterion
+				  (egg-text "Commits" 'egg-text-2) 
+				(egg-text op-name 'egg-text-2))			 
+			 (egg-text " with commiter: " 'egg-text-2)
+			 (egg-text regex 'egg-term) "\n"))
+      (setq first-criterion nil))
+    (when (setq regex (plist-get grep-info :regexp))
+      (add-to-list 'args (concat "--grep=" regex))
+      (setq desc (concat desc (if first-criterion
+				  (egg-text "Commits" 'egg-text-2) 
+				(egg-text op-name 'egg-text-2))			 
+			 (egg-text " with message matching: " 'egg-text-2)
+			 (egg-text regex 'egg-term) "\n"))
+      (setq first-criterion nil))
+    
+    (setq args (nconc args revs))
+    (setq func `(lambda ()
+		  (egg-async-insert-n-decorate-query-logs (list ,@args))
+		  ))
+
+    (with-current-buffer buf
+      (set (make-local-variable 'egg-internal-log-buffer-closure)
+           (list :description desc :closure func
+		 :grep-args args))
+      (when (memq :query egg-show-key-help-in-buffers)
+        (setq help egg-log-style-help-text))
+      (if help (plist-put egg-internal-log-buffer-closure :help help))
+      (setq closure egg-internal-log-buffer-closure)
+      (egg-query:commit-buffer-rerun buf 'init))
+    (pop-to-buffer buf)
+    closure))
+
+(defun egg-grep-commit (prefix term)
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)))
+  (let (info)
+    (setq info (list :regexp
+		     (read-string "Search for commits with message matching: " term)))
+    (when (> prefix 3)
+      (plist-put info :author
+		 (read-string "Search for commits with author: ")))
+    (when (> prefix 15)
+      (plist-put info :committer
+		 (read-string "Search for commits with commiter: ")))
+    (when (> (length info) 2)
+      (if (y-or-n-p "limits commits to those matching ALL criteria? ")
+	  (plist-put info :match-all t)))
+    (egg-do-grep-commit info nil)))
 
 ;;;========================================================
 ;;; reflog
