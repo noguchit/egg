@@ -2444,11 +2444,46 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 									"-F" "-"))
 					       (t (list "-v" "-F" "-"))))))
 
+(defun egg--async-create-signed-commit-handler (buffer-to-update)
+  (goto-char (point-min))
+  (re-search-forward "EGG-GIT-OUTPUT:\n" nil t)
+  (if (not (match-end 0))
+      (message "something wrong with git-commit's output!")
+    (let* ((proc egg-async-process)
+	   (ret-code (process-exit-status proc))
+	   res)
+      (goto-char (match-end 0)) commit
+      (save-restriction
+	(narrow-to-region (point) (point-max))
+	(setq res (egg--do-show-output 
+		   "GIT-COMMIT-GPG"
+		   (egg--do-handle-exit (cons ret-code (current-buffer)) 
+					#'egg--git-pp-commit-output
+					buffer-to-update)))
+	(when (plist-get res :success)
+	  (setq res (nconc (list :next-action 'status) res)))
+	(egg--buffer-handle-result res t)))))
+
+(defun egg--async-create-signed-commit-cmd (buffer-to-update beg end gpg-uid &rest extras)
+  (let ((args (list "-v" (if (stringp gpg-uid)
+			     (concat "--gpg-sign=" gpg-uid)
+			   "-S") 
+		    "-m" (buffer-substring-no-properties beg end))))
+    (setq args (nconc args extras))
+    (egg-async-1-args (list #'egg--async-create-signed-commit-handler buffer-to-update)
+		      (cons "commit" args))))
+
 (defsubst egg-do-commit-with-region (beg end gpg-uid)
-  (egg--git-commit-with-region-cmd t beg end gpg-uid))
+  (funcall (if gpg-uid
+	       #'egg--async-create-signed-commit-cmd
+	     #'egg--git-commit-with-region-cmd)
+	   t beg end gpg-uid))
 
 (defsubst egg-do-amend-with-region (beg end gpg-uid)
-  (egg--git-commit-with-region-cmd t beg end gpg-uid "--amend"))
+  (funcall (if gpg-uid
+	       #'egg--async-create-signed-commit-cmd
+	     #'egg--git-commit-with-region-cmd)
+	   t beg end gpg-uid "--amend"))
 
 (defun egg--git-amend-no-edit-cmd (buffer-to-update &rest args)
   (egg--do-git-action
@@ -2573,7 +2608,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (goto-char (point-min))
   (re-search-forward "EGG-GIT-OUTPUT:\n" nil t)
   (if (not (match-end 0))
-      (message "something wrong with git-tag -s output!")
+      (message "something wrong with git-tag's output!")
     (let* ((proc egg-async-process)
 	   (ret-code (process-exit-status proc))
 	   res)
@@ -5194,15 +5229,17 @@ when the buffer was created.")
 (defsubst egg-log-msg-func () (car egg-log-msg-closure))
 (defsubst egg-log-msg-args () (cdr egg-log-msg-closure))
 (defsubst egg-log-msg-prefix () (nth 0 (egg-log-msg-args)))
-(defsubst egg-log-msg-text-beg () (nth 1 (egg-log-msg-args)))
-(defsubst egg-log-msg-text-end () (nth 2 (egg-log-msg-args)))
-(defsubst egg-log-msg-next-beg () (nth 3 (egg-log-msg-args)))
-(defsubst egg-log-msg-extras () (nthcdr 4 (egg-log-msg-args)))
+(defsubst egg-log-msg-gpg-uid () (nth 1 (egg-log-msg-args)))
+(defsubst egg-log-msg-text-beg () (nth 2 (egg-log-msg-args)))
+(defsubst egg-log-msg-text-end () (nth 3 (egg-log-msg-args)))
+(defsubst egg-log-msg-next-beg () (nth 4 (egg-log-msg-args)))
+(defsubst egg-log-msg-extras () (nthcdr 5 (egg-log-msg-args)))
 (defsubst egg-log-msg-set-prefix (prefix) (setcar (egg-log-msg-args) prefix))
+(defsubst egg-log-msg-set-gpg-uid (uid) (setcar (cdr (egg-log-msg-args)) uid))
 (defsubst egg-log-msg-mk-closure-input (func &rest args)
   (cons func args))
-(defsubst egg-log-msg-mk-closure-from-input (input prefix beg end next)
-  (cons (car input) (nconc (list prefix beg end next) (cdr input))))
+(defsubst egg-log-msg-mk-closure-from-input (input gpg-uid prefix beg end next)
+  (cons (car input) (nconc (list prefix gpg-uid beg end next) (cdr input))))
 (defsubst egg-log-msg-apply-closure (prefix) 
   (egg-log-msg-set-prefix prefix)
   (apply (egg-log-msg-func) (egg-log-msg-args)))
@@ -5217,19 +5254,35 @@ when the buffer was created.")
 
 (define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
 (define-key egg-log-msg-mode-map (kbd "C-c C-k") 'egg-log-msg-cancel)
+(define-key egg-log-msg-mode-map (kbd "C-c C-s") 'egg-log-msg-buffer-toggle-signed)
 (define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
 
-(defsubst egg-log-msg-commit (prefix text-beg text-end &rest ignored)
+(defsubst egg-log-msg-commit (prefix gpg-uid text-beg text-end &rest ignored)
   "Commit the index using the text between TEXT-BEG and TEXT-END as message.
 PREFIX and IGNORED are ignored."
-  (egg-do-commit-with-region text-beg text-end nil))
+  (egg-do-commit-with-region text-beg text-end gpg-uid))
 
-(defsubst egg-log-msg-amend-commit (prefix text-beg text-end &rest ignored)
+(defsubst egg-log-msg-amend-commit (prefix gpg-uid text-beg text-end &rest ignored)
   "Amend the last commit with the index using the text between TEXT-BEG and TEXT-END
 as message. PREFIX and IGNORED are ignored."
-  (egg-do-amend-with-region text-beg text-end nil))
+  (egg-do-amend-with-region text-beg text-end gpg-uid))
+
+(defun egg-log-msg-buffer-toggle-signed ()
+  (interactive)
+  (let* ((gpg-uid (egg-log-msg-gpg-uid))
+	 (new-uid (if gpg-uid 
+		      "None"
+		    (read-string "Sign with gpg key uid: " (egg-user-name))))
+	 (inhibit-read-only t))
+    (egg-log-msg-set-gpg-uid (if gpg-uid nil new-uid))
+    (save-excursion
+      (save-match-data
+	(goto-char (point-min))
+	(re-search-forward "^GPG-Signed by: \\(.+\\)$" (egg-log-msg-text-beg))
+	(replace-match (egg-text new-uid 'egg-text-2) nil t nil 1)
+	(set-buffer-modified-p nil)))))
 
 (defun egg-log-msg-done (level)
   "Take action with the composed message.
@@ -5383,9 +5436,13 @@ using git's default msg."
 		      ((stringp title-function) title-function)
 		      (t "Shit happens!"))
 		"\n"
-		"Repository: " (egg-text git-dir 'font-lock-constant-face) "\n"
-		"Committer: " (egg-text (plist-get state :name) 'egg-text-2) " "
+		(egg-text "Repository: " 'egg-text-1) 
+		(egg-text git-dir 'font-lock-constant-face) "\n"
+		(egg-text "Committer: " 'egg-text-1) 
+		(egg-text (plist-get state :name) 'egg-text-2) " "
 		(egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
+		(egg-text "GPG-Signed by: " 'egg-text-1)
+		(egg-text "None" 'egg-text-2) "\n"
 		(egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` to cancel) -"
 			  'font-lock-comment-face))
 	(put-text-property (point-min) (point) 'read-only t)
@@ -5415,7 +5472,7 @@ using git's default msg."
 
 	(set (make-local-variable 'egg-log-msg-closure)
 	     (egg-log-msg-mk-closure-from-input action-closure 
-						nil text-beg text-end diff-beg)))
+						nil nil text-beg text-end diff-beg)))
       (pop-to-buffer buf))))
 
 ;;;========================================================
@@ -6407,13 +6464,13 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
                                     orig-head-sha1))))
 
-(defun egg-sentinel-commit-n-continue-rebase (prefix text-beg text-end next-beg
+(defun egg-sentinel-commit-n-continue-rebase (prefix gpg-uid text-beg text-end next-beg
 						     rebase-dir orig-buffer orig-sha1 commit-func)
   (let ((process-environment process-environment))
     (mapc (lambda (env-lst)
 	    (setenv (car env-lst) (cadr env-lst)))
 	  (egg-rebase-author-info rebase-dir))
-    (apply commit-func prefix text-beg text-end next-beg nil))
+    (apply commit-func prefix gpg-uid text-beg text-end next-beg nil))
   (with-current-buffer orig-buffer
     (egg-do-async-rebase-continue
      #'egg-handle-rebase-interactive-exit
@@ -8407,7 +8464,7 @@ if INCLUDE-UNTRACKED is non-nil."
 ;; (setenv "GPG_AGENT_INFO" "/tmp/gpg-peL1m4/S.gpg-agent:16429:1")
 ;; (getenv "GPG_AGENT_INFO")
 
-(defun egg-tag-msg-create-tag (prefix text-beg text-end ignored name commit gpg-uid)
+(defun egg-tag-msg-create-tag (prefix gpg-uid text-beg text-end ignored name commit)
   (if gpg-uid				;; sign the tag
       (let ((egg--do-no-output-message (format "signed %s with tag '%s'" commit name))
 	    (gpg-agent-info (egg-gpg-agent-info 'set))
@@ -8431,42 +8488,30 @@ if INCLUDE-UNTRACKED is non-nil."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-tag:msg-mode-hook))
 
-(defsubst egg-tag-buffer-create-line (name gpg-uid)
-  (concat (if gpg-uid 
-	      (egg-text "Create GPG Signed " 'egg-text-2)
-	    (egg-text "Create Annotated Tag" 'egg-text-2))
-	  (if (stringp gpg-uid)
-	      (concat (egg-text "(by " 'egg-text-2)
-		      (egg-text gpg-uid 'egg-text-2)
-		      (egg-text ") Tag" 'egg-text-2))
-	    "")
-	  "  "
-	  (egg-text name 'egg-branch)))
+;; (defun egg-tag-buffer-toggle-signed (force)
+;;   (interactive "P")
+;;   (save-match-data
+;;     (save-excursion
+;;       (let ((tag-args (egg-log-msg-extras))
+;; 	    (inhibit-read-only t)
+;; 	    gpg-uid name)
+;; 	(goto-char (point-min))
+;; 	(cond ((looking-at "^Create GPG Signed.+Tag  \\(.+\\)$")
+;; 	       (setq name (match-string-no-properties 1))
+;; 	       (replace-match (egg-tag-buffer-create-line name nil) t)
+;; 	       (setcar (nthcdr 2 tag-args) nil))
+;; 	      ((looking-at "^Create Annotated Tag  \\(.+\\)$")
+;; 	       (setq name (match-string-no-properties 1))
+;; 	       (save-match-data
+;; 		 (setq gpg-uid (read-string (format "sign tag '%s' with gpg key uid: " name)
+;; 					    (egg-user-name))))
+;; 	       (replace-match (egg-tag-buffer-create-line name gpg-uid))
+;; 	       (setcar (nthcdr 2 tag-args) gpg-uid)))))))
 
-(defun egg-tag-buffer-toggle-signed (force)
-  (interactive "P")
-  (save-match-data
-    (save-excursion
-      (let ((tag-args (egg-log-msg-extras))
-	    (inhibit-read-only t)
-	    gpg-uid name)
-	(goto-char (point-min))
-	(cond ((looking-at "^Create GPG Signed.+Tag  \\(.+\\)$")
-	       (setq name (match-string-no-properties 1))
-	       (replace-match (egg-tag-buffer-create-line name nil) t)
-	       (setcar (nthcdr 2 tag-args) nil))
-	      ((looking-at "^Create Annotated Tag  \\(.+\\)$")
-	       (setq name (match-string-no-properties 1))
-	       (save-match-data
-		 (setq gpg-uid (read-string (format "sign tag '%s' with gpg key uid: " name)
-					    (egg-user-name))))
-	       (replace-match (egg-tag-buffer-create-line name gpg-uid))
-	       (setcar (nthcdr 2 tag-args) gpg-uid)))))))
-
-(defconst egg-tag-buffer-heading-map
-  (let ((map (make-sparse-keymap "Egg:CreateTag")))
-    (define-key map (kbd "s") 'egg-tag-buffer-toggle-signed)
-    map))
+;; (defconst egg-tag-buffer-heading-map
+;;   (let ((map (make-sparse-keymap "Egg:CreateTag")))
+;;     (define-key map (kbd "s") 'egg-tag-buffer-toggle-signed)
+;;     map))
 
 (defun egg-create-annotated-tag (name commit-1 &optional gpg-uid)
   (let* ((git-dir (egg-git-dir))
@@ -8481,19 +8526,22 @@ if INCLUDE-UNTRACKED is non-nil."
     (setq inhibit-read-only t)
     (erase-buffer)
     
-    (insert (egg-tag-buffer-create-line name gpg-uid)
-            "\n\n"
-            (egg-text "on commit:" 'egg-text-2) " "
-            (egg-text commit 'font-lock-string-face) "\n"
-            (egg-text "a.k.a.:" 'egg-text-2) " "
+    (insert (egg-text "Create Annotated Tag" 'egg-text-2) "  "
+	    (egg-text name 'egg-branch) "\n"
+            (egg-text "on commit:" 'egg-text-1) " "
+            (egg-text commit 'font-lock-constant-face) "\n"
+            (egg-text "a.k.a.:" 'egg-text-1) " "
             (egg-text pretty 'font-lock-string-face) "\n"
-            (egg-text "Repository: " 'egg-text-2)
+	    (egg-text "GPG-Signed by: " 'egg-text-1)
+	    (if gpg-uid (egg-text gpg-uid 'egg-text-2)
+	      (egg-text "None" 'egg-text-2)) "\n"
+            (egg-text "Repository: " 'egg-text-1)
             (egg-text git-dir 'font-lock-constant-face) "\n"
             (egg-text "----------------- Tag Message (type C-c C-c when done) ---------------"
                       'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
-    (put-text-property (point-min) (point) 'keymap egg-tag-buffer-heading-map)
+;;    (put-text-property (point-min) (point) 'keymap egg-tag-buffer-heading-map)
     (insert "\n")
     (setq text-beg (point-marker))
     (set-marker-insertion-type text-beg nil)
@@ -8502,9 +8550,8 @@ if INCLUDE-UNTRACKED is non-nil."
 
     (set (make-local-variable 'egg-log-msg-closure)
 	 (egg-log-msg-mk-closure-from-input
-	  (egg-log-msg-mk-closure-input #'egg-tag-msg-create-tag
-					name commit-1 gpg-uid)
-	  nil text-beg text-end nil))
+	  (egg-log-msg-mk-closure-input #'egg-tag-msg-create-tag name commit-1)
+	  nil gpg-uid text-beg text-end nil))
     nil))
 ;;;========================================================
 ;;; minor-mode
