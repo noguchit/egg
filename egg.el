@@ -700,6 +700,10 @@ See also `with-temp-file' and `with-output-to-string'."
 ;;(defalias 'egg-string-at-point 'ffap-string-at-point)
 (defalias 'egg-find-file-at-point 'find-file-at-point)
 
+(defsubst egg-goto-line (line)
+  (goto-char (point-min))
+  (forward-line (1- line)))
+
 (defsubst egg-prepend (str prefix &rest other-properties)
   "Make STR appear to have prefix PREFIX.
 If OTHER-PROPERTIES was non-nil, apply it to STR."
@@ -2429,17 +2433,21 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 	(t (egg--git-pp-fatal-result (regexp-opt '("empty message" "nothing to amend"))
 				     "[Oo]nly one.+ can be used"))))
 
-(defun egg--git-commit-with-region-cmd (buffer-to-update beg end &rest args)
+(defun egg--git-commit-with-region-cmd (buffer-to-update beg end gpg-uid &rest args)
   (egg--do-git-action-stdin "commit"
 			    (cons beg end) buffer-to-update
 			    #'egg--git-pp-commit-output
-			    (append args (list "-v" "-F" "-"))))
+			    (append args (cond ((eq gpg-uid t) (list "-v" "-S" "-F" "-"))
+					       ((stringp gpg-uid) (list "-v" 
+									(concat "--gpg-sign=" gpg-uid)
+									"-F" "-"))
+					       (t (list "-v" "-F" "-"))))))
 
-(defsubst egg-do-commit-with-region (beg end)
-  (egg--git-commit-with-region-cmd t beg end))
+(defsubst egg-do-commit-with-region (beg end gpg-uid)
+  (egg--git-commit-with-region-cmd t beg end gpg-uid))
 
-(defsubst egg-do-amend-with-region (beg end)
-  (egg--git-commit-with-region-cmd t beg end "--amend"))
+(defsubst egg-do-amend-with-region (beg end gpg-uid)
+  (egg--git-commit-with-region-cmd t beg end gpg-uid "--amend"))
 
 (defun egg--git-amend-no-edit-cmd (buffer-to-update &rest args)
   (egg--do-git-action
@@ -3588,7 +3596,7 @@ exit code ACCEPTED-CODE is considered a success."
 	    (funcall egg-buffer-refresh-func (current-buffer))
 	    (if anchor
 		(egg-buffer-goto-section anchor)
-	      (goto-line line)
+	      (egg-goto-line line)
 	      (goto-char (+ (line-beginning-position) column)))
 	    (dolist (win-anchor-off-line-col win-anchor-off-line-col-alist)
 	      (let ((win (nth 0 win-anchor-off-line-col))
@@ -3599,7 +3607,7 @@ exit code ACCEPTED-CODE is considered a success."
 		(with-selected-window win
 		  (if anchor
 		      (egg-buffer-goto-section anchor offset)
-		    (goto-line line)
+		    (egg-goto-line line)
 		    (goto-char (+ (line-beginning-position) column)))))))))))
 
 (defun egg-buffer-cmd-refresh ()
@@ -5212,15 +5220,15 @@ when the buffer was created.")
 (define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
 (define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
 
-(defun egg-log-msg-commit (prefix text-beg text-end &rest ignored)
+(defsubst egg-log-msg-commit (prefix text-beg text-end &rest ignored)
   "Commit the index using the text between TEXT-BEG and TEXT-END as message.
 PREFIX and IGNORED are ignored."
-  (egg-do-commit-with-region text-beg text-end))
+  (egg-do-commit-with-region text-beg text-end nil))
 
-(defun egg-log-msg-amend-commit (prefix text-beg text-end &rest ignored)
+(defsubst egg-log-msg-amend-commit (prefix text-beg text-end &rest ignored)
   "Amend the last commit with the index using the text between TEXT-BEG and TEXT-END
 as message. PREFIX and IGNORED are ignored."
-  (egg-do-amend-with-region text-beg text-end))
+  (egg-do-amend-with-region text-beg text-end nil))
 
 (defun egg-log-msg-done (level)
   "Take action with the composed message.
