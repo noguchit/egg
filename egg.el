@@ -8422,6 +8422,42 @@ if INCLUDE-UNTRACKED is non-nil."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-tag:msg-mode-hook))
 
+(defsubst egg-tag-buffer-create-line (name gpg-uid)
+  (concat (if gpg-uid 
+	      (egg-text "Create GPG Signed " 'egg-text-2)
+	    (egg-text "Create Annotated Tag" 'egg-text-2))
+	  (if (stringp gpg-uid)
+	      (concat (egg-text "(by " 'egg-text-2)
+		      (egg-text gpg-uid 'egg-text-2)
+		      (egg-text ") Tag" 'egg-text-2))
+	    "")
+	  "  "
+	  (egg-text name 'egg-branch)))
+
+(defun egg-tag-buffer-toggle-signed (force)
+  (interactive "P")
+  (save-match-data
+    (save-excursion
+      (let ((tag-args (egg-log-msg-extras))
+	    (inhibit-read-only t)
+	    gpg-uid name)
+	(goto-char (point-min))
+	(cond ((looking-at "^Create GPG Signed.+Tag  \\(.+\\)$")
+	       (setq name (match-string-no-properties 1))
+	       (replace-match (egg-tag-buffer-create-line name nil) t)
+	       (setcar (nthcdr 2 tag-args) nil))
+	      ((looking-at "^Create Annotated Tag  \\(.+\\)$")
+	       (setq name (match-string-no-properties 1))
+	       (save-match-data
+		 (setq gpg-uid (read-string (format "sign tag '%s' with gpg key uid: " name)
+					    (egg-user-name))))
+	       (replace-match (egg-tag-buffer-create-line name gpg-uid))
+	       (setcar (nthcdr 2 tag-args) gpg-uid)))))))
+
+(defconst egg-tag-buffer-heading-map
+  (let ((map (make-sparse-keymap "Egg:CreateTag")))
+    (define-key map (kbd "s") 'egg-tag-buffer-toggle-signed)
+    map))
 
 (defun egg-create-annotated-tag (name commit-1 &optional gpg-uid)
   (let* ((git-dir (egg-git-dir))
@@ -8436,16 +8472,8 @@ if INCLUDE-UNTRACKED is non-nil."
     (setq inhibit-read-only t)
     (erase-buffer)
     
-    (insert (if gpg-uid 
-		(egg-text "Create GPG Signed " 'egg-text-2)
-	      (egg-text "Create Annotated Tag" 'egg-text-2))
-	    (if (stringp gpg-uid)
-		(concat (egg-text "(by " 'egg-text-2)
-			(egg-text gpg-uid 'egg-text-2)
-			(egg-text ") Tag" 'egg-text-2))
-	      "")
-	    "  "
-            (egg-text name 'egg-branch) "\n\n"
+    (insert (egg-tag-buffer-create-line name gpg-uid)
+            "\n\n"
             (egg-text "on commit:" 'egg-text-2) " "
             (egg-text commit 'font-lock-string-face) "\n"
             (egg-text "a.k.a.:" 'egg-text-2) " "
@@ -8456,6 +8484,7 @@ if INCLUDE-UNTRACKED is non-nil."
                       'font-lock-comment-face))
     (put-text-property (point-min) (point) 'read-only t)
     (put-text-property (point-min) (point) 'rear-sticky nil)
+    (put-text-property (point-min) (point) 'keymap egg-tag-buffer-heading-map)
     (insert "\n")
     (setq text-beg (point-marker))
     (set-marker-insertion-type text-beg nil)
