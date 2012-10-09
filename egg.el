@@ -1146,7 +1146,8 @@ The string is built based on the current state STATE."
 				stash egg-stash
 				commit egg-commit-log-edit
 				reflog egg-reflog)
-			  action)))
+			  action))
+	  (current-prefix-arg nil))
       (when (and (commandp cmd)		;; cmd is a valid command
 		 ;; if only-action is specified, then only take
 		 ;; action if it's the same as only-action
@@ -2192,7 +2193,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
    (lambda (ret-code)
      (cond ((= ret-code 0)
 	    (or (egg--git-pp-grab-line-matching "stopped before committing as requested"
-						nil :next-action 'commit :success t)
+						nil :next-action 'status :success t)
 		(egg--git-pp-grab-line-matching
 		 (regexp-opt '("merge went well" "Already up-to-date" 
 			       "file changed" "files changed"
@@ -8963,6 +8964,7 @@ with the current contents in work-dir."
   (save-some-buffers nil 'egg-is-in-git)
   (let* ((state (egg-repo-state :unstaged :staged :error-if-not-git))
          (desc (egg-describe-state state))
+	 (current-prefix-arg nil)
          action default)
     (setq action (if (or ask egg-confirm-next-action)
                      (egg-prompt-next-action desc)
