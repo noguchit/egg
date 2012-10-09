@@ -8219,47 +8219,57 @@ rebase. Otherwise mark the commit as PICK."
                       egg-query:commit-commit-map
                       egg-query:commit-commit-map)))
 
+(defun egg-do-search-file-changes (prefix default-term file-name search-action-format
+					  &optional do-all)
+  (let* ((head-name (egg-branch-or-HEAD))
+	 (file-name (or file-name (buffer-file-name)))
+	 (short-name (file-name-nondirectory file-name))
+	 (search-action (format search-action-format short-name head-name))
+	 (pickaxe (egg-buffer-prompt-pickaxe search-action :string default-term
+					     (> prefix 15) (> prefix 3) t))
+	 (closure (egg-do-search-changes pickaxe file-name (and do-all (list "--all"))))) 
+    (plist-put closure :command
+	       `(lambda (prefix default-term)
+		  (interactive (list (prefix-numeric-value current-prefix-arg)
+				     (egg-string-at-point)))
+		  (egg-do-search-file-changes prefix default-term 
+					      ,file-name
+					      ,search-action-format
+					      ,do-all)))
+    closure))
+
 
 (defun egg-search-file-changes (prefix &optional default-term file-name)
   "Search file's history in the current branch for changes introducing or removing a term.
 TERM is the default search term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (let* ((head-name (egg-branch-or-HEAD))
-	 (file-name (or file-name (buffer-file-name)))
-	 (short-name (file-name-nondirectory file-name))
-	 (search-action (format "search %s's history in %s" short-name head-name))
-	 closure) 
-    (setq closure
-	  (egg-search-changes nil nil file-name
-			      (egg-buffer-prompt-pickaxe search-action :string default-term
-							 (> prefix 15) (> prefix 3) t)))
-    (plist-put closure :command
-	       `(lambda (prefix default-term)
-		  (interactive (list (prefix-numeric-value current-prefix-arg)
-				     (egg-string-at-point)))
-		  (egg-search-file-changes prefix default-term ,file-name)))))
+  (egg-do-search-file-changes prefix default-term file-name "search %s's history in %s"))
 
-(defun egg-search-changes (prefix default-term &optional file-name pickaxe)
+(defun egg-search-file-changes-all (prefix &optional default-term file-name)
+  "Search file's full history for changes introducing or removing a term.
+TERM is the default search term."
+  (interactive (list (prefix-numeric-value current-prefix-arg)
+		     (egg-string-at-point)))
+  (egg-do-search-file-changes prefix default-term file-name "search %s's full history"
+			      'all))
+
+(defun egg-search-changes (prefix default-term)
   "Search the current branch's history for changes introducing/removing a term.
-DEFAULT-TERM is the default search term.
-If called non-interactively, the caller can provide ready-made PICKAXE info
-and a FILE-NAME. If FILE-NAME is non-nil then restrict the search to FILE-NAME's
-history."
+DEFAULT-TERM is the default search term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
   (let* ((mark (egg-log-buffer-find-first-mark ?*))
 	 (head-name (egg-branch-or-HEAD))
 	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 (revs (and start-rev (list (concat start-rev "^.." head-name))))
-	 (pickaxe (or pickaxe
-		      (egg-buffer-prompt-pickaxe 
-		       (if revs (concat "search " (car revs))
-			 (format "search %s'shistory" head-name))
-		       :string default-term 
-		       (> prefix 15) (> prefix 3) t)))
+	 (pickaxe (egg-buffer-prompt-pickaxe 
+		   (if revs (concat "search " (car revs))
+		     (format "search %s'shistory" head-name))
+		   :string default-term 
+		   (> prefix 15) (> prefix 3) t))
 	 closure)
-    (setq closure (egg-do-search-changes pickaxe file-name revs))
+    (setq closure (egg-do-search-changes pickaxe nil revs))
     (plist-put closure :command
 	       (lambda (prefix default-term)
 		 (interactive (list (prefix-numeric-value current-prefix-arg)
@@ -8267,27 +8277,9 @@ history."
 		 (egg-search-changes prefix default-term)))
     closure))
 
-(defun egg-search-file-changes-all (prefix &optional default-term file-name)
-  "Search file's full history for changes introducing or removing a term.
-TERM is the default search term."
-  (interactive (list (prefix-numeric-value current-prefix-arg)
-		     (egg-string-at-point)))
-  (let* ((file-name (or file-name (buffer-file-name)))
-	 (short-name (file-name-nondirectory file-name))
-	 (search-action (format "search %s's full history" short-name))
-	 closure) 
-    (setq closure
-	  (egg-search-changes-all nil nil file-name
-				  (egg-buffer-prompt-pickaxe search-action :string 
-							     default-term
-							     (> prefix 15) (> prefix 3) t)))
-    (plist-put closure :command
-	       `(lambda (prefix default-term)
-		  (interactive (list (prefix-numeric-value current-prefix-arg)
-				     (egg-string-at-point)))
-		  (egg-search-file-changes-all prefix default-term ,file-name)))))
 
-(defun egg-search-changes-all (prefix default-term &optional file-name pickaxe)
+
+(defun egg-search-changes-all (prefix default-term)
   "Search entire history for changes introducing/removing a term.
 DEFAULT-TERM is the default search term.
 If called non-interactively, the caller can provide ready-made PICKAXE info
@@ -8295,12 +8287,11 @@ and a FILE-NAME. If FILE-NAME is non-nil then restrict the search to FILE-NAME's
 history."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (let* ((pickaxe (or pickaxe
-		      (egg-buffer-prompt-pickaxe "search entire history"
-						 :string default-term 
-						 (> prefix 15) (> prefix 3) t)))
+  (let* ((pickaxe (egg-buffer-prompt-pickaxe "search entire history"
+					     :string default-term 
+					     (> prefix 15) (> prefix 3) t))
 	 closure)
-    (setq closure (egg-do-search-changes pickaxe file-name (list "--all")))
+    (setq closure (egg-do-search-changes pickaxe nil (list "--all")))
     (plist-put closure :command
 	       (lambda (prefix default-term)
 		 (interactive (list (prefix-numeric-value current-prefix-arg)
