@@ -6103,14 +6103,6 @@ Jump to line LINE if it's not nil."
   (let ((map (make-sparse-keymap "Egg:LogLocalBranch")))
     (set-keymap-parent map egg-log-local-ref-map)
     (define-key map (kbd "C-c C-=") 'egg-log-buffer-diff-upstream)
-    (define-key map (kbd "RET") 'egg-show-branch)
-    map)
-  "\\{egg-log-local-branch-map}")
-
-(defconst egg-log-tag-map
-  (let ((map (make-sparse-keymap "Egg:LogTag")))
-    (set-keymap-parent map egg-log-local-ref-map)
-    (define-key map (kbd "RET") 'egg-show-atag)
     map)
   "\\{egg-log-local-branch-map}")
 
@@ -6118,7 +6110,6 @@ Jump to line LINE if it's not nil."
   (let ((map (make-sparse-keymap "Egg:LogRemoteRef")))
     (set-keymap-parent map egg-log-ref-map)
     (define-key map (kbd "D") 'egg-log-buffer-fetch-remote-ref)
-    (define-key map (kbd "RET") 'egg-show-remote-branch)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-remote-ref-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-remote-ref-menu)
@@ -6415,7 +6406,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
                       egg-log-local-branch-map
-                      egg-log-tag-map
+                      egg-log-local-ref-map
                       egg-log-remote-branch-map
                       egg-log-remote-site-map
 		      sha1-name-alist)))
@@ -7786,7 +7777,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
                       egg-log-local-branch-map
-                      egg-log-tag-map
+                      egg-log-local-ref-map
                       egg-log-remote-branch-map
                       egg-log-remote-site-map
 		      sha1-reflog-alist)))
