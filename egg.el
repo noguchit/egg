@@ -467,13 +467,12 @@ Different versions of git have different names for this subdir."
                  string))
 
 (defcustom egg-show-key-help-in-buffers
-  '(:log :status :diff :file-log :reflog :query :stash)
+  '(:log :status :diff :file-log :query :stash)
   "Display keybinding help in egg special buffers."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   :status)
               (const :tag "Log Buffer"      :log)
               (const :tag "File Log Buffer" :file-log)
-              (const :tag "RefLog Buffer"   :reflog)
               (const :tag "Diff Buffer"     :diff)
               (const :tag "Commit Buffer"   :commit)
 	      (const :tag "Search Buffer"   :query)
@@ -5992,6 +5991,24 @@ Jump to line LINE if it's not nil."
   (egg-git-ok t "log" "--pretty=oneline" "--decorate=full" "--no-color"
               (concat "-S" string)))
 
+(defun egg-log-show-ref (pos)
+  (interactive "d")
+  (let* ((ref-info (get-text-property pos :ref))
+	 (reflog (unless ref-info (get-text-property pos :reflog)))
+	 (ref-type (and (cdr ref-info)))
+	 (reflog-time (and reflog (get-text-property pos :time))))
+    (if ref-info
+	(cond ((eq ref-type :head) (egg-show-branch (car ref-info)))
+	      ((eq ref-type :tag) (egg-show-atag (car ref-info)))
+	      ((eq ref-type :remote) (egg-show-remote-branch (car ref-info)))
+	      (t nil))
+      (when reflog
+	(setq reflog (substring-no-properties reflog))
+	(setq reflog-time (substring-no-properties reflog-time))
+	(put-text-property 0 (length reflog) 'face 'bold reflog)
+	(put-text-property 0 (length reflog-time) 'face 'bold reflog-time)
+	(message "reflog:%s created:%s" reflog reflog-time)))))
+
 (defconst egg-log-commit-base-map
   (let ((map (make-sparse-keymap "Egg:LogCommitBase")))
     (set-keymap-parent map egg-hide-show-map)
@@ -6005,6 +6022,7 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "m") 'egg-log-buffer-merge)
     (define-key map (kbd "r") 'egg-log-buffer-rebase)
     (define-key map (kbd "c") 'egg-log-buffer-pick-1cherry)
+    (define-key map (kbd "i") 'egg-log-show-ref)
     map))
 
 (defconst egg-secondary-log-commit-map
@@ -6222,14 +6240,15 @@ Jump to line LINE if it's not nil."
 	    (add-to-list 'short-ref-list (car (get-text-property 0 :ref ref)))))))
 
     (setq ref-string (mapconcat 'identity (append pseudo-refs-list decorated-refs) " "))
-    (when (equal ref-string "")
-      (setq ref-string nil))
-    (when (and decorated-refs ref-string) 
+    (if (equal ref-string "")
+	(setq ref-string nil)
       (add-text-properties 0 (length ref-string)
-			   (nconc (list :references short-ref-list
-					:full-references full-ref-list) 
+			   (nconc (if decorated-refs
+				      (list :references short-ref-list
+					    :full-references full-ref-list)) 
 				  extras-properties)
 			   ref-string))
+    
     ref-string))
 
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map
@@ -6279,6 +6298,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                             (setq refs-end (point))
                             (+ (point) 2)))
 	(setq pseudo-refs-list (assoc-default sha1 sha1-pseudo-ref-alist))
+	(dolist (pseudo-ref pseudo-refs-list)
+	  (put-text-property 0 (length pseudo-ref) 'keymap line-map pseudo-ref))
 	(setq ref-string
 	      (egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist 
 					      pseudo-refs-list 
@@ -7723,26 +7744,32 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (setq buf (egg-do-diff diff-info))
     (pop-to-buffer buf)))
 
-
 (defun egg-yggdrasil-insert-logs (ref)
   (let* ((mappings 
-	  (egg-git-to-lines 
-	   "--no-pager" "log" "-g" "--pretty=%H %gd%n" 
-	   (format "--max-count=%d" (1+ egg-max-reflogs))
-	   ref))
+	  (cdr (egg-git-to-lines 
+		"--no-pager" "log" "-g" "--pretty=%H~%gd%n" 
+		(format "--max-count=%d" (1+ egg-max-reflogs))
+		(concat ref "@{now}"))))
 	 (beg (point)) 
-	 (reflog-0 (concat ref "@{0}"))
 	 (head-name (egg-branch-or-HEAD))
-	 sha1-list sha1-reflog-alist sha1 reflog dup)
-    (setq mappings (save-match-data (mapcar #'split-string mappings)))
-    (dolist (map mappings)
-      (setq sha1 (car map) reflog (cadr map))
-      (unless (equal reflog reflog-0)
+	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair)
+    (setq mappings (save-match-data (mapcar (lambda (line) (split-string line "~" t)) mappings)))
+    (save-match-data
+      (dotimes (i egg-max-reflogs)
+	(setq pair (pop mappings))
+	(setq sha1 (car pair))
+	(setq reflog-time (cadr pair))
+	(setq reflog (format "%s@{%d}" ref (1+ i)))
+	(string-match "{\\(.+\\)}\\'" reflog-time)
+	(setq time (match-string-no-properties 1 reflog-time))
+	(put-text-property 0 (length reflog) :reflog (substring-no-properties reflog) reflog)
 	(put-text-property 0 (length reflog) 'face 'egg-reflog-mono reflog)
-	(add-to-list 'sha1-list sha1)
+	(put-text-property 0 (length reflog) :time time reflog)
 	(setq dup (assoc sha1 sha1-reflog-alist))
-	(if dup (setcdr dup (cons reflog (cdr dup)))
-	  (add-to-list 'sha1-reflog-alist map))))
+	(if dup
+	    (setcdr dup (cons reflog (cdr dup)))
+	  (add-to-list 'sha1-list sha1)
+	  (add-to-list 'sha1-reflog-alist (list sha1 reflog)))))
 
     (egg-git-ok-args t (nconc (list "--no-pager" "log"
 				    (format "--max-count=%d" egg-log-HEAD-max-len)
