@@ -2283,7 +2283,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
    (lambda (ret-code)
      (cond ((= ret-code 0)
 	    (or (egg--git-pp-grab-line-matching "stopped before committing as requested"
-						nil :next-action 'status :success t)
+						nil :next-action 'commit :success t)
 		(egg--git-pp-grab-line-matching
 		 (regexp-opt '("merge went well" "Already up-to-date" 
 			       "file changed" "files changed"
@@ -5226,21 +5226,32 @@ MSG will be used for the merge commit.
 Thecommand  usually take the next action recommended by the results, but
 if the next action is IGNORED-ACTION then it won't be taken."
   (let ((msg (or msg (concat "merging in " rev)))
-	(merge-mode-flag (or merge-mode-flag "-v"))
-        merge-cmd-ok res modified-files next-action)
+        merge-cmd-ok res modified-files need-commit force-commit-to-status)
     
     (setq modified-files (egg-git-to-lines "diff" "--name-only" rev))
+    (cond ((equal merge-mode-flag "--commit")
+	   (setq need-commit t)
+	   (setq merge-mode-flag "--no-commit"))
+	  ((member merge-mode-flag '("--no-commit" "--squash"))
+	   (setq force-commit-to-status t)))
 
-    (setq res (nconc (if (eq msg t)		;; no msg
-			 (egg--git-merge-cmd 'all merge-mode-flag "--log" rev)
-		       (egg--git-merge-cmd 'all merge-mode-flag "--log" "-m" msg rev))
+    (setq res (nconc (egg--git-merge-cmd 'all merge-mode-flag "--log" rev)
 		     (list :files modified-files)))
-    (egg--buffer-handle-result res t ignored-action)))
+    (if need-commit
+	(egg--buffer-handle-result-with-commit
+	 res (list (concat (egg-text "Merge in:  " 'egg-text-3)
+			   (egg-text rev 'egg-branch))
+		   (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
+		   msg)
+	 t ignored-action)
+      (when (eq (plist-get res :next-action) 'commit)
+	(plist-put res :next-action 'status))
+      (egg--buffer-handle-result res t ignored-action))))
 
-(defsubst egg-log-buffer-do-merge-to-head (rev &optional merge-mode-flag msg)
+(defsubst egg-log-buffer-do-merge-to-head (rev &optional merge-mode-flag)
   "Merge REV to HEAD when the log special buffer.
 see `egg-buffer-do-merge-to-head'."
-  (egg-buffer-do-merge-to-head rev merge-mode-flag msg 'log))
+  (egg-buffer-do-merge-to-head rev merge-mode-flag nil 'log))
 
 (defun egg-do-rebase-head (upstream-or-action &optional onto)
   "Rebase HEAD based on UPSTREAM-OR-ACTION.
@@ -6701,7 +6712,7 @@ With C-u C-u prefix, prompt the user for the type of merge to perform."
 			       (?n "(n)o-commit" " (without merge commit)" "--no-commit")
 			       (?s "(s)quash" " (without merge data)" "--squash")
 			       (?f "(f)f-only" " (fast-forward only)" "--ff-only")))
-        res msg option key)
+        res option key)
     (unless (egg-repo-clean)
       (egg-status nil nil)
       (error "Repo is not clean!"))
@@ -6723,10 +6734,6 @@ With C-u C-u prefix, prompt the user for the type of merge to perform."
 
     (if  (null (y-or-n-p (format "merge %s to HEAD%s? " rev (nth 2 option))))
         (message "cancel merge from %s to HEAD%s!" rev (nth 2 option))
-      (setq msg (if (string= (nth 3 option) "--commit")
-		    (read-string "merge commit message: " 
-				 (concat "merging in " rev))
-		  t))
       (egg-log-buffer-do-merge-to-head rev (nth 3 option)))))
 
 (defun egg-log-buffer-ff-pull (pos)
@@ -6734,16 +6741,14 @@ With C-u C-u prefix, prompt the user for the type of merge to perform."
   (unless (egg-repo-clean)
     (egg-status nil nil)
     (error "Repo is not clean!"))
-  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
-				   "--ff-only" t))
+  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD) "--ff-only"))
 
 (defun egg-log-buffer-merge-n-squash (pos)
   (interactive "d")
   (unless (egg-repo-clean)
     (egg-status nil nil)
     (error "Repo is not clean!"))
-  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)
-				   "--squash" t))
+  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD) "--squash"))
 
 (defun egg-log-buffer-rebase (pos)
   "Rebase HEAD using the commit under POS as upstream.
@@ -7064,7 +7069,7 @@ would be a pull (by default --ff-only)."
 		(if (egg-repo-clean)
 		    (egg-log-buffer-do-move-head "--hard" src)
 		  (error "Can't push on dirty repo"))
-	      (egg-log-buffer-do-merge-to-head src "--ff-only" t))
+	      (egg-log-buffer-do-merge-to-head src "--ff-only"))
 	  (egg--git-push-cmd (current-buffer) (if non-ff "-vf" "-v")
 			     "." (concat src ":" dst)))
       (message "local push cancelled!"))))
@@ -7755,7 +7760,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair)
     (setq mappings (save-match-data (mapcar (lambda (line) (split-string line "~" t)) mappings)))
     (save-match-data
-      (dotimes (i egg-max-reflogs)
+      (dotimes (i (length mappings))
 	(setq pair (pop mappings))
 	(setq sha1 (car pair))
 	(setq reflog-time (cadr pair))
