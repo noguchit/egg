@@ -2386,6 +2386,21 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
       (setq res (nconc res (list :files files))))
     res))
 
+(defun egg--git-stash-drop-cmd (buffer-to-update &rest args)
+  "Run the git stash save command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE as needed.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
+  (egg--do-git-action
+   "stash" buffer-to-update
+   (lambda (ret-code)
+     (if (= ret-code 0)
+	 (or (egg--git-pp-grab-line-matching "^Dropped stash" nil :next-action 'stash :success t)
+	     (egg--git-pp-grab-line-no -1 :next-action 'stash :success t))
+       (or (egg--git-pp-grab-line-matching "only has" nil :next-action 'stash)
+	   (egg--git-pp-fatal-result))))
+   (cons "drop" args)))
+
 (defun egg--git-stash-unstash-cmd (buffer-to-update cmd &optional args)
   "Run a git stash CMD command synchronously with ARGS as arguments.
 CMD should be pop, apply or branch.
@@ -8581,6 +8596,16 @@ This is just an alternative way to launch `egg-log'"
   (when (or no-confirm
             (y-or-n-p "pop and apply last WIP to repo? "))
     (egg-sb-buffer-do-unstash "pop" "--index")))
+
+(defun egg-sb-buffer-drop-stash (pos &optional all)
+  (interactive "d\nP")
+  (let ((stash (get-text-property pos :stash)))
+    (unless stash
+      (error "No stash here!!!"))
+    (if all
+	(error "Drop all stash not supported yet!")
+      (when (y-or-n-p (format "delete %s? " stash)) 
+	(egg-status-buffer-handle-result (egg--git-stash-drop-cmd (current-buffer) stash))))))
 
 (defun egg-status-buffer-stash-wip (msg &optional include-untracked)
   "Stash current work-in-progress in workdir and the index.
