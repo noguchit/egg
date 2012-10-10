@@ -431,13 +431,14 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
-(defcustom egg-status-buffer-sections '(repo unstaged staged untracked)
+(defcustom egg-status-buffer-sections '(repo unstaged staged untracked stash)
   "Sections to be listed in the status buffer and their order."
   :group 'egg
   :type '(repeat (choice (const :tag "Repository Info" repo)
                          (const :tag "Unstaged Changes Section" unstaged)
                          (const :tag "Staged Changes Section" staged)
-                         (const :tag "Untracked/Unignored Files" untracked))))
+                         (const :tag "Untracked/Unignored Files" untracked)
+			 (const :tag "Stashed Work-in-Progess" stash))))
 
 
 (defcustom egg-commit-buffer-sections '(staged unstaged untracked)
@@ -1233,7 +1234,7 @@ The string is built based on the current state STATE."
   (when (and action (symbolp action))
     (let ((cmd (plist-get '(log egg-log
 				status egg-status
-				stash egg-stash
+				stash egg-status
 				commit egg-commit-log-edit
 				reflog egg-reflog)
 			  action))
@@ -3770,8 +3771,8 @@ exit code ACCEPTED-CODE is considered a success."
 (defconst egg-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:Buffer")))
     (define-key map (kbd "q") 'egg-quit-buffer)
-    (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
+    (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     (define-key map (kbd "C-c C-h") 'egg-buffer-hide-all)
@@ -4054,7 +4055,8 @@ rebase session."
       (insert egg-status-buffer-common-help-text)
       (when (eq egg-status-buffer-rebase-map map)
         (insert egg-status-buffer-rebase-help-text))
-      (insert egg-status-buffer-diff-help-text))
+      (insert egg-status-buffer-diff-help-text)
+      (insert egg-stash-help-text))
     ;; Mark the repo section
     (egg-delimit-section :section 'repo beg (point) inv-beg map 'repo)
     (when help-beg
@@ -4150,6 +4152,65 @@ adding the contents."
                          inv-beg egg-section-map 'untracked)
     (put-text-property inv-beg end 'keymap egg-untracked-file-map)
     (put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))))
+
+(defsubst egg-list-stash (&optional ignored)
+  (egg-git-ok t "stash" "list"))
+
+(defun egg-sb-buffer-show-stash (pos)
+  (interactive "d")
+  (let* ((next (next-single-property-change pos :diff))
+         (stash (and next (get-text-property next :stash))))
+    (unless (equal (get-text-property pos :stash) stash)
+      (egg-buffer-do-insert-stash pos))))
+
+(defconst egg-stash-map
+  (let ((map (make-sparse-keymap "Egg:Stash")))
+    (set-keymap-parent map egg-hide-show-map)
+    (define-key map (kbd "SPC") 'egg-sb-buffer-show-stash)
+    (define-key map (kbd "RET") 'egg-sb-buffer-apply-stash)
+    (define-key map "a" 'egg-sb-buffer-apply-stash)
+    (define-key map (kbd "DEL") 'egg-sb-buffer-drop-stash)
+    (define-key map "o" 'egg-sb-buffer-pop-stash)
+    map))
+
+(defun egg-decorate-stash-list (start line-map section-prefix)
+  (let (stash-beg stash-end beg end msg-beg msg-end name msg)
+    (save-excursion
+      (goto-char start)
+      (while (re-search-forward "^\\(stash@{[0-9]+}\\): +\\(.+\\)$" nil t)
+        (setq beg (match-beginning 0)
+              stash-end (match-end 1)
+              msg-beg (match-beginning 2)
+              end (match-end 0))
+
+        (setq name (buffer-substring-no-properties beg stash-end)
+              msg (buffer-substring-no-properties msg-beg end))
+
+        ;; entire line
+        (add-text-properties beg (1+ end)
+                             (list :navigation (concat section-prefix name)
+                                   :stash name
+                                   'keymap line-map))
+
+        ;; comment
+        (put-text-property beg stash-end 'face 'egg-stash-mono)
+        (put-text-property msg-beg end 'face 'egg-text-2)))))
+
+(defun egg-sb-insert-stash-section ()
+  (let ((beg (point)) inv-beg stash-beg end)
+    (insert (egg-prepend "Stashed WIPs:" "\n\n"
+                         'face 'egg-section-title
+                         'help-echo (egg-tooltip-func))
+            "\n")
+    (setq inv-beg (1- (point)))
+    (setq stash-beg (point))
+    (egg-list-stash)
+    (setq end (point))
+    (egg-delimit-section :section 'stash beg end
+                         inv-beg egg-section-map 'stash)
+    (egg-decorate-stash-list stash-beg egg-stash-map "stash-")
+    ;;(put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))
+    ))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
@@ -4735,7 +4796,8 @@ If INIT was not nil, then perform 1st-time initializations as well."
           (cond ((eq sect 'repo) (egg-sb-insert-repo-section))
                 ((eq sect 'unstaged) (egg-sb-insert-unstaged-section "Unstaged Changes:"))
                 ((eq sect 'staged) (egg-sb-insert-staged-section "Staged Changes:"))
-                ((eq sect 'untracked) (egg-sb-insert-untracked-section))))
+                ((eq sect 'untracked) (egg-sb-insert-untracked-section))
+		((eq sect 'stash) (egg-sb-insert-stash-section))))
         (egg-calculate-hunk-ranges)
         (if init (egg-buffer-maybe-hide-all))
         (if init (egg-buffer-maybe-hide-help "help" 'repo))
@@ -8464,42 +8526,7 @@ This is just an alternative way to launch `egg-log'"
 ;;;========================================================
 ;;; stash
 ;;;========================================================
-(defsubst egg-list-stash (&optional ignored)
-  (egg-git-ok t "stash" "list" ;; "--pretty=oneline"
-              ))
-
-(defconst egg-stash-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:StashBuffer")))
-    (set-keymap-parent map egg-buffer-mode-map)
-    (define-key map "n" 'egg-stash-buffer-next-stash)
-    (define-key map "p" 'egg-stash-buffer-prev-stash)
-    (define-key map "s" 'egg-status)
-    (define-key map "/" 'egg-stash-pickaxe)
-    (define-key map (kbd "RET") 'egg-stash-buffer-pop)
-    (define-key map "o" 'egg-stash-buffer-pop)
-    (define-key map "l" 'egg-log)
-    map))
-
-(defconst egg-stash-map
-  (let ((map (make-sparse-keymap "Egg:Stash")))
-    (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "SPC") 'egg-stash-buffer-show)
-    (define-key map (kbd "RET") 'egg-stash-buffer-apply)
-    (define-key map "a" 'egg-stash-buffer-apply)
-    (define-key map (kbd "DEL") 'egg-stash-buffer-drop)
-    (define-key map "x" 'egg-stash-buffer-drop)
-    (define-key map "X" 'egg-stash-buffer-clear)
-    (define-key map "o" 'egg-stash-buffer-pop)
-    map))
-
-(define-egg-buffer stash "*%s-stash@%s*"
-  (egg-file-log-buffer-mode)
-  (use-local-map egg-stash-buffer-mode-map)
-  (setq major-mode 'egg-stash-buffer-mode
-        mode-name  "Egg-Stash")
-  (run-mode-hooks 'egg-stash-buffer-mode-hook))
-
-(defun egg-stash-buffer-do-insert-stash (pos)
+(defun egg-buffer-do-insert-stash (pos)
   (save-excursion
     (let ((stash (get-text-property pos :stash))
           (nav (get-text-property pos :navigation))
@@ -8531,14 +8558,7 @@ This is just an alternative way to launch `egg-log'"
       (forward-line 1)
       (set-buffer-modified-p nil))))
 
-(defun egg-stash-buffer-show (pos)
-  (interactive "d")
-  (let* ((next (next-single-property-change pos :diff))
-         (stash (and next (get-text-property next :stash))))
-    (unless (equal (get-text-property pos :stash) stash)
-      (egg-stash-buffer-do-insert-stash pos))))
-
-(defun egg-stash-buffer-do-unstash (cmd &rest args)
+(defun egg-sb-buffer-do-unstash (cmd &rest args)
   (let ((default-directory (egg-work-tree-dir))
 	(cmd (or cmd "pop")))
     (unless (egg-has-stashed-wip)
@@ -8546,21 +8566,21 @@ This is just an alternative way to launch `egg-log'"
     (unless (egg-repo-clean)
       (unless (y-or-n-p (format "repo is NOT clean, still want to apply stash? "))
 	(error "stash %s cancelled!" cmd)))
-    (egg-stash-buffer-handle-result (egg--git-stash-unstash-cmd t cmd args))))
+    (egg-status-buffer-handle-result (egg--git-stash-unstash-cmd t cmd args))))
 
-(defun egg-stash-buffer-pop (&optional no-confirm)
-  (interactive "P")
-  (when (or no-confirm
-            (y-or-n-p "pop and apply last WIP to repo? "))
-    (egg-stash-buffer-do-unstash "pop" "--index")))
-
-(defun egg-stash-buffer-apply (pos &optional no-confirm)
+(defun egg-sb-buffer-apply-stash (pos &optional no-confirm)
   (interactive "d\nP")
  (let ((stash (get-text-property pos :stash)))
     (when (and stash (stringp stash)
                (or no-confirm
                    (y-or-n-p (format "apply WIP %s to repo? " stash))))
-      (egg-stash-buffer-do-unstash "apply" "--index" stash))))
+      (egg-sb-buffer-do-unstash "apply" "--index" stash))))
+
+(defun egg-sb-buffer-pop-stash (&optional no-confirm)
+  (interactive "P")
+  (when (or no-confirm
+            (y-or-n-p "pop and apply last WIP to repo? "))
+    (egg-sb-buffer-do-unstash "pop" "--index")))
 
 (defun egg-status-buffer-stash-wip (msg &optional include-untracked)
   "Stash current work-in-progress in workdir and the index.
@@ -8576,91 +8596,22 @@ if INCLUDE-UNTRACKED is non-nil."
       (setq res (if include-untracked
 		    (egg--git-stash-save-cmd t "-u" msg)
 		  (egg--git-stash-save-cmd t msg)))
-      (egg-status-buffer-handle-result res))))
-
-(defun egg-stash-buffer-next-stash ()
-  "Move to the next stash."
-  (interactive)
-  (egg-buffer-cmd-next-block :stash))
-
-(defun egg-stash-buffer-prev-stash ()
-  "Move to the previous stash."
-  (interactive)
-  (egg-buffer-cmd-prev-block :stash))
-
+      (when (egg-status-buffer-handle-result res)
+	(egg-buffer-goto-section "stash-stash@{0}")))))
 
 (defconst egg-stash-help-text
   (concat
-   (egg-text "Common Key Bindings:" 'egg-help-header-2) "\n"
-   (egg-pretty-help-text
-    "\\<egg-stash-buffer-mode-map>"
-    "\\[egg-stash-buffer-next-stash]:next stash  "
-    "\\[egg-stash-buffer-prev-stash]:previous stash  "
-    "\\[egg-status]:show repo's status  "
-    "\\[egg-buffer-cmd-refresh]:redisplay  "
-    "\\[egg-quit-buffer]:quit\n" )
    (egg-text "Extra Key Bindings for a Stash line:" 'egg-help-header-2) "\n"
    (egg-pretty-help-text
     "\\<egg-stash-map>"
-    "\\[egg-stash-buffer-show]:load details  "
-    "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
-    "\\[egg-stash-buffer-apply]:apply  "
-    "\\[egg-stash-buffer-pop]:pop and apply stash\n"
-    "\\[egg-stash-buffer-drop]:delete stash  "
-    "\\[egg-stash-buffer-clear]:delete all  "
+    "\\[egg-sb-buffer-show-stash]:load details  "
+    ;; "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
+    "\\[egg-sb-buffer-apply-stash]:apply  "
+    "\\[egg-sb-buffer-pop-stash]:pop and apply stash "
+    "\\[egg-sb-buffer-drop-stash]:delete stash  "
     )
    "\n"
    ))
-
-(defun egg-decorate-stash-list (&optional line-map)
-  (let ((start (point)) stash-beg stash-end beg end msg-beg msg-end
-        name msg)
-    (save-excursion
-      (while (re-search-forward "^\\(stash@{[0-9]+}\\): +\\(.+\\)$" nil t)
-        (setq beg (match-beginning 0)
-              stash-end (match-end 1)
-              msg-beg (match-beginning 2)
-              end (match-end 0))
-
-        (setq name (buffer-substring-no-properties beg stash-end)
-              msg (buffer-substring-no-properties msg-beg end))
-
-        ;; entire line
-        (add-text-properties beg (1+ end)
-                             (list :navigation name
-                                   :stash name
-                                   'keymap line-map))
-
-        ;; comment
-        (put-text-property beg stash-end 'face 'egg-stash-mono)
-        (put-text-property msg-beg end 'face 'egg-text-2)))))
-
-(defsubst egg-stash-buffer-decorate-stash-list ()
-  (let ((beg (point)))
-    (egg-list-stash)
-    (unless (= (char-before (point-max)) ?\n)
-      (goto-char (point-max))
-      (insert ?\n))
-    (goto-char beg)
-    (egg-decorate-stash-list egg-stash-map)))
-
-(defun egg-stash ()
-  (interactive)
-  (let ((egg-internal-current-state (egg-repo-state :error-if-not-git))
-        (buffer (egg-get-stash-buffer 'create))
-        title help)
-    (setq title (concat (egg-text "Stash(es)" 'egg-branch)))
-    (with-current-buffer buffer
-      (set
-       (make-local-variable 'egg-internal-log-buffer-closure)
-       (list :title title
-             :closure #'egg-stash-buffer-decorate-stash-list))
-      (when (memq :stash egg-show-key-help-in-buffers)
-        (setq help egg-stash-help-text))
-      (if help (plist-put egg-internal-log-buffer-closure :help help)))
-    (egg-log-buffer-simple-redisplay buffer 'init)
-    (pop-to-buffer buffer)))
-
 
 ;;;========================================================
 ;;; annotated tag
@@ -8692,31 +8643,6 @@ if INCLUDE-UNTRACKED is non-nil."
         mode-line-process "")
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-tag:msg-mode-hook))
-
-;; (defun egg-tag-buffer-toggle-signed (force)
-;;   (interactive "P")
-;;   (save-match-data
-;;     (save-excursion
-;;       (let ((tag-args (egg-log-msg-extras))
-;; 	    (inhibit-read-only t)
-;; 	    gpg-uid name)
-;; 	(goto-char (point-min))
-;; 	(cond ((looking-at "^Create GPG Signed.+Tag  \\(.+\\)$")
-;; 	       (setq name (match-string-no-properties 1))
-;; 	       (replace-match (egg-tag-buffer-create-line name nil) t)
-;; 	       (setcar (nthcdr 2 tag-args) nil))
-;; 	      ((looking-at "^Create Annotated Tag  \\(.+\\)$")
-;; 	       (setq name (match-string-no-properties 1))
-;; 	       (save-match-data
-;; 		 (setq gpg-uid (read-string (format "sign tag '%s' with gpg key uid: " name)
-;; 					    (egg-user-name))))
-;; 	       (replace-match (egg-tag-buffer-create-line name gpg-uid))
-;; 	       (setcar (nthcdr 2 tag-args) gpg-uid)))))))
-
-;; (defconst egg-tag-buffer-heading-map
-;;   (let ((map (make-sparse-keymap "Egg:CreateTag")))
-;;     (define-key map (kbd "s") 'egg-tag-buffer-toggle-signed)
-;;     map))
 
 (defun egg-create-annotated-tag (name commit-1 &optional gpg-uid)
   (let* ((git-dir (egg-git-dir))
