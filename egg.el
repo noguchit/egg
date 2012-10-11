@@ -357,13 +357,20 @@ Many Egg faces inherit from this one by default."
   "Face for blame tag line."
   :group 'egg-faces)
 
-(defface egg-log-HEAD
-  '((t (:inherit region)))
-  "Face to highlight HEAD in the log buffer."
-  :group 'egg-faces)
+;; (defface egg-log-HEAD
+;;   '((t (:inherit region)))
+;;   "Face to highlight HEAD in the log buffer."
+;;   :group 'egg-faces)
 
 (defface egg-log-HEAD-name
-  '((t (:inherit (egg-log-HEAD egg-branch-mono))))
+  '((((class color) (background light))
+     (:box (:line-width 1 :color "black" :style nil)
+	   :inherit egg-branch-mono))
+    (((class color) (background dark))
+     (:box (:line-width 1 :color "white" :style nil)
+	   :inherit egg-branch-mono))
+    (t (:box (:line-width 1 :color "yellow" :style nil)
+	:inherit egg-branch-mono)))
   "Face to highlight HEAD in the log buffer."
   :group 'egg-faces)
 
@@ -1306,7 +1313,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; 7: is annotated tag
           '(1 2 3 4 5 6 7) "show-ref" "-d"))
 	(symbolic-HEAD (egg-get-symbolic-HEAD))
-        annotated-tags)
+        annotated-tags refs)
     ;; remove the annotated tags from the list
     (setq refs-desc-list
           (delq nil
@@ -1320,24 +1327,24 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
                             nil))
                         refs-desc-list)))
     ;; decorate the ref alist
-    (mapcar (lambda (desc)
-              (let ((full-name (cdr (assq 1 desc)))
-                    (name (cdr (assq 5 desc)))
-                    (remote (cdr (assq 6 desc))))
-                (cond ((assq 2 desc)
-                       ;; head
-                       (cons full-name
-                             (apply 'propertize name
-				    :full-name full-name
-                                    :ref (cons name :head)
-				    (if (and head-properties-HEAD
-					     (string-equal name
-							   symbolic-HEAD))
-					head-properties-HEAD
-				      head-properties))))
-                      ((assq 3 desc)
-                       ;; tag
-                       (cons full-name
+    (setq refs
+	  (mapcar (lambda (desc)
+		    (let ((full-name (cdr (assq 1 desc)))
+			  (name (cdr (assq 5 desc)))
+			  (remote (cdr (assq 6 desc))))
+		      (cond ((assq 2 desc)
+			     ;; head
+			     (cons full-name
+				   (apply 'propertize name
+					  :full-name full-name
+					  :ref (cons name :head)
+					  (if (and head-properties-HEAD
+						   (string-equal name symbolic-HEAD))
+					      head-properties-HEAD
+					    head-properties))))
+			    ((assq 3 desc)
+			     ;; tag
+			     (cons full-name
                              (apply 'propertize name
 				    :full-name full-name
                                     :ref (cons name :tag)
@@ -1358,7 +1365,10 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 				     :full-name full-name
                                      :ref (cons name :remote)
                                      remote-ref-properties)))))))
-            refs-desc-list)))
+            refs-desc-list))
+    (unless symbolic-HEAD
+      (setq refs (cons (cons "HEAD" (propertize "HEAD" 'face 'egg-log-HEAD-name)) refs)))
+    refs))
 
 (defun egg-get-all-refs (prefix)
   (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
@@ -6330,9 +6340,11 @@ Jump to line LINE if it's not nil."
 	(setq ref-full-name (buffer-substring-no-properties pos (point)))
 	(forward-char 2)
 	(setq pos (point))
-	(unless (or (equal ref-full-name "HEAD") 
-		    (equal ref-full-name "tag")
-		    (equal (subseq ref-full-name -5) "/HEAD"))
+	(unless (or 
+		 ;; (equal ref-full-name "HEAD") 
+		 (equal ref-full-name "tag")
+		 (and (> (length ref-full-name) 5)
+		      (equal (substring ref-full-name -5) "/HEAD")))
 	  (setq ref (assoc-default ref-full-name repo-refs-prop-alist))
 	  (when ref
 	    (add-to-list 'decorated-refs ref)
@@ -6390,7 +6402,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
               subject-beg (if (or (/= (char-after subject-beg) ?\()
 				  (not (member (buffer-substring-no-properties 
 						subject-beg (+ subject-beg 6))
-					       '("(refs/" "(tag: " "(HEAD,"))))
+					       '("(refs/" "(tag: " "(HEAD," "(HEAD)"))))
                               subject-beg
                             (setq refs-start (1+ subject-beg))
                             (goto-char subject-beg)
@@ -6489,12 +6501,13 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                                min-dashes-len))
             (forward-char 2)))
 
-        (when head-line
-          (goto-char head-line)
-          (overlay-put ov 'face 'egg-log-HEAD)
-          (overlay-put ov 'evaporate t)
-          (move-overlay ov (line-beginning-position)
-                        (1+ (line-end-position))))
+        ;; (when head-line
+        ;;   (goto-char head-line)
+        ;;   (overlay-put ov 'face 'egg-log-HEAD)
+        ;;   (overlay-put ov 'evaporate t)
+        ;;   (move-overlay ov (line-beginning-position)
+        ;;                 (1+ (line-end-position))))
+
         head-line))))
 
 (defun egg-log-buffer-insert-n-decorate-logs (log-insert-func &optional sha1-name-alist)
@@ -8786,7 +8799,7 @@ current file contains unstaged changes."
     (setq rev (egg-read-rev (format "checkout %s version: " file) head-name))
     (setq egg--do-no-output-message (format "checked out %s's contents from %s" file rev))
     (egg-file-buffer-handle-result
-     (egg--git-co-files-cmd (egg-get-stash-buffer) file rev))))
+     (egg--git-co-files-cmd (egg-get-status-buffer) file rev))))
 
 (defun egg-file-cancel-modifications (&optional no-confirm)
   "Checkout INDEX's version of the current file.
