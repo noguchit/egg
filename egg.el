@@ -1961,9 +1961,14 @@ EXIT-INFO should be the return value of `egg--do-git' or `egg--do'."
       (setq end (point-max))
       ;; even if the buffer is empty, post-proc-func must
       ;; still be done to process the ret-code
-      (when (functionp post-proc-func)
-	(goto-char (point-min))
-	(setq pp-results (funcall post-proc-func ret))))
+      (setq pp-results
+	    (cond ((functionp post-proc-func)
+		   (goto-char (point-min))
+		   (funcall post-proc-func ret))
+		  ((and (consp post-proc-func)
+			(functionp (car post-proc-func))
+			(functionp (cdr post-proc-func)))
+		   (funcall (cdr post-proc-func) (funcall (car post-proc-func) ret))))))
     (cond ((bufferp buffer-to-update)
 	   (egg-refresh-buffer buffer-to-update))
 	  ((memq buffer-to-update '(t all))
@@ -2272,7 +2277,30 @@ command will be displayed as feedback of emacs command.
 See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--git-co-rev-cmd-args buffer-to-update rev args))
 
-(defun egg--git-merge-cmd (buffer-to-update &rest args)
+(defun egg--git-merge-pp-func (ret-code)
+  (cond ((= ret-code 0)
+	 (or (egg--git-pp-grab-line-matching "stopped before committing as requested"
+					     nil :next-action 'commit :success t)
+	     (egg--git-pp-grab-line-matching
+	      (regexp-opt '("merge went well" "Already up-to-date" 
+			    "file changed" "files changed"
+			    "insertions" "deletions"))
+	      nil :success t :next-action 'log)
+	     (egg--git-pp-grab-line-no -1 :success t :next-action 'status)))
+	((= ret-code 1)
+	 (or (egg--git-pp-grab-line-matching "fix conflicts and then commit"
+					     nil :next-action 'status :success t)
+	     (egg--git-pp-grab-line-matching
+	      "untracked working tree files would be overwritten by merge"
+	      "untracked files would be overwritten, please rename them before merging"
+	      :next-action 'status)
+	     (egg--git-pp-grab-line-matching
+	      "commit your changes or stash them before you can merge"
+	      nil :next-action 'status)
+	     (egg--git-pp-grab-line-no -1)))
+	(t (egg--git-pp-fatal-result))))
+
+(defun egg--git-merge-cmd (buffer-to-update pp-func &rest args)
   "Peform the git merge command synchronously with ARGS as arguments.
 Update BUFFER-TO-UPDATE if needed. The relevant line from the
 output of the underlying git command will be displayed as
@@ -2281,28 +2309,7 @@ feedback of emacs command.
 See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action 
    "merge" buffer-to-update
-   (lambda (ret-code)
-     (cond ((= ret-code 0)
-	    (or (egg--git-pp-grab-line-matching "stopped before committing as requested"
-						nil :next-action 'commit :success t)
-		(egg--git-pp-grab-line-matching
-		 (regexp-opt '("merge went well" "Already up-to-date" 
-			       "file changed" "files changed"
-			       "insertions" "deletions"))
-		 nil :success t :next-action 'log)
-		(egg--git-pp-grab-line-no -1 :success t :next-action 'status)))
-	   ((= ret-code 1)
-	    (or (egg--git-pp-grab-line-matching "fix conflicts and then commit"
-						nil :next-action 'status :success t)
-		(egg--git-pp-grab-line-matching
-		 "untracked working tree files would be overwritten by merge"
-		 "untracked files would be overwritten, please rename them before merging"
-		 :next-action 'status)
-		(egg--git-pp-grab-line-matching
-		 "commit your changes or stash them before you can merge"
-		 nil :next-action 'status)
-		(egg--git-pp-grab-line-no -1)))
-	   (t (egg--git-pp-fatal-result))))
+   (cons #'egg--git-merge-pp-func pp-func)
    args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
@@ -5303,16 +5310,27 @@ MSG will be used for the merge commit.
 Thecommand  usually take the next action recommended by the results, but
 if the next action is IGNORED-ACTION then it won't be taken."
   (let ((msg (or msg (concat "merging in " rev)))
-        merge-cmd-ok res modified-files need-commit force-commit-to-status)
+        merge-cmd-ok res modified-files 
+	need-commit force-commit-to-status line fix-line-func)
     
     (setq modified-files (egg-git-to-lines "diff" "--name-only" rev))
     (cond ((equal merge-mode-flag "--commit")
 	   (setq need-commit t)
-	   (setq merge-mode-flag "--no-commit"))
+	   (setq merge-mode-flag "--no-commit")
+	   (setq fix-line-func
+		 (lambda (merge-res)
+		   (let (line)
+		     (when (and (plist-get merge-res :success)
+				(setq line (plist-get merge-res :line)))
+		       (save-match-data
+			 (when (string-match "stopped before committing as requested" line)
+			   (setq line 
+				 "Auto-merge went well, please prepare the merge message")
+			   (plist-put merge-res :line line))))))))
 	  ((member merge-mode-flag '("--no-commit" "--squash"))
 	   (setq force-commit-to-status t)))
 
-    (setq res (nconc (egg--git-merge-cmd 'all merge-mode-flag "--log" rev)
+    (setq res (nconc (egg--git-merge-cmd 'all fix-line-func merge-mode-flag "--log" rev)
 		     (list :files modified-files)))
     (if need-commit
 	(egg--buffer-handle-result-with-commit
@@ -5321,7 +5339,8 @@ if the next action is IGNORED-ACTION then it won't be taken."
 		   (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
 		   msg)
 	 t ignored-action)
-      (when (eq (plist-get res :next-action) 'commit)
+      (when (and (eq (plist-get res :next-action) 'commit)
+		 force-commit-to-status)
 	(plist-put res :next-action 'status))
       (egg--buffer-handle-result res t ignored-action))))
 
