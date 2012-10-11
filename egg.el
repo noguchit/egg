@@ -383,7 +383,7 @@ Many Egg faces inherit from this one by default."
               (const :tag "Diff Buffer"     egg-diff-buffer-mode)
               (const :tag "Commit Buffer"   egg-commit-buffer-mode)))
 
-(defcustom egg-buffer-hide-section-type-on-start nil
+(defcustom egg-buffer-hide-section-type-on-start '((egg-status-buffer-mode . :diff))
   "Initially hide sections of the selected type."
   :group 'egg
   :type '(set (cons :tag "Status Buffer"
@@ -3185,8 +3185,7 @@ the index. \\{egg-wdir-diff-section-map}")
   (put-text-property (1+ beg) end 'help-echo (egg-tooltip-func)))
 
 (defsubst egg-decorate-diff-index-line (beg end line-beg line-end)
-  (put-text-property (1- line-beg) beg 'display "    -- ")
-  (put-text-property beg end 'face 'egg-diff-none))
+  (put-text-property line-beg (1+ line-end) 'display ""))
 
 (defsubst egg-decorate-hunk-header (beg end line-beg line-end)
   (put-text-property beg end 'face 'egg-diff-hunk-header)
@@ -3439,7 +3438,8 @@ positions of the sequence as well as the decorations.
                                (match-string-no-properties diff-no)
                                sub-beg sub-end head-end))
                   sub-beg sub-end m-e-0 diff-map 'egg-compute-navigation)
-		 
+
+		 (put-text-property (- sub-end 2) sub-end 'intangible t)		 
 		 (setq current-delta-is 'diff))
 
                 ((match-beginning cc-diff-no) ;; cc-diff
@@ -3458,13 +3458,13 @@ positions of the sequence as well as the decorations.
                                sub-beg sub-end head-end))
                   sub-beg sub-end m-e-0 cc-diff-map
                   'egg-compute-navigation)
-
+		 (put-text-property (- sub-end 2) end 'intangible t)
 		 (setq current-delta-is 'cc-diff))
 
                 ((match-beginning index-no) ;; index
                  (setq m-b-x (match-beginning index-no)
                        m-e-x (match-end index-no))
-                 (egg-decorate-diff-index-line m-b-x m-e-x m-b-0 m-b-0))
+                 (egg-decorate-diff-index-line m-b-x m-e-x m-b-0 m-e-0))
                 ) ;; cond
           ) ;; while
         ) ;; save-excursion
@@ -3885,15 +3885,15 @@ as: (format FMT current-dir-name git-dir-full-path)."
   (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
     (set-keymap-parent map egg-buffer-mode-map)
     (define-key map (kbd "c") 'egg-commit-log-edit)
-    (define-key map (kbd "o") 'egg-status-buffer-checkout-ref)
+    (define-key map (kbd "d") 'egg-diff-ref)
     (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "o") 'egg-status-buffer-checkout-ref)
     (define-key map (kbd "w") 'egg-status-buffer-stash-wip)
-    (define-key map (kbd "W") 'egg-stash)
+    (define-key map (kbd "G") 'egg-status)
     (define-key map (kbd "L") 'egg-reflog)
     (define-key map (kbd "S") 'egg-stage-all-files)
     (define-key map (kbd "U") 'egg-unstage-all-files)
     (define-key map (kbd "X") 'egg-status-buffer-undo-wdir)
-    (define-key map (kbd "d") 'egg-diff-ref)
     map)
   "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
 
@@ -4097,6 +4097,7 @@ rebase session."
       ;; Mark the help sub-section so it can be hidden
       (egg-delimit-section :help 'help help-beg (point) help-inv-beg map
                            'egg-compute-navigation))
+    (put-text-property (- (point) 2) (point) 'intangible t)
     (put-text-property beg (or help-beg (point))
                        'help-echo (egg-tooltip-func))))
 
@@ -4185,7 +4186,9 @@ adding the contents."
     (egg-delimit-section :section 'untracked beg end
                          inv-beg egg-section-map 'untracked)
     (put-text-property inv-beg end 'keymap egg-untracked-file-map)
-    (put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))))
+    (put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))
+
+    (put-text-property (- end 2) end 'intangible t)))
 
 (defsubst egg-list-stash (&optional ignored)
   (egg-git-ok t "stash" "list"))
@@ -4243,12 +4246,13 @@ adding the contents."
     (egg-delimit-section :section 'stash beg end
                          inv-beg egg-section-map 'stash)
     (egg-decorate-stash-list stash-beg egg-stash-map "stash-")
+    (put-text-property (- end 2) end 'intangible t)
     ;;(put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))
     ))
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
-  (let ((beg (point)) inv-beg diff-beg)
+  (let ((beg (point)) inv-beg diff-beg end)
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
             "\n")
@@ -4257,6 +4261,7 @@ adding the contents."
     (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
            "-M" "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
            (append egg-git-diff-options extra-diff-options))
+    (setq end (point))
     (egg-delimit-section :section 'unstaged beg (point)
                          inv-beg egg-section-map 'unstaged)
     ;; this section might contains merge conflicts, thus cc-diff
@@ -4268,20 +4273,23 @@ adding the contents."
                                :hunk-map egg-unstaged-hunk-section-map
                                :cc-diff-map egg-unmerged-diff-section-map
                                :cc-hunk-map egg-unmerged-hunk-section-map
-                               :conflict-map egg-unmerged-hunk-section-map)))
+                               :conflict-map egg-unmerged-hunk-section-map)
+    (put-text-property (- end 2) end 'intangible t)))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   "Insert the staged changes section into the status buffer."
-  (let ((beg (point)) inv-beg diff-beg)
+  (let ((beg (point)) inv-beg diff-beg end)
     (insert (egg-prepend title "\n\n"
                          'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
             "\n")
+    (put-text-property (- beg 2) beg 'intangible t)
     (setq diff-beg (point)
           inv-beg (1- diff-beg))
     (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
            "--cached" "-M" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
            (append egg-git-diff-options extra-diff-options))
+    (setq end (point))
     (egg-delimit-section :section 'staged beg (point)
                          inv-beg egg-section-map 'staged)
     ;; this section never contains merge conflicts, thus no cc-diff
@@ -4290,7 +4298,8 @@ adding the contents."
                                :src-prefix "HEAD:/"
                                :dst-prefix "INDEX:/"
                                :diff-map egg-staged-diff-section-map
-                               :hunk-map egg-staged-hunk-section-map)))
+                               :hunk-map egg-staged-hunk-section-map)
+    (put-text-property (- end 2) end 'intangible t)))
 
 (defvar egg-hunk-ranges-cache nil
   "A list of (FILENAME HUNK-RANGE-INFO ...)) for each file in the
