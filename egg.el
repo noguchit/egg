@@ -2309,7 +2309,9 @@ feedback of emacs command.
 See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--do-git-action 
    "merge" buffer-to-update
-   (cons #'egg--git-merge-pp-func pp-func)
+   (if (functionp pp-func)
+       (cons #'egg--git-merge-pp-func pp-func)
+     #'egg--git-merge-pp-func)
    args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
