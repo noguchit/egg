@@ -64,6 +64,7 @@
 (require 'ediff)
 (require 'ffap)
 (require 'diff-mode)
+(require 'rx)
 
 (defconst egg-version "1.0.2")
 
@@ -1270,22 +1271,6 @@ The string is built based on the current state STATE."
                        head))
                  '("HEAD" "ORIG_HEAD")))))
 
-(defun egg-ref-type-alist ()
-  "Build an alist of (REF-NAME . :type) cells."
-  (mapcar (lambda (ref-desc)
-            (cons (cdr (assq 5 ref-desc))
-                  (cond ((assq 2 ref-desc) :head)
-                        ((assq 3 ref-desc) :tag)
-                        ((assq 4 ref-desc) :remote))))
-          (egg-git-lines-matching-multi
-           "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n]+\\)\\)$"
-           ;; 1: full-name
-           ;; 2: head
-           ;; 3: tag
-           ;; 4: remote
-           ;; 5: name
-           ;; 6: remote-host
-           '(1 2 3 4 5 6) "show-ref")))
 
 (defsubst egg-tooltip-func ()
   (if egg-enable-tooltip 'egg-buffer-help-echo))
@@ -1295,22 +1280,37 @@ The string is built based on the current state STATE."
                                      atag-properties
                                      remote-ref-properties
                                      remote-site-properties
-				     &optional head-properties-HEAD)
+				     &optional head-properties-HEAD stash-properties)
   "Build an alist of (ref . :type) cells.
 A ref string of a head will be decorated with HEAD-PROPERTIES.  A
 ref string of a tag will be decorated with TAG-PROPERTIES or
 ATAG-PROPERTIES.  A ref string of a remote will be formatted with
 REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
-  (let ((refs-desc-list
-         (egg-git-lines-matching-multi
-          "^.+ \\(refs/\\(?:\\(heads\\)\\|\\(tags\\)\\|\\(remotes\\)\\)/\\(\\([^/\n]+/\\)?[^/\n{}]+\\)\\)\\(\\^{}\\)?$"
+  (let* ((ref-re
+	  (rx line-start
+	      (one-or-more not-newline)
+	      (group "refs/"
+		     (or (seq (or (group "heads") 
+				  (group "tags") 
+				  (group "remotes"))
+			      "/"
+			      (group (optional (seq (group (one-or-more 
+							    (not (any ?\n blank ?^ ?/))))
+						    "/")) 
+				     (one-or-more (not (any ?\n blank ?^ ?/)))))
+			 (group "stash")))
+	      (optional (group "^{}"))
+	      line-end))
+	 (refs-desc-list
+         (egg-git-lines-matching-multi ref-re
           ;; 1: full-name
           ;; 2: head
           ;; 3: tag
           ;; 4: remote
           ;; 5: name
           ;; 6: remote-host
-          ;; 7: is annotated tag
+          ;; 7: stash
+          ;; 8: is annotated tag
           '(1 2 3 4 5 6 7) "show-ref" "-d"))
 	(symbolic-HEAD (egg-get-symbolic-HEAD))
         annotated-tags refs)
@@ -1318,7 +1318,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
     (setq refs-desc-list
           (delq nil
                 (mapcar (lambda (desc)
-                          (if (not (assq 7 desc))
+                          (if (not (assq 8 desc))
                               ;; not an annotated tag
                               desc
                             (setq annotated-tags
@@ -1330,7 +1330,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
     (setq refs
 	  (mapcar (lambda (desc)
 		    (let ((full-name (cdr (assq 1 desc)))
-			  (name (cdr (assq 5 desc)))
+			  (name (cdr (or (assq 5 desc) (assq 7 desc))))
 			  (remote (cdr (assq 6 desc))))
 		      (cond ((assq 2 desc)
 			     ;; head
@@ -1345,26 +1345,33 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 			    ((assq 3 desc)
 			     ;; tag
 			     (cons full-name
-                             (apply 'propertize name
-				    :full-name full-name
-                                    :ref (cons name :tag)
-                                    (if (member full-name annotated-tags)
-                                        atag-properties
-                                      tag-properties))))
-                      ((assq 4 desc)
-                       ;; remote
-                       (cons full-name
-                             (concat
-                              (if (stringp remote)
-                                  (apply 'propertize remote
-                                         :ref (cons name :remote)
-                                         remote-site-properties)
-                                ;; svn has no remote name
-                                "")
-                              (apply 'propertize (substring name (length remote))
-				     :full-name full-name
-                                     :ref (cons name :remote)
-                                     remote-ref-properties)))))))
+				   (apply 'propertize name
+					  :full-name full-name
+					  :ref (cons name :tag)
+					  (if (member full-name annotated-tags)
+					      atag-properties
+					    tag-properties))))
+			    ((assq 4 desc)
+			     ;; remote
+			     (cons full-name
+				   (concat
+				    (if (stringp remote)
+					(apply 'propertize remote
+					       :ref (cons name :remote)
+					       remote-site-properties)
+				      ;; svn has no remote name
+				      "")
+				    (apply 'propertize (substring name (length remote))
+					   :full-name full-name
+					   :ref (cons name :remote)
+					   remote-ref-properties))))
+			    ((assq 7 desc)
+			     ;; stash
+			     (cons full-name
+				   (apply 'propertize name 
+					  :full-name full-name
+					  :ref (cons name :stash)
+					  stash-properties))))))
             refs-desc-list))
     (unless symbolic-HEAD
       (setq refs (cons (cons "HEAD" (propertize "HEAD" 'face 'egg-log-HEAD-name)) refs)))
@@ -2880,7 +2887,13 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
       (with-current-buffer blame-buf
         (goto-char (point-min))
         ;; search for a ful commit info
-        (while (re-search-forward "^\\([0-9a-f]\\{40\\}\\) \\([0-9]+\\) \\([0-9]+\\) \\([0-9]+\\)$" nil t)
+        (while (re-search-forward (rx line-start
+				      (group (= 40 hex-digit)) " "
+				      (group (1+ digit)) " "
+				      (group (1+ digit)) " "
+				      (group (1+ digit)) 
+				      line-end)
+				  nil t)
           (setq commit (match-string-no-properties 1)
                 old-line (string-to-number
                           (match-string-no-properties 2))
@@ -6273,7 +6286,7 @@ Jump to line LINE if it's not nil."
 (defconst egg-log-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:LogBuffer")))
     (set-keymap-parent map egg-log-buffer-base-map)
-    (define-key map "L" 'egg-reflog)
+    (define-key map "L" 'egg-log-buffer-reflog-ref)
     (define-key map "/" 'egg-search-changes)
     map)  
   "Keymap for the log buffer.\\{egg-log-buffer-mode-map}")
@@ -6390,7 +6403,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
           (list 'face 'egg-an-tag-mono 'keymap tag-map 'help-echo (egg-tooltip-func))
           (list 'face 'egg-branch-mono 'keymap remote-map 'help-echo (egg-tooltip-func))
           (list 'face 'egg-remote-mono 'keymap remote-site-map 'help-echo (egg-tooltip-func))
-	  (list 'face 'egg-log-HEAD-name 'keymap head-map 'help-echo (egg-tooltip-func))))
+	  (list 'face 'egg-log-HEAD-name 'keymap head-map 'help-echo (egg-tooltip-func))
+	  (list 'face 'egg-reflog-mono 'keymap line-map 'help-echo (egg-tooltip-func))))
         (ref-string-len 0)
         (dashes-len 0)
         (min-dashes-len 300)
@@ -8572,14 +8586,17 @@ of at least one."
 This is just an alternative way to launch `egg-log'"
   (interactive (let ((head-name (egg-branch-or-HEAD)))
 		 (list (if current-prefix-arg
-			   (egg-read-rev "show history of ref: " head-name)
+			   (egg-read-ref "show history of ref: " head-name)
                        head-name))))
   (egg-log branch))
 
-(defun egg-log-buffer-reflog-ref (pos)
+(defun egg-log-buffer-reflog-ref (pos &optional no-ask)
   "Show reflogs for the ref at POS"
-  (interactive "d")
-  (egg-reflog (egg-ref-at-point pos)))
+  (interactive "d\nP")
+  (let ((ref (egg-ref-at-point)))
+    (egg-reflog (if (and no-ask ref)
+		    ref
+		  (egg-read-ref "show history of ref: " ref)))))
 
 ;;;========================================================
 ;;; stash
