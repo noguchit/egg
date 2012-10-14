@@ -6513,7 +6513,7 @@ Jump to line LINE if it's not nil."
 
 
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map
-				   sha1-pseudo-ref-alist)
+				   sha1-pseudo-refs-alist)
   "Decorate a log buffer.
 LINE-MAP is used as local keymap for a commit line.
 HEAD-MAP is used as local keymap for the name of a head.
@@ -6547,8 +6547,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
         refs-start refs-end
         head-line)
 
-    (dolist (pseudo-ref pseudo-refs-list)
-	    (put-text-property 0 (length pseudo-ref) 'keymap line-map pseudo-ref))
+    (dolist (sha1-pseudo-refs sha1-pseudo-refs-alist)
+      (dolist (pseudo-ref (cdr sha1-pseudo-refs))
+	(put-text-property 0 (length pseudo-ref) 'keymap line-map pseudo-ref)))
 
     (save-excursion
       (while (< (point) (point-max))
@@ -6579,7 +6580,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 	  (when graph-map
 	    (egg-redraw-chars-in-region (line-beginning-position) (1- sha-beg) graph-map))
 
-	  (setq pseudo-refs-list (assoc-default sha1 sha1-pseudo-ref-alist))
+	  (setq pseudo-refs-list (assoc-default sha1 sha1-pseudo-refs-alist))
 	  
 	  (setq ref-string
 		(egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist 
@@ -6718,19 +6719,22 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 (defun egg-log-buffer-get-rev-at (pos &rest options)
   (let* ((commit (egg-commit-at-point pos))
          (refs (egg-references-at-point pos))
-         (first-head (if (stringp refs) refs (car (last refs))))
+         (first-ref (if (stringp refs) refs (car (last refs))))
          (ref-at-point (egg-ref-at-point pos))
+	 (current-branch (egg-get-symbolic-HEAD))
          (head-sha1 (egg-get-current-sha1)))
     
     (when (stringp commit)
-      (if (memq :sha1 options)
-	  commit
-	(if (and (not (memq :no-HEAD options)) (string= head-sha1 commit))
-	    "HEAD"
-	  (or ref-at-point first-head
-	      (if (memq :symbolic options)
-		  (egg-describe-rev commit)
-		commit)))))))
+      (cond ((memq :sha1 options) (if (memq :short options)
+				      (substring commit 0 8)
+				    commit))
+	    ((stringp ref-at-point) ref-at-point)
+	    ((and (equal commit head-sha1) (stringp current-branch)) current-branch)
+	    ((and (equal commit head-sha1) (not (memq :no-HEAD options))) "HEAD")
+	    ((stringp first-ref) first-ref)
+	    ((memq :symbolic options) (egg-describe-rev commit))
+	    ((memq :short options)(substring commit 0 8))
+	    (t commit)))))
 
 (defun egg-log-buffer-do-remove-mark (mark-char)
   (let ((pos (point-min))
@@ -6977,7 +6981,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 With C-u prefix, do not auto commit the merge result.
 With C-u C-u prefix, prompt the user for the type of merge to perform."
   (interactive "d\np")
-  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+  (let ((rev (egg-log-buffer-get-rev-at pos :no-HEAD :short))
 	(merge-options-alist '((?c "(c)ommit" "" "--commit")
 			       (?n "(n)o-commit" " (without merge commit)" "--no-commit")
 			       (?s "(s)quash" " (without merge data)" "--squash")
