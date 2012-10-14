@@ -7015,14 +7015,15 @@ With C-u C-u prefix, prompt the user for the type of merge to perform."
   (unless (egg-repo-clean)
     (egg-status nil nil)
     (error "Repo is not clean!"))
-  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD) "--ff-only"))
+  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :short :no-HEAD)
+				   "--ff-only"))
 
 (defun egg-log-buffer-merge-n-squash (pos)
   (interactive "d")
   (unless (egg-repo-clean)
     (egg-status nil nil)
     (error "Repo is not clean!"))
-  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD) "--squash"))
+  (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :short :no-HEAD) "--squash"))
 
 (defun egg-log-buffer-rebase (pos)
   "Rebase HEAD using the commit under POS as upstream.
@@ -7030,8 +7031,8 @@ If there was a commit marked as BASE, then rebase HEAD onto the commit under the
 cursor using the BASE commit as upstream."
   (interactive "d")
   (let* ((mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
-         (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
-	 (onto (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+         (upstream (if mark (egg-log-buffer-get-rev-at mark :short)))
+	 (onto (egg-log-buffer-get-rev-at pos :short :no-HEAD))
 	 (head-name (egg-branch-or-HEAD))
 	 res modified-files buf)
 
@@ -7092,7 +7093,7 @@ The commit at POS is the where the chain of marked commits will rebased onto."
 With prefix, force the checkout even if the index was different from the new commit."
   (interactive "d\nP")
   (let ((ref (egg-read-rev "checkout: "
-	      (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))))
+	      (egg-log-buffer-get-rev-at pos :short :no-HEAD))))
     (if force 
 	(egg-log-buffer-do-co-rev ref "-f")
       (egg-log-buffer-do-co-rev ref))))
@@ -7102,7 +7103,7 @@ With prefix, force the checkout even if the index was different from the new com
 With prefix, force the creation of the tag even if it replace an
 existing one with the same name."
   (interactive "d\nP")
-  (let* ((rev (egg-log-buffer-get-rev-at pos))
+  (let* ((rev (egg-log-buffer-get-rev-at pos :short))
 	 (name (read-string (format "tag %s with name: " rev)))
 	 (egg--do-no-output-message 
 	  (format "new lightweight tag '%s' at %s" name rev)))
@@ -7129,7 +7130,7 @@ With prefix, the tag will be gpg-signed."
 (defun egg-log-buffer-create-new-branch (pos &optional force)
   "Create a new branch, without checking it out."
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos))
+  (let ((rev (egg-log-buffer-get-rev-at pos :short))
 	(upstream (egg-head-at pos)))
     (egg-buffer-do-create-branch 
      (read-string (format "create new branch at %s with name: " rev))
@@ -7138,7 +7139,7 @@ With prefix, the tag will be gpg-signed."
 (defun egg-log-buffer-start-new-branch (pos &optional force)
   "Create a new branch, and make it a new HEAD"
   (interactive "d\nP")
-  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+  (let ((rev (egg-log-buffer-get-rev-at pos :short :no-HEAD))
 	(upstream (egg-head-at pos))
 	(force (if force "-B" "-b"))
 	name track)
@@ -7161,7 +7162,7 @@ index will be reset and the work tree updated by throwing away all local
 modifications (this is basically git reset --hard). With C-u C-u prefix,
 the command will prompt for the git reset mode to perform."
   (interactive "d\np")
-  (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
+  (let* ((rev (egg-log-buffer-get-rev-at pos :short :no-HEAD))
          (commit (egg-commit-at-point pos))
          (branch (egg-current-branch))
          (hard (> strict-level 3))
@@ -7250,7 +7251,7 @@ the command will prompt for the git reset mode to perform."
 With prefix, will not auto-commit but let the user re-compose the message."
   (interactive "d\nP")
   
-  (let ((rev (egg-log-buffer-get-rev-at pos :symbolic))
+  (let ((rev (egg-log-buffer-get-rev-at pos :short :no-HEAD))
 	(selection (cdr (get-text-property pos :selection)))
 	(head-name (egg-branch-or-HEAD))
 	res modified-files old-msg)
@@ -7344,14 +7345,14 @@ When the destination of the push is HEAD, the underlying git command
 would be a pull (by default --ff-only)."
   (interactive "d\np")
   (let ((src (or (egg-ref-at-point pos)
-		 (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD)))
+		 (egg-log-buffer-get-rev-at pos :short :no-HEAD)))
 	(prompt-dst (> level 3))
 	(non-ff (> level 15))
 	(head-name (egg-branch-or-HEAD))
 	dst mark base)
     
     (setq mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
-    (setq base (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+    (setq base (if mark (egg-log-buffer-get-rev-at mark :short)))
     (setq dst (or base head-name))
 
     (unless src
@@ -8018,7 +8019,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
          (mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
 	 (head-name (egg-branch-or-HEAD))
-         (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) head-name))
+         (base (if mark (egg-log-buffer-get-rev-at mark :short) head-name))
 	 (pickaxe pickaxe)
 	 buf diff-info)
     (unless (and rev (stringp rev))
@@ -8404,10 +8405,10 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
 
 (defun egg-query:commit-buffer-diff-revs (pos prefix)
   (interactive "d\np")
-  (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
+  (let* ((rev (egg-log-buffer-get-rev-at pos :short))
 	 (mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
 	 (head-name (egg-branch-or-HEAD))
-	 (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) head-name))
+	 (base (if mark (egg-log-buffer-get-rev-at mark :short) head-name))
 	 (pickaxe (plist-get egg-internal-log-buffer-closure :pickaxe))
 	 (file (nth 1 (plist-get egg-internal-log-buffer-closure :paths)))
 	 buf diff-info)
@@ -8622,7 +8623,7 @@ DEFAULT-TERM is the default search term."
 		     (egg-string-at-point)))
   (let* ((mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
 	 (head-name (egg-branch-or-HEAD))
-	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
+	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :short)))
 	 (revs (and start-rev (list (concat start-rev "^.." head-name))))
 	 (pickaxe (egg-buffer-prompt-pickaxe 
 		   (if revs (concat "search " (car revs))
