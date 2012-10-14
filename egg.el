@@ -576,6 +576,99 @@ will select the window unless prefixed with C-u."
 					   "--ignore-all-space"))))
 		 ))
 
+(defcustom egg-log-buffer-marks "+~.*"
+  "A vector of 4 characters used for marking commit in the log buffer.
+The first 3 elemements are used to mark a commit for the upcoming interactive rebase.
+The 1st element is used to mark a commit to be picked, the 2nd to be edited and
+the 3rd to be squashed. The 4th element is used to mark a commit as the BASE
+commit."
+  :group 'egg
+  :type '(radio :tag "Commit Marking Characters" 
+		(const :tag "+ ~ . *" "+~.*")
+		(const :tag "✔ ✎ ↶ ➤" "✔✎↶➤")
+		(const :tag "✔ ✎ ↯ ➤" "✔✎↯➤")
+		(const :tag "✔ ✍ ↶ ➤" "✔✍↶➤")
+		(const :tag "✔ ✍ ↯ ➤" "✔✍↯➤")
+		(vector :tag "Pick Individual Character"
+			(radio :tag "Pick Mark"
+			       (const :tag "+" ?+)
+			       (const :tag "✔" #x2714)
+			       (const :tag "♥" #x2665)
+			       (const :tag "▶" #x24b6)
+			       character)
+			(radio :tag "Edit Mark"
+			       (const :tag "~" ?~)
+			       (const :tag "✍" #x270d)
+			       (const :tag "✎" #x270e)
+			       (const :tag "✒" #x2712)
+			       character)
+			(radio :tag "Squash Mark"
+			       (const :tag "." ?.)
+			       (const :tag "↶" #x21b6)
+			       (const :tag "↯" #x21af)
+			       (const :tag "┅" #x2505)
+			       (const :tag "♻" #x267b)
+			       character)
+			(radio :tag "Base Mark"
+			       (const :tag "*" ?*)
+			       (const :tag "★" #x2605)
+			       (const :tag "█" #x2588)
+			       (const :tag "➤" #x27a4)
+			       (const :tag "■" #x27a0)
+			       (const :tag "▣" #x27a3)
+			       (const :tag "●" #x25cf)
+			       (const :tag "✽" #x273d)
+			       (const :tag "☻" #x263b)
+			       character))
+		string))
+
+(defsubst egg-log-buffer-pick-mark () (aref egg-log-buffer-marks 0))
+(defsubst egg-log-buffer-edit-mark () (aref egg-log-buffer-marks 1))
+(defsubst egg-log-buffer-squash-mark () (aref egg-log-buffer-marks 2))
+(defsubst egg-log-buffer-base-mark () (aref egg-log-buffer-marks 3))
+
+;;(string #x2714 #x270d #x21b6 #x27a4)
+;;(string #x2588)
+
+(defcustom egg-commit-file-select-mark ?+
+  "Character used to mark a commit's file to be used in the upcoming cherry picking."
+  :group 'egg
+  :type '(radio :tag "File Select Mark"
+		 (const :tag "✔" #x2714)
+		 (const :tag "⬅" #x2b05)
+		 (const :tag "◀" #x25c0)
+		 (const :tag "▶" #x25b6)
+		 (const :tag "➤" #x27a4)
+		 (const :tag "★" #x2605)
+		 (const :tag "●" #x25cf)
+		 (const :tag "⬤" #x2b24)
+		 (const :tag "+" ?+)
+		 character))
+
+(defcustom egg-log-graph-chars "*|-/\\"
+  "Characters used to re-draw the git-log's graph in the log buffer.
+Using custom characters will slow down the log buffer rendering.
+On slow machine, stick to the default which is not changing the git's drawing.
+The 1st char is the bullet for the node in the graph.
+The 2nd char is the veritcal line in the graph.
+The 3rd char is the dash between the graph and the sha1.
+The 4th char is the diagonal line from lower-left to upper right.
+The 5th char is the diagonal line from upper-lef to lower-right."
+  :group 'egg
+  :type '(radio :tag "Log Graph Characters"
+		(const :tag "* | - / \\" "*|-/\\")
+		(const :tag "● │ ─ ╱ ╲" "●│─╱╲")
+		(const :tag "█ │ ─ ╱ ╲" "█│─╱╲")
+		(vector :tag "Pick individual character"
+			(radio :tag "Node"
+			       (const :tag "◉" #x25c9)
+			       (const :tag "○" #x25cb)
+			       (const :tag "●" #x25cf)
+			       (const :tag "■" #x25a0)
+			       (const :tag "□" #x25a1)
+			       (const :tag "█" #x2588)))))
+
+
 (defcustom egg-dummy-option nil
   "Foo bar"
   :group 'egg
@@ -3747,6 +3840,11 @@ exit code ACCEPTED-CODE is considered a success."
          (or newly-read-state (egg-get-repo-state))))
     (run-hooks 'egg-buffers-refresh-hook)))
 
+(defun egg-previous-non-hidden (pos)
+  (while (and (> pos (point-min)) (invisible-p pos))
+    (setq pos (previous-single-property-change pos 'invisible)))
+  pos)
+
 (defun egg-refresh-buffer (buffer)
   (when (and (bufferp buffer) (buffer-live-p buffer))
     (with-current-buffer buffer
@@ -3771,7 +3869,7 @@ exit code ACCEPTED-CODE is considered a success."
 	    (if anchor
 		(egg-buffer-goto-section anchor)
 	      (egg-goto-line line)
-	      (goto-char (+ (line-beginning-position) column)))
+	      (goto-char (egg-previous-non-hidden (+ (line-beginning-position) column))))
 	    (dolist (win-anchor-off-line-col win-anchor-off-line-col-alist)
 	      (let ((win (nth 0 win-anchor-off-line-col))
 		    (anchor (nth 1 win-anchor-off-line-col))
@@ -3782,7 +3880,8 @@ exit code ACCEPTED-CODE is considered a success."
 		  (if anchor
 		      (egg-buffer-goto-section anchor offset)
 		    (egg-goto-line line)
-		    (goto-char (+ (line-beginning-position) column)))))))))))
+		    (goto-char (egg-previous-non-hidden
+				(+ (line-beginning-position) column))))))))))))
 
 (defun egg-buffer-cmd-refresh ()
   "Refresh the current egg special buffer."
@@ -4858,6 +4957,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (if init (egg-buffer-maybe-hide-all))
         (if init (egg-buffer-maybe-hide-help "help" 'repo))
         (egg-restore-section-visibility)
+	(goto-char (egg-previous-non-hidden (point)))
        ))))
 
 (defun egg-internal-background (proc msg)
@@ -6264,6 +6364,7 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
     (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
     (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
+    (define-key map (kbd "SPC") 'egg-log-diff-toggle-file-selection)
     map))
 
 (defconst egg-log-hunk-map
@@ -6272,6 +6373,7 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
     (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
     (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
+    (define-key map (kbd "SPC") 'egg-log-diff-toggle-file-selection)
     map))
 
 (defconst egg-log-buffer-base-map
@@ -6385,6 +6487,29 @@ Jump to line LINE if it's not nil."
     
     ref-string))
 
+
+(defun egg-subst-ucs-char-in-buffer (start from to)
+  (unless (= from to)
+    (let ((skip (if (= from ?\\)
+		    (string ?^ from from)
+		  (string ?^ from))))
+      (goto-char (1- start))
+	(while (and (> (skip-chars-forward skip) 0) (not (eobp)))
+	  (insert-char to 1)
+	  (delete-char 1)))))
+
+(defun egg-redraw-chars-in-region (beg end map)
+  (let (pair)
+    (while (< beg end)
+      (setq pair (assq (char-after beg) map))
+      (when pair
+	(goto-char beg)
+	(insert-char (cdr pair) 1)
+	(delete-char 1))
+      (setq beg (1+ beg)))
+  (goto-char end)))
+
+
 (defun egg-decorate-log (&optional line-map head-map tag-map remote-map remote-site-map
 				   sha1-pseudo-ref-alist)
   "Decorate a log buffer.
@@ -6395,7 +6520,14 @@ REMOTE-MAP is used as local keymap for the name of a remote head.
 REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (let ((start (point))
         (head-sha1 (egg-get-current-sha1))
+	(dash-char (aref egg-log-graph-chars 2))
         (ov (make-overlay (point-min) (point-min) nil t))
+	(graph-map (unless (equal egg-log-graph-chars "*|-/\\")
+		     (let (lst)
+		       (dotimes (i (length egg-log-graph-chars))
+			 (add-to-list 'lst (cons (aref "*|-/\\" i)
+						 (aref egg-log-graph-chars i))))
+		       lst)))
         (dec-ref-alist
          (egg-full-ref-decorated-alist
           (list 'face 'egg-branch-mono 'keymap head-map 'help-echo (egg-tooltip-func))
@@ -6412,86 +6544,97 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
         line-props graph-len beg end sha-beg sha-end subject-beg
         refs-start refs-end
         head-line)
+
+    (dolist (pseudo-ref pseudo-refs-list)
+	    (put-text-property 0 (length pseudo-ref) 'keymap line-map pseudo-ref))
+
     (save-excursion
-      (while (re-search-forward "\\([0-9a-f]\\{40\\}\\) .+$" nil t)
-        (setq sha-beg (match-beginning 1)
-              sha-end (match-end 1)
-              subject-beg (1+ sha-end)
-              beg (line-beginning-position)
-              end (match-end 0)
-              refs-start nil)
-        (setq graph-len (if (= beg sha-beg) 0 (- sha-beg beg 1))
-              sha1 (buffer-substring-no-properties sha-beg sha-end)
-              subject-beg (if (or (/= (char-after subject-beg) ?\()
-				  (not (member (buffer-substring-no-properties 
-						subject-beg (+ subject-beg 6))
-					       '("(refs/" "(tag: " "(HEAD," "(HEAD)"))))
-                              subject-beg
-                            (setq refs-start (1+ subject-beg))
-                            (goto-char subject-beg)
-			    (skip-chars-forward "^)")
-                            (setq refs-end (point))
-                            (+ (point) 2)))
-	(setq pseudo-refs-list (assoc-default sha1 sha1-pseudo-ref-alist))
-	(dolist (pseudo-ref pseudo-refs-list)
-	  (put-text-property 0 (length pseudo-ref) 'keymap line-map pseudo-ref))
-	(setq ref-string
-	      (egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist 
-					      pseudo-refs-list 
-					      :navigation sha1 :commit sha1))
-        ;; common line decorations
-        (setq line-props (nconc (list :navigation sha1 :commit sha1)
-				(if line-map (list 'keymap line-map))
-				(if ref-string 
-				    (list :references
-					  (get-text-property 0 :references ref-string)))))
+      (while (< (point) (point-max))
+	(if (not (looking-at "^.+\\([0-9a-f]\\{40\\}\\) .+$"))
+	    (when graph-map
+	      (egg-redraw-chars-in-region (line-beginning-position)
+					  (1- (line-end-position))
+					  graph-map))
+	  (setq sha-beg (match-beginning 1)
+		sha-end (match-end 1)
+		subject-beg (1+ sha-end)
+		beg (line-beginning-position)
+		end (match-end 0)
+		refs-start nil)
+	  (setq graph-len (if (= beg sha-beg) 0 (- sha-beg beg 1))
+		sha1 (buffer-substring-no-properties sha-beg sha-end)
+		subject-beg (if (or (/= (char-after subject-beg) ?\()
+				    (not (member (buffer-substring-no-properties 
+						  subject-beg (+ subject-beg 6))
+						 '("(refs/" "(tag: " "(HEAD," "(HEAD)"))))
+				subject-beg
+			      (setq refs-start (1+ subject-beg))
+			      (goto-char subject-beg)
+			      (skip-chars-forward "^)")
+			      (setq refs-end (point))
+			      (+ (point) 2)))
+
+	  (when graph-map
+	    (egg-redraw-chars-in-region (line-beginning-position) (1- sha-beg) graph-map))
+
+	  (setq pseudo-refs-list (assoc-default sha1 sha1-pseudo-ref-alist))
+	  
+	  (setq ref-string
+		(egg--log-parse-decoration-refs refs-start refs-end dec-ref-alist 
+						pseudo-refs-list 
+						:navigation sha1 :commit sha1))
+	  ;; common line decorations
+	  (setq line-props (nconc (list :navigation sha1 :commit sha1)
+				  (if line-map (list 'keymap line-map))
+				  (if ref-string 
+				      (list :references
+					    (get-text-property 0 :references ref-string)))))
 	
 
-	;; (when (and (not ref-string) pseudo-ref)
-	;;   (setq ref-string pseudo-ref)
-	;;   (add-text-properties 0 (length ref-string) line-props ref-string))
+	  ;; (when (and (not ref-string) pseudo-ref)
+	  ;;   (setq ref-string pseudo-ref)
+	  ;;   (add-text-properties 0 (length ref-string) line-props ref-string))
 
-        (setq separator (apply 'propertize " " line-props))
-        (setq ref-string-len (if ref-string (length ref-string)))
+	  (setq separator (apply 'propertize " " line-props))
+	  (setq ref-string-len (if ref-string (length ref-string)))
 
-        ;; entire line
-        (add-text-properties beg (1+ end) line-props)
+	  ;; entire line
+	  (add-text-properties beg (1+ end) line-props)
 
-        ;; comment
-        (put-text-property subject-beg end 'face 'egg-text-2)
-        ;; delete refs list (they're already parsed)
-        (if refs-start
-            (delete-region (1- refs-start) (+ refs-end 2)))
+	  ;; comment
+	  (put-text-property subject-beg end 'face 'egg-text-2)
+	  ;; delete refs list (they're already parsed)
+	  (if refs-start
+	      (delete-region (1- refs-start) (+ refs-end 2)))
 
-        ;; shorten sha
-        (delete-region (+ sha-beg 8) sha-end)
-        (put-text-property sha-beg (+ sha-beg 8)
-                           'face 'font-lock-constant-face)
-        (put-text-property sha-beg (+ sha-beg 8)
-                           'help-echo (egg-tooltip-func))
+	  ;; shorten sha
+	  (delete-region (+ sha-beg 8) sha-end)
+	  (put-text-property sha-beg (+ sha-beg 8)
+			     'face 'font-lock-constant-face)
+	  (put-text-property sha-beg (+ sha-beg 8)
+			     'help-echo (egg-tooltip-func))
 
-        (setq dashes-len (- 300 graph-len 1
-                            (if ref-string (1+ ref-string-len) 0)))
-        (setq min-dashes-len (min min-dashes-len dashes-len))
+	  (setq dashes-len (- 300 graph-len 1
+			      (if ref-string (1+ ref-string-len) 0)))
+	  (setq min-dashes-len (min min-dashes-len dashes-len))
 
-        (put-text-property sha-beg (1+ sha-beg)
-                           :dash-refs
-                           (apply 'concat
-                                  (apply 'propertize
-                                         (make-string dashes-len ?-)
-                                         (nconc (list 'face 'egg-graph)
-                                                line-props))
-                                  separator
-                                  (if ref-string
-                                      (list ref-string separator))))
+	  (put-text-property sha-beg (1+ sha-beg)
+			     :dash-refs
+			     (apply 'concat
+				    (apply 'propertize
+					   (make-string dashes-len dash-char)
+					   (nconc (list 'face 'egg-graph)
+						  line-props))
+				    separator
+				    (if ref-string
+					(list ref-string separator))))
 ;;; 	(when (string= sha1 head-sha1)
 ;;; 	  (overlay-put ov 'face 'egg-log-HEAD)
 ;;; 	  (overlay-put ov 'evaporate t)
 ;;; 	  (move-overlay ov beg (1+ (line-end-position))))
-        (when (string= sha1 head-sha1)
-          (setq head-line (point-marker)))
-
-        (goto-char (line-end-position)))
+	  (when (string= sha1 head-sha1)
+	    (setq head-line (point-marker))))
+	(forward-line 1))
 
       (if (= min-dashes-len 300)
           (insert (egg-text "nothing found!" 'egg-warning))
@@ -6519,7 +6662,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
           (goto-char (1- start))
           (while (setq start (next-single-property-change (point)
                                                           :dash-refs))
-            (goto-char start)
+	    (goto-char start)
             (insert (substring (get-text-property start :dash-refs)
                                min-dashes-len))
             (forward-char 2)))
@@ -6627,19 +6770,19 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
 (defun egg-log-buffer-mark (pos)
   (interactive "d")
-  (egg-log-buffer-do-mark pos ?* nil t))
+  (egg-log-buffer-do-mark pos (egg-log-buffer-base-mark) nil t))
 
 (defun egg-log-buffer-mark-pick (pos)
   (interactive "d")
-  (egg-log-buffer-do-mark pos ?+))
+  (egg-log-buffer-do-mark pos (egg-log-buffer-pick-mark)))
 
 (defun egg-log-buffer-mark-squash (pos)
   (interactive "d")
-  (egg-log-buffer-do-mark pos ?.))
+  (egg-log-buffer-do-mark pos (egg-log-buffer-squash-mark)))
 
 (defun egg-log-buffer-mark-edit (pos)
   (interactive "d")
-  (egg-log-buffer-do-mark pos ?~))
+  (egg-log-buffer-do-mark pos (egg-log-buffer-edit-mark)))
 
 (defun egg-log-buffer-do-unmark-all ()
   (interactive)
@@ -6717,9 +6860,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (erase-buffer)
       (insert "# Rebase " upstream ".." orig-head-sha1 " onto " onto "\n")
       (dolist (rev-info commit-alist)
-        (insert (cond ((eq (nth 1 rev-info) ?+) "pick")
-                      ((eq (nth 1 rev-info) ?.) "squash")
-                      ((eq (nth 1 rev-info) ?~) "edit"))
+        (insert (cond ((eq (nth 1 rev-info) (egg-log-buffer-pick-mark)) "pick")
+                      ((eq (nth 1 rev-info) (egg-log-buffer-squash-mark)) "squash")
+                      ((eq (nth 1 rev-info) (egg-log-buffer-edit-mark)) "edit"))
                 " " (nth 0 rev-info) " " (nth 2 rev-info) "\n"))
       (write-region (point-min) (point-max)
                     (concat rebase-dir "git-rebase-todo"))
@@ -6880,7 +7023,7 @@ With C-u C-u prefix, prompt the user for the type of merge to perform."
 If there was a commit marked as BASE, then rebase HEAD onto the commit under the
 cursor using the BASE commit as upstream."
   (interactive "d")
-  (let* ((mark (egg-log-buffer-find-first-mark ?*))
+  (let* ((mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
          (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 (onto (egg-log-buffer-get-rev-at pos :symbolic :no-HEAD))
 	 (head-name (egg-branch-or-HEAD))
@@ -6908,7 +7051,9 @@ The commit at POS is the where the chain of marked commits will rebased onto."
   (let* ((state (egg-repo-state :staged :unstaged))
          (rebase-dir (concat (plist-get state :gitdir) "/"
                              egg-git-rebase-subdir "/"))
-         (todo-alist (egg-log-buffer-get-marked-alist ?+ ?. ?~))
+         (todo-alist (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
+						      (egg-log-buffer-squash-mark)
+						      (egg-log-buffer-edit-mark)))
          (commits (mapcar 'car todo-alist))
 	 (r-commits (reverse commits))
          (upstream (egg-commit-at pos))
@@ -7075,12 +7220,32 @@ the command will prompt for the git reset mode to perform."
       (egg-log-buffer-handle-result
        (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))
 
+(defun egg-log-buffer-do-pick-partial-cherry (rev head-name files)
+  (if (not (y-or-n-p (format "pick selected files from %s and put i on %s"
+			     rev head-name)))
+      (message "Nah! that cherry (%s) looks rotten!!!" rev)
+    (let ((dir (egg-work-tree-dir))
+	  patch)
+      (with-temp-buffer
+	(setq default-directory dir)
+	(unless (apply 'egg-git-ok t "--no-pager" "show" "--no-color" rev "--" files)
+	  (error "Error retrieving rev %s" rev))
+	(setq patch (buffer-string)))
+      (egg--git-apply-cmd t patch "--3way"))))
+
+(defun egg-log-buffer-do-pick-1cherry (rev head-name edit-commit-msg)
+  (if (not (y-or-n-p (format "pick %s and put it on %s%s? " rev head-name
+			     (if edit-commit-msg " (with new commit message)" ""))))
+      (message "Nah! that cherry (%s) looks rotten!!!" rev)
+    (egg--git-cherry-pick-cmd t rev (if edit-commit-msg "--no-commit" "--ff"))))
+
 (defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
   "Pick one cherry at POS and put on HEAD.
 With prefix, will not auto-commit but let the user re-compose the message."
   (interactive "d\nP")
   
   (let ((rev (egg-log-buffer-get-rev-at pos :symbolic))
+	(selection (cdr (get-text-property pos :selection)))
 	(head-name (egg-branch-or-HEAD))
 	res modified-files old-msg)
     (unless (and rev (stringp rev))
@@ -7088,18 +7253,18 @@ With prefix, will not auto-commit but let the user re-compose the message."
     (when (string-equal rev "HEAD")
       (error "Cannot pick your own HEAD!"))
 
-    (if (not (y-or-n-p (format "pick %s and put it on %s%s? " rev head-name
-			       (if edit-commit-msg " (with new commit message)" ""))))
-	(message "Nah! that cherry (%s) looks rotten!!!" rev)
-      
-      (setq old-msg (egg-commit-message rev))
-      (setq res (egg--git-cherry-pick-cmd t rev (if edit-commit-msg "--no-commit" "--ff")))
-      (egg--buffer-handle-result-with-commit
-       res (list (concat (egg-text "Newly Picked Cherry:  " 'egg-text-3)
-			 (egg-text rev 'egg-branch))
-		 (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
-		 old-msg)
-       t 'log))))
+    (setq res (if (null selection)
+		  (egg-log-buffer-do-pick-1cherry rev head-name edit-commit-msg)
+		(setq edit-commit-msg t)
+		(egg-log-buffer-do-pick-partial-cherry rev head-name selection)))
+
+    (setq old-msg (egg-commit-message rev))
+    (egg--buffer-handle-result-with-commit
+     res (list (concat (egg-text "Newly Picked Cherry:  " 'egg-text-3)
+		       (egg-text rev 'egg-branch))
+	       (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
+	       old-msg)
+     t 'log)))
 
 (defun egg-log-buffer-revert-rev (pos &optional use-default-commit-msg)
   (interactive "d\nP")
@@ -7179,7 +7344,7 @@ would be a pull (by default --ff-only)."
 	(head-name (egg-branch-or-HEAD))
 	dst mark base)
     
-    (setq mark (egg-log-buffer-find-first-mark ?*))
+    (setq mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
     (setq base (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
     (setq dst (or base head-name))
 
@@ -7309,6 +7474,34 @@ prompt for a remote repo."
           (setq p-pos (1- p-pos))
           (egg-log-buffer-goto-pos p-pos))))))
 
+(defun egg-log-diff-toggle-file-selection (pos)
+  (interactive "d")
+  (let* ((diff (get-text-property pos :diff))
+	 (diff-beg (and diff (nth 1 diff)))
+	 (file (and diff (car diff)))
+	 (selection (get-text-property pos :selection))
+	 (files (and selection (cdr selection)))
+	 (inhibit-read-only t))
+    (unless (consp selection)
+      (error "Cannot select a commit's file at the cursor!"))
+    (unless (stringp file)
+      (error "Failed to pick a commit's file at the cursor!"))
+    (save-excursion
+      (goto-char diff-beg)
+      (setcdr selection
+	      (if (member file files)
+		  (progn
+		    (put-text-property (line-end-position)
+				       (1+ (line-end-position))
+				       'display nil)
+		    (delete file files))
+		(put-text-property (line-end-position)
+				   (1+ (line-end-position))
+				   'display 
+				   (propertize (string ?  egg-commit-file-select-mark ?\n)
+					       'face 'egg-diff-file-header))
+		(cons file files))))))
+
 (defun egg-log-buffer-do-insert-commit (pos &optional args highlight-regexp path-args)
   (save-excursion
     (let ((sha1 (get-text-property pos :commit))
@@ -7333,6 +7526,11 @@ prompt for a remote repo."
 			path-args))
         (error "error calling git log %s!" ref))
       (setq end (point-marker))
+
+      ;; car is the sha1 of the commit
+      ;; cdr is a list of selected files from the commit.
+      (put-text-property beg end :selection (list sha1))
+
       (save-excursion
 	(save-match-data
 	  (goto-char beg)
@@ -7812,7 +8010,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 A ready made PICKAXE info can be provided by the caller when called non-interactively."
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
-         (mark (egg-log-buffer-find-first-mark ?*))
+         (mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
 	 (head-name (egg-branch-or-HEAD))
          (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) head-name))
 	 (pickaxe pickaxe)
@@ -7845,7 +8043,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
   "Compare REF at POS against its upstream."
   (interactive "d\np")
   (let* ((ref (egg-ref-at-point pos :head))
-         (mark (egg-log-buffer-find-first-mark ?*))
+         (mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
          (upstream (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 pickaxe buf diff-info)
     (unless (and ref (stringp ref))
@@ -8201,7 +8399,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
 (defun egg-query:commit-buffer-diff-revs (pos prefix)
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
-	 (mark (egg-log-buffer-find-first-mark ?*))
+	 (mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
 	 (head-name (egg-branch-or-HEAD))
 	 (base (if mark (egg-log-buffer-get-rev-at mark :symbolic) head-name))
 	 (pickaxe (plist-get egg-internal-log-buffer-closure :pickaxe))
@@ -8323,8 +8521,8 @@ rebase. Otherwise mark the commit as PICK."
 		      (list "-G" (car pickaxe-term))))))
     (setq args (nconc args (list revs)))
     (egg-async-mark-log-buffer-commits args (current-buffer)
-				       (list :matched-mark ?~
-					     :unmatched-mark ?+
+				       (list :matched-mark (egg-log-buffer-edit-mark)
+					     :unmatched-mark (egg-log-buffer-pick-mark)
 					     :commits all-commits))))
 
 (defun egg-async-insert-n-decorate-query-logs (args)
@@ -8416,7 +8614,7 @@ TERM is the default search term."
 DEFAULT-TERM is the default search term."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
-  (let* ((mark (egg-log-buffer-find-first-mark ?*))
+  (let* ((mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
 	 (head-name (egg-branch-or-HEAD))
 	 (start-rev (if mark (egg-log-buffer-get-rev-at mark :symbolic)))
 	 (revs (and start-rev (list (concat start-rev "^.." head-name))))
