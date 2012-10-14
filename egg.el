@@ -4954,9 +4954,11 @@ If INIT was not nil, then perform 1st-time initializations as well."
                 ((eq sect 'untracked) (egg-sb-insert-untracked-section))
 		((eq sect 'stash) (egg-sb-insert-stash-section))))
         (egg-calculate-hunk-ranges)
-        (if init (egg-buffer-maybe-hide-all))
-        (if init (egg-buffer-maybe-hide-help "help" 'repo))
-        (egg-restore-section-visibility)
+	(if init
+	    (progn
+	      (egg-buffer-maybe-hide-all)
+	      (egg-buffer-maybe-hide-help "help" 'repo))
+	  (egg-restore-section-visibility))
 	(goto-char (egg-previous-non-hidden (point)))
        ))))
 
