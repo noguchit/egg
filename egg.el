@@ -419,7 +419,7 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'integer)
 
-(defcustom egg-log-all-max-len 10000
+(defcustom egg-log-all-max-len 3000
   "Maximum number of entries when showing the history of HEAD."
   :group 'egg
   :type 'integer)
@@ -526,8 +526,7 @@ will select the window unless prefixed with C-u."
   :group 'egg
   :type 'boolean)
 
-(defcustom egg-git-diff-options
-  '("--patience" "--ignore-space-at-eol")
+(defcustom egg-git-diff-options '("--patience")
   "Extra options for git diff."
   :group 'egg
   :type '(set :tag "Extra Diff Options"
@@ -535,7 +534,7 @@ will select the window unless prefixed with C-u."
 		     (const :tag "Patience" "--patience")
 		     (const :tag "Historgram" "--histogram")
 		     (const :tag "Minimal" "--minimal"))
-	      (radio :tag "White Space"
+	      (radio :tag "White Space (Warning: might cause problem for hunk (un)staging)"
 		      (const :tag "Ignore Space at End-of-Line" 
 			     "--ignore-space-at-eol")
 		      (const :tag "Ignore Space Changes"
@@ -6212,23 +6211,26 @@ Jump to line LINE if it's not nil."
 (defvar egg-log-buffer-comment-column nil)
 (defvar egg-internal-log-buffer-closure nil)
 
-(defun egg-run-git-log-HEAD (&optional refs-only)
-  (if refs-only
-      (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
-                  "--graph" "--topo-order" "--simplify-by-decoration"
-                  "--pretty=oneline" "--decorate=full" "--no-color")
-    (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
-                "--graph" "--topo-order"
-                "--pretty=oneline" "--decorate=full" "--no-color")))
 
-(defun egg-run-git-log-all (&optional refs-only)
-  (if refs-only
-      (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
-                  "--graph" "--topo-order" "--simplify-by-decoration"
-                  "--pretty=oneline" "--decorate=full" "--all" "--no-color")
-    (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
-                "--graph" "--topo-order"
-                "--pretty=oneline" "--decorate=full" "--all" "--no-color")))
+(defun egg-run-git-log (ref &optional git-log-extra-options paths)
+  (egg-git-ok-args 
+   t (nconc (list "--no-pager" "log"
+		  "--graph" "--topo-order"
+		  "--pretty=oneline"
+		  "--decorate=full"
+		  "--no-color")
+	    (cond ((null ref)
+		   (and egg-log-all-max-len
+			(list (format "--max-count=%d" egg-log-all-max-len))))
+		  ((or (stringp ref) (consp ref))
+		   (and egg-log-HEAD-max-len
+			(list (format "--max-count=%d" egg-log-HEAD-max-len))))
+		  (t (error "Invalid ref: %s" ref)))
+	    git-log-extra-options
+	    (cond ((null ref) (list "--all"))
+		  ((stringp ref) (list ref))
+		  ((consp ref) ref))
+	    (when paths (cons "--" paths)))))
 
 (defun egg-run-git-log-pickaxe (string)
   (egg-git-ok t "log" "--pretty=oneline" "--decorate=full" "--no-color"
@@ -6679,17 +6681,17 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
         head-line))))
 
-(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func &optional sha1-name-alist)
+(defun egg-log-buffer-insert-n-decorate-logs (log-insert-func &optional log-insert-args)
   "Use LOG-INSERT-FUNC to insert logs in current buffer then decorate it."
   (let ((beg (point)))
-    (funcall log-insert-func)
+    (apply log-insert-func log-insert-args)
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
                       egg-log-local-branch-map
                       egg-log-local-ref-map
                       egg-log-remote-branch-map
                       egg-log-remote-site-map
-		      sha1-name-alist)))
+		      nil)))
 
 (defalias 'egg-log-pop-to-file 'egg-buffer-pop-to-file)
 
@@ -8079,7 +8081,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (setq buf (egg-do-diff diff-info))
     (pop-to-buffer buf)))
 
-(defun egg-yggdrasil-insert-logs (ref)
+(defun egg-yggdrasil-insert-logs (ref &optional git-log-extra-options)
   (let* ((mappings 
 	  (cdr (egg-git-to-lines 
 		"--no-pager" "log" "-g" "--pretty=%H~%gd%n" 
@@ -8088,7 +8090,10 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 	 (beg (point)) 
 	 (head-name (egg-branch-or-HEAD))
 	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair)
-    (setq mappings (save-match-data (mapcar (lambda (line) (split-string line "~" t)) mappings)))
+    (setq mappings (save-match-data 
+		     (mapcar (lambda (line) 
+			       (split-string line "~" t)) 
+			     mappings)))
     (save-match-data
       (dotimes (i (length mappings))
 	(setq pair (pop mappings))
@@ -8106,13 +8111,19 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 	  (add-to-list 'sha1-list sha1)
 	  (add-to-list 'sha1-reflog-alist (list sha1 reflog)))))
 
-    (egg-git-ok-args t (nconc (list "--no-pager" "log"
-				    (format "--max-count=%d" egg-log-HEAD-max-len)
-				    "--graph" "--topo-order"
-				    "--pretty=oneline" "--decorate=full" "--no-color")
-			      (if (equal head-name ref)
-				  (cons ref sha1-list)
-				(nconc (list ref head-name) sha1-list))))
+    ;; (egg-git-ok-args t (nconc (list "--no-pager" "log"
+    ;; 				    (format "--max-count=%d" egg-log-HEAD-max-len)
+    ;; 				    "--graph" "--topo-order"
+    ;; 				    "--pretty=oneline" "--decorate=full" "--no-color")
+    ;; 			      git-log-extra-options
+    ;; 			      (if (equal head-name ref)
+    ;; 				  (cons ref sha1-list)
+    ;; 				(nconc (list ref head-name) sha1-list))))
+    (egg-run-git-log (if (equal head-name ref)
+			 (cons ref sha1-list)
+		       (nconc (list ref head-name) sha1-list))
+		     git-log-extra-options)
+
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
                       egg-log-local-branch-map
@@ -8121,17 +8132,23 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
                       egg-log-remote-site-map
 		      sha1-reflog-alist)))
 
-(defun egg-log (ref-name)
+(defun egg-log-interactive ()
+  (let ((level (prefix-numeric-value current-prefix-arg))
+	(head-name (egg-branch-or-HEAD))
+	(pickup (egg-string-at-point))
+	ref)
+    (cond ((> level 15) ;; ask
+	   (setq ref (egg-read-ref "show history of: " (or pickup head-name) t))
+	   (if (equal ref "") (setq ref nil))
+	   (list ref (y-or-n-p "only show 1st parent? ")))
+	  ((> level 3) ;; all refs
+	   (list nil))
+	  (t ;; default head
+	   (list head-name)))))
+
+(defun egg-log (ref-name &optional single-mom)
   "Show the commit DAG of REF-NAME."
-  (interactive (list (let ((level (prefix-numeric-value current-prefix-arg))
-			   (head-name (egg-branch-or-HEAD))
-			   (pickup (egg-string-at-point)))
-		       (cond ((> level 15) ;; ask
-			      (egg-read-ref "show history of: " (or pickup head-name)))
-			     ((> level 3) ;; all refs
-			      'all)
-			     (t	;; default head
-			      head-name)))))
+  (interactive (egg-log-interactive))
   (let* ((egg-internal-current-state
           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
          (default-directory (egg-work-tree-dir 
@@ -8142,19 +8159,22 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (with-current-buffer buf
       (when (memq :log egg-show-key-help-in-buffers)
         (setq help egg-log-buffer-help-text))
+      (when single-mom
+	(setq single-mom (list "--first-parent")))
       (set
        (make-local-variable 'egg-internal-log-buffer-closure)
-       (if (eq ref-name 'all)
-	   (list :description (concat
-				  (egg-text "history scope: " 'egg-text-2)
-				  (egg-text "all refs" 'egg-term))
-		    :closure (lambda ()
-			       (egg-log-buffer-insert-n-decorate-logs
-				'egg-run-git-log-all)))
-	 (list :description (concat
-                             (egg-text "history scope: " 'egg-text-2)
-                             (egg-text ref-name 'egg-term))
-               :closure `(lambda () (egg-yggdrasil-insert-logs ,ref-name)))))
+       (list :description (concat
+			   (egg-text "history scope: " 'egg-text-2)
+			   (if ref-name 
+			       (egg-text ref-name 'egg-term)
+			     (egg-text "all refs" 'egg-term)))
+	     :closure 
+	     (if ref-name 
+		 `(lambda () 
+		    (egg-yggdrasil-insert-logs ,ref-name (list ,@single-mom)))
+	       `(lambda ()
+		  (egg-log-buffer-insert-n-decorate-logs
+		   #'egg-run-git-log (list nil (list ,@single-mom)))))))
       (if help (plist-put egg-internal-log-buffer-closure :help help))
       (plist-put egg-internal-log-buffer-closure :command 'egg-log)
       (egg-log-buffer-redisplay buf 'init))
@@ -8280,25 +8300,25 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
               "--pretty=oneline" "--decorate=full" "--all" "--" file))
 
 
-(defun egg-log-buffer-decorate-logs-simple-1 (log-insert-func arg
+(defun egg-log-buffer-decorate-logs-simple-1 (log-insert-func args
 					   line-map head-map tag-map remote-map)
   (let ((beg (point)))
-    (funcall log-insert-func arg)
+    (apply log-insert-func args)
     (unless (= (char-before (point-max)) ?\n)
       (goto-char (point-max))
       (insert ?\n))
     (goto-char beg)
     (egg-decorate-log line-map head-map tag-map remote-map)))
 
-(defsubst egg-log-buffer-decorate-logs-simple (log-insert-func arg)
-  (egg-log-buffer-decorate-logs-simple-1 log-insert-func arg
+(defsubst egg-log-buffer-decorate-logs-simple (log-insert-func args)
+  (egg-log-buffer-decorate-logs-simple-1 log-insert-func args
 					 egg-secondary-log-commit-map
 					 egg-secondary-log-commit-map
 					 egg-secondary-log-commit-map
 					 egg-secondary-log-commit-map))
 
-(defsubst egg-file-log-buffer-decorate-logs (log-insert-func arg)
-  (egg-log-buffer-decorate-logs-simple-1 log-insert-func arg
+(defsubst egg-file-log-buffer-decorate-logs (log-insert-func args)
+  (egg-log-buffer-decorate-logs-simple-1 log-insert-func args
 					 egg-file-log-commit-map
 					 egg-file-log-commit-map
 					 egg-file-log-commit-map
@@ -8358,14 +8378,14 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
                                       (egg-text "all refs" 'egg-branch-mono))
                  :closure `(lambda ()
                              (egg-file-log-buffer-decorate-logs
-                              #'egg-run-git-file-log-all ,file-name))
+			      #'egg-run-git-log (list nil nil (list ,file-name))))
 		 :paths (list (egg-file-git-name file-name)))
          (list :title title
                :description (concat (egg-text "scope: " 'egg-text-2)
                                     (egg-text head-name 'egg-branch-mono))
                :closure `(lambda ()
                            (egg-file-log-buffer-decorate-logs
-                            #'egg-run-git-file-log-HEAD ,file-name))
+			    #'egg-run-git-log (list ,head-name nil (list ,file-name))))
 	       :paths (list (egg-file-git-name file-name)))))
       (when (memq :file-log egg-show-key-help-in-buffers)
         (setq help egg-file-log-help-text))
@@ -8445,10 +8465,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
                  :closure
                  `(lambda ()
 		    (egg-log-buffer-insert-n-decorate-logs
-		     (lambda ()
-                       (egg-git-ok t "log" "--max-count=10000" "--graph"
-                                   "--topo-order" "--pretty=oneline" "--no-color"
-                                   "--decorate=full" ,head-name ,sha1))))))
+		     #'egg-run-git-log (list (list ,head-name ,sha1))))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
