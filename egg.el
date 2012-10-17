@@ -1113,13 +1113,6 @@ E.g: `bar' in `foo/bar'"
        (> (length rbranch) 0)
        (file-name-nondirectory rbranch)))
 
-(defsubst egg-short-ref (full-ref)
-  "Return the short ref name of the full ref name FULL-REF.
-like `my_tag' in `refs/tags/my_tag'."
-  (and (stringp full-ref)
-       (> (length full-ref) 0)
-       (file-name-nondirectory full-ref)))
-
 (defsubst egg-file-as-string-raw (file-name)
   (with-temp-buffer
     (insert-file-contents-literally file-name)
@@ -1184,6 +1177,20 @@ END-RE is the regexp to match the end of a record."
 (defsubst egg-name-rev (rev)
   "get the symbolic name of REV."
   (egg-git-to-string "name-rev" "--always" "--name-only" rev))
+
+(defun egg-pretty-short-rev (rev)
+  (let ((rev (egg-name-rev rev))
+	(short-sha (substring (egg-git-to-string "rev-parse" rev) 0 8)))
+    (save-match-data
+      (when (string-match "\\`\\(remotes\\|tags\\)/" rev)
+	(setq rev (substring rev (match-end 0)))))
+    (if (> (length rev) 24)
+	short-sha
+      rev)))
+
+(defsubst egg-git-canon-name (rev file)
+  (when (and rev file)
+    (concat rev ":" (egg-file-git-name file))))
 
 (defsubst egg-describe-rev (rev)
   "get the long symbolic name of REV."
@@ -1984,7 +1991,7 @@ success."
 (defvar egg--ediffing-temp-buffers nil)
 (defun egg--add-ediffing-temp-buffers (&rest buffers)
   (dolist (buf buffers)
-    (when (buffer-live-p buf)
+    (when (and (bufferp buf)(buffer-live-p buf))
       (add-to-list 'egg--ediffing-temp-buffers buf))))
 
 (defun egg--kill-ediffing-temp-buffers ()
@@ -3605,20 +3612,20 @@ See `egg-decorate-diff-sequence'."
 (defun egg-unmerged-section-cmd-ediff3 (file)
   "Run ediff3 to resolve merge conflicts in FILE."
   (interactive (list (car (get-text-property (point) :diff))))
-  (find-file file)
-  (egg-resolve-merge-with-ediff))
+  (egg-resolve-merge-with-ediff file))
 
 (defun egg-unstaged-section-cmd-ediff (file)
   "Compare FILE and its staged copy using ediff."
   (interactive (list (car (get-text-property (point) :diff))))
-  (find-file file)
-  (egg-file-do-ediff ":0" "INDEX"))
+  (egg--ediff-file-revs file nil nil ":0" "INDEX"))
 
-(defun egg-staged-section-cmd-ediff3 (file)
+(defun egg-staged-section-cmd-ediff3 (file &optional ediff2)
   "Compare the staged copy of FILE and the version in HEAD using ediff."
-  (interactive (list (car (get-text-property (point) :diff))))
-  (find-file file)
-  (egg-file-do-ediff ":0" "INDEX" "HEAD"))
+  (interactive (list (car (get-text-property (point) :diff)) current-prefix-arg))
+
+  (if ediff2
+      (egg--ediff-file-revs file ":0" "INDEX" (egg-branch-or-HEAD) nil)
+    (egg--ediff-file-revs file nil nil ":0" "INDEX" (egg-branch-or-HEAD) nil)))
 
 (defvar egg-diff-buffer-info nil
   "Data for the diff buffer.
@@ -3629,20 +3636,11 @@ This is built by `egg-build-diff-info'")
   (interactive (list (car (get-text-property (point) :diff))
                      (point)))
   (let ((commit (get-text-property pos :commit))
-        (diff-info egg-diff-buffer-info)
-        src src-name dst)
-    (find-file file)
-    (cond (commit
-           (setq src (egg-describe-rev (concat commit "^"))
-                 dst (egg-describe-rev commit)))
-          ((setq src (plist-get diff-info :src-revision))
-	   (when (consp src)
-	     (setq src (egg-git-to-string "merge-base" (car src) (cdr src))))
-           (setq src (egg-describe-rev src)))
-          ((setq src (and diff-info ":0"))
-           (setq src-name "INDEX")))
-    (unless src (error "Ooops!"))
-    (egg-file-do-ediff src src-name dst nil 'ediff2)))
+        (diff-info egg-diff-buffer-info))
+    (cond ((stringp commit)
+	   (egg--commit-do-ediff-file-revs (egg-pretty-short-rev commit) file))
+	  ((consp diff-info)
+	   (egg--diff-do-ediff-file-revs diff-info file)))))
 
 (defun egg-hunk-compute-line-no (hunk-header hunk-beg &optional hunk-ranges)
   "Calculate the effective line number in the original file based
@@ -9075,7 +9073,7 @@ current file contains unstaged changes."
          (rev (or rev (egg-read-rev prompt rbranch)))
          (canon-name (egg-file-git-name file))
          (git-name (concat rev ":" canon-name))
-         (buf (get-buffer-create (concat "*" (or name git-name) "*"))))
+         (buf (get-buffer-create (concat "*" (if name (concat name ":" canon-name) git-name) "*"))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -9111,66 +9109,74 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
-         (dst-buf (if ask-for-dst
-                      (egg-file-get-other-version
-                       (buffer-file-name) nil
-                       (format "(ediff) %s's newer version: " file)
-                       t)
-                    (current-buffer)))
-         (src-buf (egg-file-get-other-version
-                   (buffer-file-name)
-                   nil
-                   (format "(ediff) %s's older version: " file)
-                   t)))
-    (unless (and (bufferp src-buf) (bufferp dst-buf))
-      (error "Ooops!"))
-    (unless (equal (current-buffer) dst-buf)
-      (egg--add-ediffing-temp-buffers dst-buf))
-    (egg--add-ediffing-temp-buffers src-buf)
-    (ediff-buffers dst-buf src-buf)))
+	 (short-file (file-name-nondirectory file))
+         (dst (if ask-for-dst (egg-read-ref (format "(ediff) %s's newer version: " short-file)
+					    (egg-branch-or-HEAD))))
+	 (src (egg-read-ref (if dst (format "(ediff) %s's %s vs older version: " short-file  dst)
+			      (format "(ediff) %s vs version: " short-file  dst)))))
+    (egg--ediff-file-revs file dst nil src nil)))
 
-(defun egg-resolve-merge-with-ediff (&optional what)
-  "Launch a 3-way ediff session to resolve the merge conflicts in the current file.
-WHAT is a mistery."
+
+(defun egg-resolve-merge-with-ediff (file)
+  "Launch a 3-way ediff session to resolve the merge conflicts in FILE."
   (interactive "P")
-  (unless (buffer-file-name)
-    (error "Current buffer has no associated file!"))
-  (let* ((file buffer-file-name)
-         (short-file (file-name-nondirectory file))
-         (ours (egg-file-get-other-version file ":2" nil t (concat "our:" short-file)))
-         (theirs (egg-file-get-other-version file ":3" nil t (concat "their:" short-file))))
-    (unless (and (bufferp ours) (bufferp theirs))
-      (error "Ooops!"))
-    (egg--add-ediffing-temp-buffers ours theirs)
+  (let* ((short-file (file-name-nondirectory file))
+	 (ours ":2")
+	 (pretty-ours "ours")
+	 (theirs ":3")
+	 (pretty-theirs "theirs"))
     (if (egg-rebase-in-progress)
-	(ediff-buffers3 ours theirs (current-buffer))
-      (ediff-buffers3 theirs ours (current-buffer)))))
+	(egg--ediff-file-revs file nil nil theirs pretty-theirs ours pretty-ours)
+      (egg--ediff-file-revs file nil nil ours pretty-ours theirs pretty-theirs))))
 
-(defun egg-file-do-ediff (closer-rev closer-rev-name &optional further-rev further-rev-name ediff2)
-  "Invoke ediff to compare the contents of the file from FURTHER-REV to CLOSER-REV.
-CLOSER-REV-NAME and FURTHER-REV-NAME are pretty display names for the revs.
-If EDIFF2 is non-nil, use 2-way ediff session, otherwise use 3-way ediff session
-with the current contents in work-dir."
-  (unless (buffer-file-name)
-    (error "Current buffer has no associated file!"))
-  (let* ((file buffer-file-name)
-         (short-file (file-name-nondirectory file))
-         (closer-name (concat (or closer-rev-name closer-rev)
-                              ":" short-file))
-         (this (egg-file-get-other-version file closer-rev nil t closer-name))
-         (further-name (and further-rev
-                            (concat (or further-rev-name further-rev)
-                                    ":" short-file)))
-         (that (and further-rev
-                    (egg-file-get-other-version file further-rev nil t further-name))))
-    (unless (bufferp this) (error "Ooops!"))
-    (unless (or (null further-rev) (bufferp that)) (error "Ooops!"))
-    (egg--add-ediffing-temp-buffers this that)
-    (if (bufferp that)
-        (if ediff2
-            (ediff-buffers that this)
-          (ediff-buffers3 that this (current-buffer)))
-      (ediff-buffers this (current-buffer)))))
+(defun egg--ediff-file-revs (file-name new-rev new-rev-pretty parent-1 parent-1-pretty
+				       &optional parent-2 parent-2-pretty)
+  (let* ((default-directory (egg-work-tree-dir))
+	 (git-file-name (egg-file-git-name file-name))
+	 (short-file (file-name-nondirectory file-name))
+	 (buffer-3 (if new-rev
+		       (egg-file-get-other-version git-file-name new-rev nil t new-rev-pretty)
+		     (find-file-noselect file-name)))
+	 (buffer-1 (egg-file-get-other-version git-file-name parent-1 nil t parent-1-pretty))
+	 (buffer-2 (and parent-2 
+			(egg-file-get-other-version git-file-name parent-2 nil t parent-2-pretty))))
+    (when new-rev (egg--add-ediffing-temp-buffers buffer-3))
+    (when parent-1 (egg--add-ediffing-temp-buffers buffer-1))
+    (when parent-2 (egg--add-ediffing-temp-buffers buffer-2))
+    (cond ((and (bufferp buffer-1) (bufferp buffer-2) (bufferp buffer-3))
+	   (ediff-buffers3 buffer-2 buffer-1 buffer-3))
+	  ((and (bufferp buffer-1) (bufferp buffer-3))
+	   (ediff-buffers buffer-1 buffer-3) )
+	  (t (error "internal error: something wrong")))))
+
+(defun egg--commit-do-ediff-file-revs (commit file)
+  (let* ((default-directory (egg-work-tree-dir))
+	 parents)
+    (with-temp-buffer
+      (egg-git-ok t "--no-pager" "cat-file" "-p" commit)
+      (goto-char (point-min))
+      (while (re-search-forward (rx line-start 
+				    "parent " (group (= 40 hex-digit)) 
+				    (0+ space)
+				    line-end) nil t)
+	(add-to-list 'parents (match-string-no-properties 1)))
+      (setq parents (mapcar (lambda (long)
+			      (substring-no-properties long 0 8))
+			    (nreverse parents)))
+      (egg--ediff-file-revs file commit nil (car parents) nil (cadr parents) nil))))
+
+(defun egg--diff-do-ediff-file-revs (diff-info file)
+  (let ((default-directory (egg-work-tree-dir))
+	(src (plist-get diff-info :src-revision))
+	(src-pretty (plist-get diff-info :src))
+	(dst (plist-get diff-info :dst-revision))
+	(dst-pretty (plist-get diff-info :dst)))
+    (setq src (cond ((consp src) (egg-git-to-string "merge-base" (car src) (cdr src)))
+		    ((stringp src) src)
+		    ((null src)
+		     (setq src-pretty (concat "INDEX:" file))
+		     ":0")))
+    (egg--ediff-file-revs file dst dst-pretty src src-pretty nil nil)))
 
 (defconst egg-key-action-alist
   '((?m :merge-file "[m]erge current file" "Resolve merge conflict(s) in current file.")
