@@ -6680,6 +6680,45 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
         head-line))))
 
+(defun egg-insert-logs-with-decoration (ref git-log-extra-options paths
+					    keymap-plist sha1-pseudo-refs-alist)
+  (let ((beg (point)))
+    (egg-run-git-log ref git-log-extra-options paths)
+    (unless (= (char-before (point-max)) ?\n)
+      (goto-char (point-max))
+      (insert ?\n))
+    (goto-char beg)
+    (egg-decorate-log (plist-get keymap-plist :line)
+		      (plist-get keymap-plist :branch)
+		      (plist-get keymap-plist :tag)
+		      (plist-get keymap-plist :remote)
+		      (plist-get keymap-plist :site)
+		      sha1-pseudo-refs-alist)))
+
+(defun egg-insert-logs-with-simple-decoration (ref &optional git-log-extra-options paths)
+  (egg-insert-logs-with-decoration ref git-log-extra-options paths
+				   (list :line egg-secondary-log-commit-map
+					 :branch egg-secondary-log-commit-map
+					 :tag egg-secondary-log-commit-map
+					 :remote egg-secondary-log-commit-map
+					 :site egg-secondary-log-commit-map)
+				   nil))
+
+(defun egg-insert-logs-with-full-decoration (ref &optional git-log-extra-options paths)
+  (egg-insert-logs-with-decoration ref git-log-extra-options paths
+					(if paths
+					    (list :line egg-file-log-commit-map
+						  :branch egg-file-log-commit-map
+						  :tag egg-file-log-commit-map
+						  :remote egg-file-log-commit-map
+						  :site egg-file-log-commit-map)
+					  (list :line egg-log-commit-map
+						:branch egg-log-local-branch-map
+						:tag egg-log-local-ref-map
+						:remote egg-log-remote-branch-map
+						:site egg-log-remote-site-map))
+					nil))
+
 (defun egg-log-buffer-insert-n-decorate-logs (log-insert-func &optional log-insert-args)
   "Use LOG-INSERT-FUNC to insert logs in current buffer then decorate it."
   (let ((beg (point)))
@@ -8083,6 +8122,9 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 (defun egg-insert-n-decorate-yggdrasil (ignored-func args)
   (egg-do-insert-n-decorate-yggdrasil (nth 0 args) (nth 1 args)))
 
+(defun egg-insert-yggdrasil-with-decoration (ref &optional git-log-extra-options ignored)
+  (egg-do-insert-n-decorate-yggdrasil ref git-log-extra-options))
+
 (defun egg-do-insert-n-decorate-yggdrasil (ref &optional git-log-extra-options)
   (let* ((mappings 
 	  (cdr (egg-git-to-lines 
@@ -8146,17 +8188,15 @@ if FILE-NAME is non-nil, restrict the logs to the commits modifying FILE-NAME."
       (when file-name
 	(setq paths (list file-name)))
       (setq decorating-func
-	    (cond (file-name #'egg-file-log-buffer-decorate-logs)
-		  (ref-name #'egg-insert-n-decorate-yggdrasil)
-		  (t #'egg-log-buffer-insert-n-decorate-logs)))
+	    (if (and (null file-name) ref-name)
+		#'egg-insert-yggdrasil-with-decoration
+	      #'egg-insert-logs-with-full-decoration))
       (set
        (make-local-variable 'egg-internal-log-buffer-closure)
        (append (list :description description
 		     :closure
 		     `(lambda ()
-			(,decorating-func #'egg-run-git-log (list ,ref-name
-								  (list ,@single-mom)
-								  (list ,@paths)))))
+			(,decorating-func ,ref-name (list ,@single-mom) (list ,@paths))))
 	       closure-items))
       (when (and (memq :log egg-show-key-help-in-buffers) help)
 	(plist-put egg-internal-log-buffer-closure :help help))
@@ -8190,42 +8230,6 @@ if FILE-NAME is non-nil, restrict the logs to the commits modifying FILE-NAME."
     (cond (egg-switch-to-buffer (switch-to-buffer buf))
 	  (t (pop-to-buffer buf)))))
 
-
-;; (defun egg-log (ref-name &optional single-mom)
-;;   "Show the commit DAG of REF-NAME."
-;;   (interactive (egg-log-interactive))
-;;   (let* ((egg-internal-current-state
-;;           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
-;;          (default-directory (egg-work-tree-dir 
-;; 			     (egg-git-dir (invoked-interactively-p))))
-;;          (buf (egg-get-log-buffer 'create))
-;; 	 ;; (head-name (egg-branch-or-HEAD))
-;;          help)
-;;     (with-current-buffer buf
-;;       (when (memq :log egg-show-key-help-in-buffers)
-;;         (setq help egg-log-buffer-help-text))
-;;       (when single-mom
-;; 	(setq single-mom (list "--first-parent")))
-;;       (set
-;;        (make-local-variable 'egg-internal-log-buffer-closure)
-;;        (list :description (concat
-;; 			   (egg-text "history scope: " 'egg-text-2)
-;; 			   (if ref-name 
-;; 			       (egg-text ref-name 'egg-term)
-;; 			     (egg-text "all refs" 'egg-term)))
-;; 	     :closure 
-;; 	     (if ref-name 
-;; 		 `(lambda () 
-;; 		    (egg-do-insert-n-decorate-yggdrasil ,ref-name (list ,@single-mom)))
-;; 	       `(lambda ()
-;; 		  (egg-log-buffer-insert-n-decorate-logs
-;; 		   #'egg-run-git-log (list nil (list ,@single-mom)))))))
-;;       (if help (plist-put egg-internal-log-buffer-closure :help help))
-;;       (plist-put egg-internal-log-buffer-closure :command 'egg-log)
-;;       (egg-log-buffer-redisplay buf 'init))
-;;     (cond
-;;      (egg-switch-to-buffer (switch-to-buffer buf))
-;;      (t (pop-to-buffer buf)))))
 
 ;;;========================================================
 ;;; file history
@@ -8494,8 +8498,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
                          (egg-text short-sha1 'egg-term))
                  :closure
                  `(lambda ()
-		    (egg-log-buffer-insert-n-decorate-logs
-		     #'egg-run-git-log (list (list ,head-name ,sha1))))))
+		    (egg-insert-logs-with-full-decoration (list ,head-name ,sha1)))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
@@ -8620,7 +8623,7 @@ rebase. Otherwise mark the commit as PICK."
 (defun egg-insert-n-decorate-pickaxed-logs (args)
   (let ((beg (point)))
     (egg-git-ok-args t 
-		     (nconc (list "log" "--pretty=oneline" "--decorate=full" "--no-color")
+		     (nconc (list "log" "--pretty=oneline" "--graph"  "--decorate=full" "--no-color")
 			    args))
     (goto-char beg)
     (egg-decorate-log egg-query:commit-commit-map
