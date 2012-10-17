@@ -6214,7 +6214,6 @@ Jump to line LINE if it's not nil."
 (defun egg-run-git-log (ref &optional git-log-extra-options paths)
   (egg-git-ok-args 
    t (nconc (list "--no-pager" "log"
-		  "--graph" "--topo-order"
 		  "--pretty=oneline"
 		  "--decorate=full"
 		  "--no-color")
@@ -6230,10 +6229,6 @@ Jump to line LINE if it's not nil."
 		  ((stringp ref) (list ref))
 		  ((consp ref) ref))
 	    (when paths (cons "--" paths)))))
-
-(defun egg-run-git-log-pickaxe (string)
-  (egg-git-ok t "log" "--pretty=oneline" "--decorate=full" "--no-color"
-              (concat "-S" string)))
 
 (defun egg-log-show-ref (pos)
   (interactive "d")
@@ -6697,7 +6692,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 		      sha1-pseudo-refs-alist)))
 
 (defun egg-insert-logs-with-simple-decoration (ref &optional git-log-extra-options paths)
-  (egg-insert-logs-with-decoration ref git-log-extra-options paths
+  (egg-insert-logs-with-decoration ref 
+				   (append '("--graph" "--topo-order") git-log-extra-options) 
+				   paths
 				   (list :line egg-secondary-log-commit-map
 					 :branch egg-secondary-log-commit-map
 					 :tag egg-secondary-log-commit-map
@@ -6706,19 +6703,21 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 				   nil))
 
 (defun egg-insert-logs-with-full-decoration (ref &optional git-log-extra-options paths)
-  (egg-insert-logs-with-decoration ref git-log-extra-options paths
-					(if paths
-					    (list :line egg-file-log-commit-map
-						  :branch egg-file-log-commit-map
-						  :tag egg-file-log-commit-map
-						  :remote egg-file-log-commit-map
-						  :site egg-file-log-commit-map)
-					  (list :line egg-log-commit-map
-						:branch egg-log-local-branch-map
-						:tag egg-log-local-ref-map
-						:remote egg-log-remote-branch-map
-						:site egg-log-remote-site-map))
-					nil))
+  (egg-insert-logs-with-decoration ref 
+				   (append '("--graph" "--topo-order") git-log-extra-options) 
+				   paths
+				   (if paths
+				       (list :line egg-file-log-commit-map
+					     :branch egg-file-log-commit-map
+					     :tag egg-file-log-commit-map
+					     :remote egg-file-log-commit-map
+					     :site egg-file-log-commit-map)
+				     (list :line egg-log-commit-map
+					   :branch egg-log-local-branch-map
+					   :tag egg-log-local-ref-map
+					   :remote egg-log-remote-branch-map
+					   :site egg-log-remote-site-map))
+				   nil))
 
 (defalias 'egg-log-pop-to-file 'egg-buffer-pop-to-file)
 
@@ -8147,7 +8146,8 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 	  (add-to-list 'sha1-list sha1)
 	  (add-to-list 'sha1-reflog-alist (list sha1 reflog)))))
 
-    (egg-run-git-log (nconc refs sha1-list) git-log-extra-options)
+    (egg-run-git-log (nconc refs sha1-list) 
+		     (append '("--graph" "--topo-order") git-log-extra-options))
 
     (goto-char beg)
     (egg-decorate-log egg-log-commit-map
@@ -8333,41 +8333,6 @@ if FILE-NAME is non-nil, restrict the logs to the commits modifying FILE-NAME."
   (interactive)
   (when (egg-commit-at-point)
     (egg-file-log-walk-show-buffer)))
-
-(defsubst egg-run-git-file-log-HEAD (file)
-  (egg-git-ok t "log" (format "--max-count=%d" egg-log-HEAD-max-len)
-              "--graph" "--topo-order" "--no-color"
-              "--pretty=oneline" "--decorate=full" "--" file))
-
-(defsubst egg-run-git-file-log-all (file)
-  (egg-git-ok t "log" (format "--max-count=%d" egg-log-all-max-len)
-              "--graph" "--topo-order" "--no-color"
-              "--pretty=oneline" "--decorate=full" "--all" "--" file))
-
-
-(defun egg-log-buffer-decorate-logs-simple-1 (log-insert-func args
-					   line-map head-map tag-map remote-map)
-  (let ((beg (point)))
-    (apply log-insert-func args)
-    (unless (= (char-before (point-max)) ?\n)
-      (goto-char (point-max))
-      (insert ?\n))
-    (goto-char beg)
-    (egg-decorate-log line-map head-map tag-map remote-map)))
-
-(defsubst egg-log-buffer-decorate-logs-simple (log-insert-func args)
-  (egg-log-buffer-decorate-logs-simple-1 log-insert-func args
-					 egg-secondary-log-commit-map
-					 egg-secondary-log-commit-map
-					 egg-secondary-log-commit-map
-					 egg-secondary-log-commit-map))
-
-(defsubst egg-file-log-buffer-decorate-logs (log-insert-func args)
-  (egg-log-buffer-decorate-logs-simple-1 log-insert-func args
-					 egg-file-log-commit-map
-					 egg-file-log-commit-map
-					 egg-file-log-commit-map
-					 egg-file-log-commit-map))
 
 (defun egg-log-buffer-simple-redisplay (buffer &optional init)
   (with-current-buffer buffer
@@ -8596,8 +8561,7 @@ rebase. Otherwise mark the commit as PICK."
 				 (if output output "Nothing found!!!"))
 		      (egg-refresh-buffer log-buffer)))
 		  (current-buffer) closure)
-	    (nconc (list "--no-pager" "log" "--pretty=oneline" 
-			 "--decorate=full" "--no-color")
+	    (nconc (list "--no-pager" "log" "--pretty=oneline" "--decorate=full" "--no-color")
 		   args)))
 
 	  ((stringp fetched-data)
@@ -8613,18 +8577,6 @@ rebase. Otherwise mark the commit as PICK."
 			     egg-query:commit-commit-map))
 	  (t (error "fetched-data is: %s" fetched-data)))
     beg))
-
-
-(defun egg-insert-n-decorate-pickaxed-logs (args)
-  (let ((beg (point)))
-    (egg-git-ok-args t 
-		     (nconc (list "log" "--pretty=oneline" "--graph"  "--decorate=full" "--no-color")
-			    args))
-    (goto-char beg)
-    (egg-decorate-log egg-query:commit-commit-map
-                      egg-query:commit-commit-map
-                      egg-query:commit-commit-map
-                      egg-query:commit-commit-map)))
 
 (defun egg-do-search-file-changes (prefix default-term file-name search-action-format
 					  &optional do-all)
