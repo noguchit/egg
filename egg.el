@@ -476,12 +476,11 @@ Different versions of git have different names for this subdir."
                  string))
 
 (defcustom egg-show-key-help-in-buffers
-  '(:log :status :diff :file-log :query :stash)
+  '(:log :status :diff :query :stash)
   "Display keybinding help in egg special buffers."
   :group 'egg
   :type '(set (const :tag "Status Buffer"   :status)
               (const :tag "Log Buffer"      :log)
-              (const :tag "File Log Buffer" :file-log)
               (const :tag "Diff Buffer"     :diff)
               (const :tag "Commit Buffer"   :commit)
 	      (const :tag "Search Buffer"   :query)
@@ -8081,7 +8080,10 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (setq buf (egg-do-diff diff-info))
     (pop-to-buffer buf)))
 
-(defun egg-yggdrasil-insert-logs (ref &optional git-log-extra-options)
+(defun egg-insert-n-decorate-yggdrasil (ignored-func args)
+  (egg-do-insert-n-decorate-yggdrasil (nth 0 args) (nth 1 args)))
+
+(defun egg-do-insert-n-decorate-yggdrasil (ref &optional git-log-extra-options)
   (let* ((mappings 
 	  (cdr (egg-git-to-lines 
 		"--no-pager" "log" "-g" "--pretty=%H~%gd%n" 
@@ -8111,14 +8113,6 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 	  (add-to-list 'sha1-list sha1)
 	  (add-to-list 'sha1-reflog-alist (list sha1 reflog)))))
 
-    ;; (egg-git-ok-args t (nconc (list "--no-pager" "log"
-    ;; 				    (format "--max-count=%d" egg-log-HEAD-max-len)
-    ;; 				    "--graph" "--topo-order"
-    ;; 				    "--pretty=oneline" "--decorate=full" "--no-color")
-    ;; 			      git-log-extra-options
-    ;; 			      (if (equal head-name ref)
-    ;; 				  (cons ref sha1-list)
-    ;; 				(nconc (list ref head-name) sha1-list))))
     (egg-run-git-log (if (equal head-name ref)
 			 (cons ref sha1-list)
 		       (nconc (list ref head-name) sha1-list))
@@ -8131,6 +8125,42 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
                       egg-log-remote-branch-map
                       egg-log-remote-site-map
 		      sha1-reflog-alist)))
+
+
+(defun egg-build-log-closure (ref-name file-name buf help &optional single-mom &rest closure-items)
+  "Show the commit DAG of REF-NAME.
+if SINGLE-MOM is non-nil, only show the first parent.
+if FILE-NAME is non-nil, restrict the logs to the commits modifying FILE-NAME."
+  (let* ((egg-internal-current-state
+          (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
+         (default-directory (egg-work-tree-dir 
+			     (egg-git-dir (invoked-interactively-p))))
+	 (description (concat (egg-text "history scope: " 'egg-text-2)
+			      (if ref-name 
+				  (egg-text ref-name 'egg-term)
+				(egg-text "all refs" 'egg-term))))
+         help paths decorating-func)
+    (with-current-buffer buf
+      (when single-mom
+	(setq single-mom (list "--first-parent")))
+      (when file-name
+	(setq paths (list file-name)))
+      (setq decorating-func
+	    (cond (file-name #'egg-file-log-buffer-decorate-logs)
+		  (ref-name #'egg-insert-n-decorate-yggdrasil)
+		  (t #'egg-log-buffer-insert-n-decorate-logs)))
+      (set
+       (make-local-variable 'egg-internal-log-buffer-closure)
+       (append (list :description description
+		     :closure
+		     `(lambda ()
+			(,decorating-func #'egg-run-git-log (list ,ref-name
+								  (list ,@single-mom)
+								  (list ,@paths)))))
+	       closure-items))
+      (when (and (memq :log egg-show-key-help-in-buffers) help)
+	(plist-put egg-internal-log-buffer-closure :help help))
+      egg-internal-log-buffer-closure)))
 
 (defun egg-log-interactive ()
   (let ((level (prefix-numeric-value current-prefix-arg))
@@ -8153,34 +8183,50 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
          (default-directory (egg-work-tree-dir 
 			     (egg-git-dir (invoked-interactively-p))))
-         (buf (egg-get-log-buffer 'create))
-	 ;; (head-name (egg-branch-or-HEAD))
-         help)
-    (with-current-buffer buf
-      (when (memq :log egg-show-key-help-in-buffers)
-        (setq help egg-log-buffer-help-text))
-      (when single-mom
-	(setq single-mom (list "--first-parent")))
-      (set
-       (make-local-variable 'egg-internal-log-buffer-closure)
-       (list :description (concat
-			   (egg-text "history scope: " 'egg-text-2)
-			   (if ref-name 
-			       (egg-text ref-name 'egg-term)
-			     (egg-text "all refs" 'egg-term)))
-	     :closure 
-	     (if ref-name 
-		 `(lambda () 
-		    (egg-yggdrasil-insert-logs ,ref-name (list ,@single-mom)))
-	       `(lambda ()
-		  (egg-log-buffer-insert-n-decorate-logs
-		   #'egg-run-git-log (list nil (list ,@single-mom)))))))
-      (if help (plist-put egg-internal-log-buffer-closure :help help))
-      (plist-put egg-internal-log-buffer-closure :command 'egg-log)
-      (egg-log-buffer-redisplay buf 'init))
-    (cond
-     (egg-switch-to-buffer (switch-to-buffer buf))
-     (t (pop-to-buffer buf)))))
+         (buf (egg-get-log-buffer 'create)))
+    (egg-build-log-closure ref-name nil buf egg-log-buffer-help-text single-mom
+			   :command 'egg-log)
+    (egg-log-buffer-redisplay buf 'init)
+    (cond (egg-switch-to-buffer (switch-to-buffer buf))
+	  (t (pop-to-buffer buf)))))
+
+
+;; (defun egg-log (ref-name &optional single-mom)
+;;   "Show the commit DAG of REF-NAME."
+;;   (interactive (egg-log-interactive))
+;;   (let* ((egg-internal-current-state
+;;           (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
+;;          (default-directory (egg-work-tree-dir 
+;; 			     (egg-git-dir (invoked-interactively-p))))
+;;          (buf (egg-get-log-buffer 'create))
+;; 	 ;; (head-name (egg-branch-or-HEAD))
+;;          help)
+;;     (with-current-buffer buf
+;;       (when (memq :log egg-show-key-help-in-buffers)
+;;         (setq help egg-log-buffer-help-text))
+;;       (when single-mom
+;; 	(setq single-mom (list "--first-parent")))
+;;       (set
+;;        (make-local-variable 'egg-internal-log-buffer-closure)
+;;        (list :description (concat
+;; 			   (egg-text "history scope: " 'egg-text-2)
+;; 			   (if ref-name 
+;; 			       (egg-text ref-name 'egg-term)
+;; 			     (egg-text "all refs" 'egg-term)))
+;; 	     :closure 
+;; 	     (if ref-name 
+;; 		 `(lambda () 
+;; 		    (egg-do-insert-n-decorate-yggdrasil ,ref-name (list ,@single-mom)))
+;; 	       `(lambda ()
+;; 		  (egg-log-buffer-insert-n-decorate-logs
+;; 		   #'egg-run-git-log (list nil (list ,@single-mom)))))))
+;;       (if help (plist-put egg-internal-log-buffer-closure :help help))
+;;       (plist-put egg-internal-log-buffer-closure :command 'egg-log)
+;;       (egg-log-buffer-redisplay buf 'init))
+;;     (cond
+;;      (egg-switch-to-buffer (switch-to-buffer buf))
+;;      (t (pop-to-buffer buf)))))
+
 ;;;========================================================
 ;;; file history
 ;;;========================================================
@@ -8364,39 +8410,23 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
   (interactive (list (buffer-file-name) current-prefix-arg))
   (unless (and file-name (file-exists-p file-name))
     (error "File does not exist: %s" file-name))
-  (let ((buffer (egg-get-file-log-buffer 'create))
-        (title (concat (egg-text "history of " 'egg-text-2)
-                       (egg-text file-name 'egg-term)))
+  (let ((egg-internal-current-state
+	 (egg-repo-state (if (invoked-interactively-p) :error-if-not-git)))
+	(default-directory (egg-work-tree-dir 
+			    (egg-git-dir (invoked-interactively-p))))
+	(buffer (egg-get-file-log-buffer 'create))
 	(head-name (egg-branch-or-HEAD))
-        help)
-    (with-current-buffer buffer
-      (set
-       (make-local-variable 'egg-internal-log-buffer-closure)
-       (if all
-           (list :title title
-                 :description (concat (egg-text "scope: " 'egg-text-2)
-                                      (egg-text "all refs" 'egg-branch-mono))
-                 :closure `(lambda ()
-                             (egg-file-log-buffer-decorate-logs
-			      #'egg-run-git-log (list nil nil (list ,file-name))))
-		 :paths (list (egg-file-git-name file-name)))
-         (list :title title
-               :description (concat (egg-text "scope: " 'egg-text-2)
-                                    (egg-text head-name 'egg-branch-mono))
-               :closure `(lambda ()
-                           (egg-file-log-buffer-decorate-logs
-			    #'egg-run-git-log (list ,head-name nil (list ,file-name))))
-	       :paths (list (egg-file-git-name file-name)))))
-      (when (memq :file-log egg-show-key-help-in-buffers)
-        (setq help egg-file-log-help-text))
-      (if help (plist-put egg-internal-log-buffer-closure :help help))
-      (plist-put egg-internal-log-buffer-closure :command
-		 `(lambda (&optional all)
-		    (interactive "P")
-		    (egg-file-log ,file-name all))))
-      
+	(title (concat (egg-text "history of " 'egg-text-2) (egg-text file-name 'egg-term)))
+	ref help single-mom)
+    (egg-build-log-closure (if all nil head-name) 
+			   file-name buffer egg-file-log-help-text single-mom
+			   :title title
+			   :command `(lambda (&optional all)
+				       (interactive "P")
+				       (egg-file-log ,file-name all)))
     (egg-log-buffer-simple-redisplay buffer 'init)
-    (pop-to-buffer buffer)))
+    (cond (egg-switch-to-buffer (switch-to-buffer buffer))
+	  (t (pop-to-buffer buffer)))))
 
 ;;;========================================================
 ;;; commit search
