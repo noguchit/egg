@@ -2004,6 +2004,16 @@ success."
 	(bury-buffer buf)
 	(kill-buffer buf)))))
 
+(defvar egg--ediff-saved-window-config nil)
+(defun egg--ediff-save-windows-config-hook ()
+  (setq egg--ediff-saved-window-config (current-window-configuration)))
+
+(defun egg--ediff-restore-windows-config-hook ()
+  (and (window-configuration-p egg--ediff-saved-window-config)
+       (set-window-configuration egg--ediff-saved-window-config)))
+
+
+
 (defsubst egg--do-output (&optional erase)
   "Get the output buffer for synchronous commands.
 erase the buffer's contents if ERASE was non-nil."
@@ -9110,10 +9120,12 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
 	 (short-file (file-name-nondirectory file))
-         (dst (if ask-for-dst (egg-read-ref (format "(ediff) %s's newer version: " short-file)
+         (dst (if ask-for-dst (egg-read-ref (format "(ediff) %s's newer version: "
+						    short-file)
 					    (egg-branch-or-HEAD))))
-	 (src (egg-read-ref (if dst (format "(ediff) %s's %s vs older version: " short-file  dst)
-			      (format "(ediff) %s vs version: " short-file  dst)))))
+	 (src (egg-read-ref (if dst (format "(ediff) %s's %s vs older version: "
+					    short-file  dst)
+			      (format "(ediff) %s vs version: " short-file)))))
     (egg--ediff-file-revs file dst nil src nil)))
 
 
@@ -9143,6 +9155,10 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
     (when new-rev (egg--add-ediffing-temp-buffers buffer-3))
     (when parent-1 (egg--add-ediffing-temp-buffers buffer-1))
     (when parent-2 (egg--add-ediffing-temp-buffers buffer-2))
+
+    (add-hook 'ediff-before-setup-hook #'egg--ediff-save-windows-config-hook)
+    (add-hook 'ediff-quit-hook #'egg--ediff-restore-windows-config-hook)
+
     (cond ((and (bufferp buffer-1) (bufferp buffer-2) (bufferp buffer-3))
 	   (ediff-buffers3 buffer-2 buffer-1 buffer-3))
 	  ((and (bufferp buffer-1) (bufferp buffer-3))
