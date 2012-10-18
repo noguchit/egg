@@ -574,7 +574,7 @@ will select the window unless prefixed with C-u."
 					   "--ignore-all-space"))))
 		 ))
 
-(defcustom egg-log-buffer-marks "+~.*"
+(defcustom egg-log-buffer-marks "+~.*_@"
   "A vector of 4 characters used for marking commit in the log buffer.
 The first 3 elemements are used to mark a commit for the upcoming interactive rebase.
 The 1st element is used to mark a commit to be picked, the 2nd to be edited and
@@ -582,11 +582,13 @@ the 3rd to be squashed. The 4th element is used to mark a commit as the BASE
 commit."
   :group 'egg
   :type '(radio :tag "Commit Marking Characters" 
-		(const :tag "+ ~ . *" "+~.*")
-		(const :tag "✔ ✎ ↶ ➤" "✔✎↶➤")
-		(const :tag "✔ ✎ ↯ ➤" "✔✎↯➤")
-		(const :tag "✔ ✍ ↶ ➤" "✔✍↶➤")
-		(const :tag "✔ ✍ ↯ ➤" "✔✍↯➤")
+		(const :tag "+ ~ . * >" "+~.*>")
+		(const :tag "✔ ✎ ↶ ➤ ⚒" "✔✎↶➤⚒")
+		(const :tag "✔ ✎ ↯ ➤ ⚒" "✔✎↯➤⚒")
+		(const :tag "✔ ✎ ▼ ● ⚒" "✔✎▼●⚒")
+		(const :tag "✔ ✎ ↯ ● ⚒" "✔✎↯●⚒")
+		(const :tag "✔ ✍ ↶ ➤ ⚒" "✔✍↶➤⚒")
+		(const :tag "✔ ✍ ↯ ➤ ⚒" "✔✍↯➤⚒")
 		(vector :tag "Pick Individual Character"
 			(radio :tag "Pick Mark"
 			       (const :tag "+" ?+)
@@ -624,6 +626,10 @@ commit."
 (defsubst egg-log-buffer-edit-mark () (aref egg-log-buffer-marks 1))
 (defsubst egg-log-buffer-squash-mark () (aref egg-log-buffer-marks 2))
 (defsubst egg-log-buffer-base-mark () (aref egg-log-buffer-marks 3))
+(defsubst egg-log-buffer-fixup-mark () (aref egg-log-buffer-marks 4))
+
+;; (defsubst egg-log-buffer-fixup-mark () (aref egg-log-buffer-marks 4))
+;; (defsubst egg-log-buffer-melt-mark () (aref egg-log-buffer-marks 5))
 
 ;;(string #x2714 #x270d #x21b6 #x27a4)
 ;;(string #x2588)
@@ -659,12 +665,26 @@ The 5th char is the diagonal line from upper-lef to lower-right."
 		(const :tag "█ │ ─ ╱ ╲" "█│─╱╲")
 		(vector :tag "Pick individual character"
 			(radio :tag "Node"
+			       (const :tag "*" ?*)
 			       (const :tag "◉" #x25c9)
 			       (const :tag "○" #x25cb)
 			       (const :tag "●" #x25cf)
 			       (const :tag "■" #x25a0)
 			       (const :tag "□" #x25a1)
-			       (const :tag "█" #x2588)))))
+			       (const :tag "█" #x2588))
+			(radio :tag "Vertical"
+			       (const :tag "|" ?|)
+			       (const :tag "│" ?│))
+			(radio :tag "Horizontal"
+			       (const :tag "-" ?-)
+			       (const :tag "─" ?─))
+			(radio :tag "Lower-Left to Upper-Right"
+			       (const :tag "/" ?/)
+			       (const :tag "╱" ?╱))
+			(radio :tag "Upper-Left to Lower-Right"
+			       (const :tag "\\" ?\\)
+			       (const :tag "╲" ?╲))
+			)))
 
 
 (defcustom egg-dummy-option nil
@@ -838,6 +858,31 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
 					      (re-search-forward "\n" nil t))
 					  (match-beginning 0)
 					(point-max))))))
+
+(defun egg-commit-parents (rev)
+  (let ((default-directory (egg-work-tree-dir))
+	parents)
+    (with-temp-buffer
+      (egg-git-ok t "--no-pager" "cat-file" "-p" rev)
+      (goto-char (point-min))
+      (while (re-search-forward (rx line-start 
+				    "parent " (group (= 40 hex-digit)) 
+				    (0+ space)
+				    line-end) nil t)
+	(add-to-list 'parents (match-string-no-properties 1)))
+      (setq parents (mapcar (lambda (long)
+			      (substring-no-properties long 0 8))
+			    (nreverse parents))))
+    parents))
+
+(defun egg-completing-read-sha1 (from prompt &optional default max-back)
+  (let* ((max-count (or max-back 100))
+	 (sha1-list (egg-git-to-lines "rev-list" "--topo-order"
+				      (format "--max-count=%d" max-count)
+				      "--abbrev-commit" 
+				     from))
+	 (sha1-hist (copy-sequence sha1-list)))
+    (egg-sha1 (completing-read prompt sha1-list nil nil default 'sha1-hist))))
 
 (defsubst egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
@@ -1642,7 +1687,7 @@ this is for rebase -m variant."
         :rebase-head (egg-pretty-short-rev 
 		      (egg-file-as-string (concat rebase-dir "head-name")))
         :rebase-upstream
-        (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
+        (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "onto")))
         :rebase-step (string-to-number (car patch-files))
         :rebase-num (string-to-number (car (nreverse patch-files))))))
 
@@ -1653,7 +1698,7 @@ this is for rebase -m variant."
         :rebase-head
         (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "head-name")))
         :rebase-upstream
-        (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto_name")))
+        (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "onto_name")))
         :rebase-step			;; string-to-number?
         (egg-file-as-string (concat rebase-dir "msgnum"))
         :rebase-num			;; string-to-number?
@@ -1666,7 +1711,7 @@ this is for rebase -i variant."
         :rebase-head
         (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "head-name")))
         :rebase-upstream
-        (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
+        (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "onto")))
         :rebase-num
         (length
          (egg-pick-file-records (concat rebase-dir "git-rebase-todo.backup")
@@ -1875,7 +1920,7 @@ as repo state instead of re-read from disc."
 as repo state instead of re-read from disc."
   (let* ((state (or state (egg-repo-state)))
          (branch (plist-get state :branch)))
-    (or branch (egg-describe-rev (plist-get state :sha1)))))
+    (or branch (egg-pretty-short-rev (plist-get state :sha1)))))
 
 (defsubst egg-branch-or-HEAD () (or (egg-get-symbolic-HEAD) "HEAD"))
 
@@ -4143,10 +4188,11 @@ rebase session."
     (setq action (cdr (assq action '((:skip . "--skip")
                                      (:continue . "--continue")
                                      (:abort . "--abort")))))
-    (egg-do-async-rebase-continue
-     #'egg-handle-rebase-interactive-exit
-     (egg-pick-file-contents (concat (egg-git-rebase-dir) "head") "^.+$")
-     action)))
+    (with-egg-debug-buffer
+      (egg-do-async-rebase-continue
+       #'egg-handle-rebase-interactive-exit
+       (egg-pick-file-contents (concat (egg-git-rebase-dir) "head") "^.+$")
+       action))))
 
 (defun egg-buffer-selective-rebase-continue ()
   "Continue the current rebase session.
@@ -5665,7 +5711,11 @@ perform the indicated rebase action."
   (let ((pre-merge (egg-get-current-sha1))
         cmd-res modified-files feed-back old-choices)
     (with-egg-debug-buffer
-      (erase-buffer)
+
+      (unless (eq upstream-or-action :abort) ;; keep for debugging
+	(erase-buffer))
+
+
       ;; (when (and (stringp upstream-or-action) ;; start a rebase
       ;;            (eq old-base t))	      ;; ask for old-base
       ;;   (unless (egg-git-ok (current-buffer) "rev-list"
@@ -6380,6 +6430,17 @@ Jump to line LINE if it's not nil."
 ;;;========================================================
 ;;; log browsing
 ;;;========================================================
+(defun egg-log-buffer-get-commit-pos (commit &optional beg end)
+  (let* ((sha1 (egg-sha1 commit))
+	 (beg (or beg (point-min)))
+	 (end (or end (point-max)))
+	 (pos beg))
+    (while (and pos (not (equal (get-text-property pos :commit) sha1)))
+	(setq pos (next-single-property-change pos :commit nil end))
+	(unless (< pos end)
+	  (setq pos nil)))
+    pos))
+
 (defvar egg-log-buffer-comment-column nil)
 (defvar egg-internal-log-buffer-closure nil)
 
@@ -6408,11 +6469,29 @@ Jump to line LINE if it's not nil."
   (let* ((ref-info (get-text-property pos :ref))
 	 (reflog (unless ref-info (get-text-property pos :reflog)))
 	 (ref-type (and (cdr ref-info)))
+	 (mark (get-text-property pos :mark))
+	 (append-to (get-text-property pos :append-to))
+	 (followed-by (get-text-property pos :followed-by))
 	 (reflog-time (and reflog (get-text-property pos :time))))
-    (if ref-info
+    (if (or ref-info mark)
 	(cond ((eq ref-type :head) (egg-show-branch (car ref-info)))
 	      ((eq ref-type :tag) (egg-show-atag (car ref-info)))
 	      ((eq ref-type :remote) (egg-show-remote-branch (car ref-info)))
+	      (mark
+	       (setq append-to (and append-to (egg-pretty-short-rev append-to)))
+	       (setq followed-by (and followed-by (egg-pretty-short-rev followed-by)))
+	       (message "marked to be %s%s in the upcoming interactive rebase"
+			(cond ((eq mark (egg-log-buffer-pick-mark)) "picked")
+			      ((eq mark (egg-log-buffer-edit-mark)) "edited")
+			      ((eq mark (egg-log-buffer-squash-mark)) "squashed")
+			      ((eq mark (egg-log-buffer-fixup-mark)) "absorbed")
+			      (t (error "unknow mark: %s" mark)))
+			(cond ((and append-to followed-by)
+			       (format " into %s and to be followed by %s" 
+				       append-to followed-by))
+			      (append-to (format " into %s" append-to))
+			      (followed-by (format " and followed by %s" followed-by))
+			      (t ""))))
 	      (t nil))
       (when reflog
 	(setq reflog (substring-no-properties reflog))
@@ -6460,6 +6539,8 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "+") 'egg-log-buffer-mark-pick)
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
+    (define-key map (kbd "_") 'egg-log-buffer-mark-fixup)
+    (define-key map (kbd "@") 'egg-log-buffer-mark-melt)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
     (define-key map (kbd "DEL") 'egg-log-buffer-unmark)
 
@@ -6951,7 +7032,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                 (/= (get-text-property pos :mark) mark-char)))
     pos))
 
-(defun egg-log-buffer-do-mark (pos char &optional unmark remove-first)
+(defun egg-log-buffer-do-mark (pos char &optional unmark remove-first &rest extra-properties)
   (let ((commit (get-text-property pos :commit))
         (inhibit-read-only t)
         (col (- egg-log-buffer-comment-column 10))
@@ -6959,16 +7040,18 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (when commit
       (when remove-first
         (egg-log-buffer-do-remove-mark char))
+      (goto-char pos)
       (move-to-column col)
       (funcall (if unmark
                    #'remove-text-properties
                  #'add-text-properties)
                (point) (1+ (point))
-               (list :mark char
-                     'display
-                     (and char
-                          (egg-text (char-to-string char)
-                                    'egg-log-buffer-mark))))
+               (nconc (list :mark char
+			    'display
+			    (and char
+				 (egg-text (char-to-string char)
+					   'egg-log-buffer-mark)))
+		      extra-properties))
       (forward-line step)
       (while (not (or (get-text-property (point) :commit)
                       (eobp) (bobp)))
@@ -6979,17 +7062,90 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (interactive "d")
   (egg-log-buffer-do-mark pos (egg-log-buffer-base-mark) nil t))
 
-(defun egg-log-buffer-mark-pick (pos)
-  (interactive "d")
-  (egg-log-buffer-do-mark pos (egg-log-buffer-pick-mark)))
+(defun egg-log-buffer-do-mark-append (pos mark prompt-fmt error-fmt &optional exclusive)
+  (let* ((commit (egg-commit-at-point pos))
+	 (pretty (egg-pretty-short-rev commit))
+	 (parent (car (egg-commit-parents commit)))
+	 leader pretty-leader other leader-pos 
+	 leader-mark must-mark-leader leader-leader)
+    (unless (setq leader (egg-completing-read-sha1 
+			  commit (format prompt-fmt pretty) parent))
+      (error error-fmt pretty))
+    (setq pretty-leader (egg-pretty-short-rev leader))
+    (unless (setq leader-pos (egg-log-buffer-get-commit-pos leader))
+      (error "Can't find %s in buffer, please configure egg to display more commits"
+	     leader))
+    (when (functionp mark)
+      (setq mark (funcall mark commit leader)))
+    (setq leader-pos (+ leader-pos egg-log-buffer-comment-column -10))
+    (setq leader-mark (get-text-property leader-pos :mark))
+    (unless leader-mark
+      (when (y-or-n-p (format "should %s be picked as well? " pretty-leader))
+	(setq must-mark-leader t
+	      leader-mark (egg-log-buffer-pick-mark))))
+    (setq other (get-text-property leader-pos :followed-by))
+    (setq leader-leader (get-text-property leader-pos :append-to))
+    (when exclusive
+      (if (and other
+	       (not (y-or-n-p 
+		     (format "%s is already exclusively followed by %s! replace it with %s? "
+			     pretty-leader other pretty))))
+	  (setq exclusive nil)
+	(setq must-mark-leader t
+	      leader-mark (egg-log-buffer-pick-mark))))
+    (when must-mark-leader
+      (egg-log-buffer-do-mark leader-pos leader-mark nil nil
+			      :followed-by (and exclusive commit)
+			      :append-to leader-leader))
+    (egg-log-buffer-do-mark pos mark nil nil :append-to leader)))
 
-(defun egg-log-buffer-mark-squash (pos)
-  (interactive "d")
-  (egg-log-buffer-do-mark pos (egg-log-buffer-squash-mark)))
 
-(defun egg-log-buffer-mark-edit (pos)
+(defun egg-log-buffer-mark-pick (pos &optional append-to) 
+  (interactive "d\nP")
+  (if append-to
+      (egg-log-buffer-do-mark-append pos (egg-log-buffer-pick-mark)
+				     "reorder %s to follow: "
+				     "Need a commit for %s to follow!" t)
+    (egg-log-buffer-do-mark pos (egg-log-buffer-pick-mark))))
+
+(defun egg-log-buffer-mark-squash (pos &optional append-to)
+  (interactive "d\nP")
+  (if append-to
+      (egg-log-buffer-do-mark-append 
+       pos (lambda (commit leader)
+	     (if (y-or-n-p (format "keep %s's message (merge into %s's message)? "
+				   (egg-pretty-short-rev commit)
+				   (egg-pretty-short-rev leader)))
+		 (egg-log-buffer-squash-mark)
+	       (egg-log-buffer-fixup-mark)))
+       "squash %s into: "
+       "Need a commit to squash %s into!")
+    (egg-log-buffer-do-mark pos (egg-log-buffer-squash-mark))))
+
+(defun egg-log-buffer-mark-edit (pos &optional append-to)
+  (interactive "d\nP")
+  (if append-to
+      (egg-log-buffer-do-mark-append pos (egg-log-buffer-edit-mark)
+				     "reorder %s to follow: "
+				     "Need a commit for %s to follow!" t)
+    (egg-log-buffer-do-mark pos (egg-log-buffer-edit-mark))))
+
+(defun egg-log-buffer-mark-append-old (pos)
   (interactive "d")
-  (egg-log-buffer-do-mark pos (egg-log-buffer-edit-mark)))
+  (let* ((commit (egg-commit-at-point pos))
+	 (pretty (egg-pretty-short-rev commit))
+	 (parent (car (egg-commit-parents commit)))
+	 leader pos)
+    (unless (setq leader (egg-completing-read-sha1 commit (format "append commit %s to: " pretty) parent))
+      (error "Need a valid commit to append %s to!" pretty))
+    (unless (setq pos (egg-log-buffer-get-commit-pos leader))
+      (error "Can't find %s in buffer, please configure egg to display more commits" leader))
+    (save-excursion
+      (goto-char (+ pos egg-log-buffer-comment-column -10))
+      (unless (get-text-property (point) :mark)
+	(when (y-or-n-p (format "should %s be picked as well? " leader))
+	  (egg-log-buffer-do-mark (point) (egg-log-buffer-pick-mark)))))
+    (egg-log-buffer-do-mark pos (egg-log-buffer-append-mark) nil nil :append-to leader)))
 
 (defun egg-log-buffer-do-unmark-all ()
   (interactive)
@@ -6997,7 +7153,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
         (inhibit-read-only t))
     (while (setq pos (next-single-property-change (1+ pos) :mark))
       (remove-text-properties pos (1+ pos)
-                              (list :mark nil 'display nil)))))
+                              (list :mark nil 'display nil 
+				    :append-to nil :followed-by nil)))))
 
 (defun egg-log-buffer-unmark (pos &optional all)
   (interactive "d\nP")
@@ -7018,9 +7175,40 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 			 (point) (line-end-position)))
 	  (setq alist (cons (list (get-text-property pos :commit)
 				  (get-text-property pos :mark)
-				  subject marker)
+				  subject marker
+				  (get-text-property pos :append-to))
 			    alist)))))
     alist))
+
+(defun egg-log-buffer-get-rebase-marked-alist ()
+  (let ((marked-alist 
+	 (nreverse 
+	  (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
+					   (egg-log-buffer-squash-mark)
+					   (egg-log-buffer-edit-mark)
+					   (egg-log-buffer-fixup-mark))))
+	add-func ordered-list follow-alist leader commit info)
+    (setq add-func
+	  (lambda (commit-info)
+	    (dolist (follower-followee follow-alist)
+	      (let ((follower (car follower-followee))
+		    (followee (cdr follower-followee)))
+		(when (equal follower (car commit-info))
+		  (setcar follower-followee nil)
+		  (setcdr follower-followee nil)
+		  (funcall add-func followee))))
+	    (add-to-list 'ordered-list commit-info)))
+    (dolist (item marked-alist)
+      (setq leader (nth 4 item))
+      (setq commit (nth 0 item))
+      (setq info (list commit (nth 1 item) (nth 2 item))) ;; commit/mark/subject
+      (cond ((null leader)
+	     (funcall add-func info))
+	    ((assoc leader ordered-list)
+	     (error "Cannot squash commit %s to following commit %s!"
+		    (egg-pretty-short-rev commit) (egg-pretty-short-rev leader)))
+	    (t (add-to-list 'follow-alist (cons leader info) t))))
+    ordered-list))
 
 
 (defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
@@ -7069,18 +7257,28 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (dolist (rev-info commit-alist)
         (insert (cond ((eq (nth 1 rev-info) (egg-log-buffer-pick-mark)) "pick")
                       ((eq (nth 1 rev-info) (egg-log-buffer-squash-mark)) "squash")
+                      ((eq (nth 1 rev-info) (egg-log-buffer-fixup-mark)) "fixup")
                       ((eq (nth 1 rev-info) (egg-log-buffer-edit-mark)) "edit"))
                 " " (nth 0 rev-info) " " (nth 2 rev-info) "\n"))
       (write-region (point-min) (point-max)
                     (concat rebase-dir "git-rebase-todo"))
       (write-region (point-min) (point-max)
-                    (concat rebase-dir "git-rebase-todo.backup")))
+                    (concat rebase-dir "git-rebase-todo.backup"))
+      (write-region (point-min) (point-max)
+                    (concat (egg-work-tree-dir) "egg-rebase-todo.txt")))
 
     (setenv "GIT_REFLOG_ACTION" (format "rebase -i (%s)" onto))
     (with-egg-debug-buffer
       (erase-buffer)
+      ;; debug
+      (insert "upstream: " upstream "\n")
+      (insert "onto: " onto "\n")
+      (insert "orig-head: " orig-head-sha1 "\n")
+      (insert (plist-get repo-state :head) "\n")
+      
       (egg-git-ok nil "update-ref" "ORIG_HEAD" orig-head-sha1)
       (egg-git-ok nil "checkout" onto)
+
       (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
                                     orig-head-sha1))))
 
@@ -7096,45 +7294,88 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
      #'egg-handle-rebase-interactive-exit
      orig-sha1)))
 
+
+(defun egg-search-for-regexps (re-value-alist)
+  (let (line item re value)
+    (save-match-data
+      (while re-value-alist
+	(setq item (car re-value-alist)
+	      re-value-alist (cdr re-value-alist)
+	      re (car item))
+	(when (re-search-forward re nil t)
+	  (setq line (buffer-substring-no-properties (line-beginning-position)
+						     (line-end-position)))
+	  (setq value (cdr item))
+	  (setq re-value-alist nil))))
+    (if (stringp line)
+	(cons value line)
+      nil)))
+
+
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
   (let ((exit-msg egg-async-exit-msg)
+	(debug-rebase-msg (buffer-string))
         (proc egg-async-process)
 	(case-fold-search nil)
-        state buffer res msg rebase-dir)
-    (goto-char (point-min))
-    (save-match-data
-      (re-search-forward
-       (eval-when-compile
-         (concat "\\<\\(?:"
-                 "\\(please commit in egg.+$\\)"                             "\\|" ;; 1
-                 "\\(Successfully rebased and updated.+$\\)"  		     "\\|" ;; 2
-                 "\\(You can amend the commit now\\)" 	     		     "\\|" ;; 3
-                 "\\(Automatic cherry-pick failed\\)"	     		     "\\|" ;; 4
-                 "\\(nothing added to commit\\)"	             	     "\\|" ;; 5
-                 "\\(nothing to commit (working directory clean)\\)"	     "\\|" ;; 6
-                 "\\(If you wish to commit it anyway\\)"     		     "\\|" ;; 7
-		 "\\(When you have resolved this problem\\)"		     "\\|" ;; 8
-                 "\\(\\(?:Cannot\\|Could not\\).+\\)" "\\)")) nil t)
-      (setq msg (match-string-no-properties 0))
-      (setq res (cond ((match-beginning 1) :rebase-commit)
-                      ((match-beginning 2) :rebase-done)
-                      ((match-beginning 3) :rebase-edit)
-                      ((match-beginning 4) :rebase-conflict)
-                      ((match-beginning 5) :rebase-empty)
-                      ((match-beginning 6) :rebase-empty)
-                      ((match-beginning 7) :rebase-empty)
-                      ((match-beginning 8) :rebase-conflict)
-                      ((match-beginning 9) :rebase-fail))))
+	(output-buffer (current-buffer))
+        state buffer res msg rebase-dir match-code-line)
+
+    (setq match-code-line
+	  (egg-search-for-regexps
+	   '(("error: could not apply" .			:rebase-conflict)
+	     ("When you have resolved this problem" .		:rebase-conflict)
+	     ("Automatic cherry-pick failed" .			:rebase-conflict)
+	     ("Successfully rebased and updated" .		:rebase-done)
+	     ("You can amend the commit now" .			:rebase-edit)
+	     ("nothing added to commit" .			:rebase-empty)
+	     ("nothing to commit (working directory clean)" .	:rebase-empty)
+	     ("If you wish to commit it anyway" .		:rebase-empty)
+	     ("Could not commit staged changes" .		:rebase-resolved)
+	     ("You have uncommitted changes" .			:rebase-commit)
+	     ("You have staged changes in your working tree" .	:rebase-commit)
+	     ("Could not apply" .				:rebase-squash)
+	     ("please commit in egg" .				:rebase-commit)
+	     (": needs merge" .					:rebase-unmerged-file)
+	     ("You must edit all merge conflicts" .		:rebase-unresolved)
+	     ("\\(?:Cannot\\|Could not\\)" .			:rebase-fail)
+	     )))
+
+    (setq res (car match-code-line) msg (cdr match-code-line))
     (setq buffer (process-get proc :orig-buffer))
-    (with-current-buffer buffer
+    
+    (with-egg-debug-buffer
       (egg-run-buffers-update-hook)
       (egg-revert-all-visited-files) ;; too heavy ???
       (setq state (egg-repo-state :force))
       (setq rebase-dir (plist-get state :rebase-dir))
+
+      ;; debug
+      (goto-char (point-max))
+      (insert "ASYNC-REBASE-MSG-BEGIN (" (symbol-name res) "):\n" 
+	      debug-rebase-msg
+	      "ASYNC-REBASE-MSG-END:\n")
+
+      (when (eq res :rebase-resolved)
+	(setq res (if (file-exists-p (concat (egg-git-rebase-dir) "amend"))
+		      :rebase-amend :rebase-commit)))
+
       (cond ((eq res :rebase-done)
              (message "GIT-REBASE-INTERACTIVE: %s" msg))
 
-            ((eq res :rebase-commit)
+	    ((null res)
+             (message "EGG got confused by rebase's output")
+	     (pop-to-buffer output-buffer))
+
+	    ((eq res :rebase-unresolved)
+             (message "GIT-REBASE-INTERACTIVE: merge conflict(s) needs to be resolved an staged!"))
+	    ((eq res :rebase-unmerged-file)
+	     (let (file)
+	       (save-match-data
+	       	 (string-match "\\`\\([^:]+\\): needs merge" msg)
+	       	 (setq file (match-string 1 msg)))
+	       (message "GIT-REBASE-INTERACTIVE> merge %s before continue with rebase" file)))
+
+            ((memq res '(:rebase-commit :rebase-amend))
              (egg-commit-log-edit
               (let* ((cherry (plist-get state :rebase-cherry))
                      (cherry-op (save-match-data
@@ -7143,13 +7384,32 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                  (egg-text "Rebasing " 'egg-text-3)
                  (egg-text (plist-get state :rebase-head) 'egg-branch)
                  ": "
-                 (egg-text (concat "Commit " cherry-op "ed cherry")
+                 (egg-text (concat (if (eq res :rebase-commit) "Commit " "Amend ")
+				   cherry-op "ed cherry")
                            'egg-text-3)))
               (egg-log-msg-mk-closure-input #'egg-sentinel-commit-n-continue-rebase
-					    rebase-dir buffer orig-sha1 #'egg-log-msg-commit)
+					    rebase-dir buffer orig-sha1
+					    (if (eq res :rebase-commit) 
+						#'egg-log-msg-commit
+					      #'egg-log-msg-amend-commit))
               (egg-file-as-string (concat rebase-dir "message")))
 
 	     (message "please commit the changes to continue with rebase."))
+
+	    ((eq res :rebase-squash)
+             (egg-commit-log-edit
+              (let* ((cherry (plist-get state :rebase-cherry))
+                     (cherry-op (save-match-data (car (split-string cherry)))))
+		(concat 
+		 (egg-text "Rebasing " 'egg-text-3)
+		 (egg-text (plist-get state :rebase-head) 'egg-branch) ": "
+		 (egg-text (concat "Merge " cherry-op "ed cherry into last commit")
+			   'egg-text-3)))
+	      (egg-log-msg-mk-closure-input #'egg-sentinel-commit-n-continue-rebase
+					    rebase-dir buffer orig-sha1 
+					    #'egg-log-msg-amend-commit)
+              (egg-file-as-string (concat rebase-dir "message")))
+	     (message "please edit the combined message and commit the changes to continue with rebase."))
 
 
             ((eq res :rebase-edit)
@@ -7171,7 +7431,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
             ((eq res :rebase-empty)
              (egg-status nil t :sentinel)
              (ding)
-             (message "automatic rebase stopped! this commit should be skipped!"))
+             (message "automatic rebase stopped! this empty commit should be skipped!"))
             ((eq res :rebase-fail)
              (egg-status nil t :sentinel)
              (ding)
@@ -7259,14 +7519,16 @@ The commit at POS is the where the chain of marked commits will rebased onto."
   (let* ((state (egg-repo-state :staged :unstaged))
          (rebase-dir (concat (plist-get state :gitdir) "/"
                              egg-git-rebase-subdir "/"))
-         (todo-alist (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
-						      (egg-log-buffer-squash-mark)
-						      (egg-log-buffer-edit-mark)))
+         (todo-alist (egg-log-buffer-get-rebase-marked-alist))
          (commits (mapcar 'car todo-alist))
 	 (r-commits (reverse commits))
          (upstream (egg-commit-at pos))
          (all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick"
                                 (concat upstream "..HEAD"))))
+
+    (unless (consp commits)
+      (error "No commit selected! must select atleast one commit to rebase!"))
+
     (unless (egg-repo-clean state)
       (error "repo %s is not clean" (plist-get state :gitdir)))
     (mapc (lambda (commit)
@@ -7275,18 +7537,7 @@ The commit at POS is the where the chain of marked commits will rebased onto."
                      commit upstream)))
           commits)
 
-;;    (unless (equal sha1 (car r-commits)) (error "HEAD (%s) was not marked!" sha1))
-
-    (setq all (egg-git-to-lines "rev-list" "--reverse" "--cherry-pick" (concat (car commits) "^..HEAD")))
-
-    (mapc (lambda (commit)
-            (unless (member commit commits)
-              (error "unmarked commit %s between %s and HEAD."
-                     commit (car commits))))
-          all)
-    
-    (egg-setup-rebase-interactive rebase-dir upstream nil
-                                  state todo-alist)
+    (egg-setup-rebase-interactive rebase-dir upstream nil state todo-alist)
     (egg-status nil t)))
 
 (defun egg-log-buffer-checkout-commit (pos &optional force)
@@ -7316,7 +7567,7 @@ With prefix, the tag will be gpg-signed."
   (interactive "d\np")
   (let* ((commit (get-text-property pos :commit))
 	 (name (read-string (format "create annotated tag on %s with name: "
-				    (egg-describe-rev commit))))
+				    (egg-pretty-short-rev commit))))
 	 (gpg-uid (cond ((> sign-tag 15) t) ;; use default gpg uid
 			((> sign-tag 3)	    ;; sign the tag
 			 (read-string (format "sign tag '%s' with gpg key uid: " name)
@@ -7721,6 +7972,32 @@ prompt for a remote repo."
 					       'face 'egg-diff-file-header))
 		(cons file files))))))
 
+(defcustom egg-commit-box-chars "-|++"
+  "horz line, vert line, up-left corner and low-left corner"
+  :group 'egg
+  :type '(radio :tag "Commit Box Characters"
+		(const :tag "- | + +" "-|++")
+		(vector :tag "Pick individual character"
+			(radio :tag "line"
+			       (const :tag "■" #x25a0)
+			       (const :tag "□" #x25a1)
+			       (const :tag "█" #x2588)))))
+
+(defun egg-log-buffer-box-inserted-commit (beg end)
+  (save-excursion
+    (let ((inhibit-read-only t))
+      (goto-char beg)
+      (insert (aref egg-commit-box-chars 2)
+	      (make-string 100 (aref egg-commit-box-chars 0))
+	      "\n")
+      (while (< (point) end)
+	(forward-line 1)
+	(insert (aref egg-commit-box-chars 1) " "))
+      (forward-line 1)
+      (insert (aref egg-commit-box-chars 3)
+	      (make-string 100 (aref egg-commit-box-chars 0))
+	      "\n"))))
+
 (defun egg-log-buffer-do-insert-commit (pos &optional args highlight-regexp path-args)
   (save-excursion
     (let ((sha1 (get-text-property pos :commit))
@@ -7796,6 +8073,7 @@ prompt for a remote repo."
 
       (when (stringp highlight-regexp)
 	(egg-buffer-highlight-pickaxe highlight-regexp diff-beg diff-end is-cc-diff))
+      ;;(egg-log-buffer-box-inserted-commit beg diff-end)
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
@@ -8966,23 +9244,50 @@ of at least one."
 ;;; reflog
 ;;;========================================================
 
-
-(defun egg-reflog (branch)
+(defun egg-reflog (ref &optional prefix)
   "Show commit DAG of BRANCH and its reflogs.
 This is just an alternative way to launch `egg-log'"
-  (interactive (let ((head-name (egg-branch-or-HEAD)))
-		 (list (if current-prefix-arg
-			   (egg-read-ref "show history of ref: " head-name)
-                       head-name))))
-  (egg-log branch))
+  (interactive (list (egg-branch-or-HEAD) (prefix-numeric-value current-prefix-arg)))
+  (let ((head-name (egg-branch-or-HEAD)))
+    (egg-log 
+     (delq nil
+	   (cond ((> prefix 15) 
+		  (setq ref (egg-read-ref "show history of ref: " ref))
+		  (list ref
+			(unless (equal head-name ref)
+			  (when (and (y-or-n-p 
+				      (format "combine %s's history with %s? " 
+					      ref head-name)))
+			    head-name))))
+		 ((> prefix 3) 
+		  (setq ref (egg-read-ref "show history of ref: " ref))
+		  (list ref (unless (equal head-name ref) head-name)))
+		 (t (list ref)))))))
 
-(defun egg-log-buffer-reflog-ref (pos &optional no-ask)
+(defun egg-reflog-old (branch &optional branch2)
+  "Show commit DAG of BRANCH and its reflogs.
+This is just an alternative way to launch `egg-log'"
+  (interactive (let ((head-name (egg-branch-or-HEAD))
+		     (prefix (prefix-numeric-value current-prefix-arg))
+		     ref)
+		 (cond ((> prefix 15) 
+			(setq ref (egg-read-ref "show history of ref: " head-name))
+			(list ref
+			      (unless (equal head-name ref)
+				(when (and (y-or-n-p 
+					    (format "combine %s's history with %s? " 
+						    ref head-name)))
+				  head-name))))
+		       ((> prefix 3) 
+			(setq ref (egg-read-ref "show history of ref: " head-name))
+			(list ref (unless (equal head-name ref) head-name)))
+		       (t (list head-name)))))
+  (egg-log (delete nil (list branch branch2))))
+
+(defun egg-log-buffer-reflog-ref (pos &optional prefix)
   "Show reflogs for the ref at POS"
-  (interactive "d\nP")
-  (let ((ref (egg-ref-at-point)))
-    (egg-reflog (if (and no-ask ref)
-		    ref
-		  (egg-read-ref "show history of ref: " ref)))))
+  (interactive "d\np")
+  (egg-reflog (egg-ref-at-point) prefix))
 
 ;;;========================================================
 ;;; stash
@@ -9120,7 +9425,7 @@ if INCLUDE-UNTRACKED is non-nil."
          (default-directory (egg-work-tree-dir git-dir))
          (buf (egg-get-tag:msg-buffer 'create))
          (commit (egg-git-to-string "rev-parse" "--verify" commit-1))
-         (pretty (egg-describe-rev commit))
+         (pretty (egg-pretty-short-rev commit))
          (inhibit-read-only inhibit-read-only)
 	 text-beg text-end)
     (or commit (error "Bad commit: %s" commit-1))
@@ -9342,20 +9647,23 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
 	  (t (error "internal error: something wrong")))))
 
 (defun egg--commit-do-ediff-file-revs (commit file)
-  (let* ((default-directory (egg-work-tree-dir))
-	 parents)
-    (with-temp-buffer
-      (egg-git-ok t "--no-pager" "cat-file" "-p" commit)
-      (goto-char (point-min))
-      (while (re-search-forward (rx line-start 
-				    "parent " (group (= 40 hex-digit)) 
-				    (0+ space)
-				    line-end) nil t)
-	(add-to-list 'parents (match-string-no-properties 1)))
-      (setq parents (mapcar (lambda (long)
-			      (substring-no-properties long 0 8))
-			    (nreverse parents)))
-      (egg--ediff-file-revs file commit nil (car parents) nil (cadr parents) nil))))
+  (let ((parents (egg-commit-parents commit)))
+    (egg--ediff-file-revs file commit nil (car parents) nil (cadr parents) nil))
+  ;; (let* ((default-directory (egg-work-tree-dir))
+  ;; 	 parents)
+  ;;   (with-temp-buffer
+  ;;     (egg-git-ok t "--no-pager" "cat-file" "-p" commit)
+  ;;     (goto-char (point-min))
+  ;;     (while (re-search-forward (rx line-start 
+  ;; 				    "parent " (group (= 40 hex-digit)) 
+  ;; 				    (0+ space)
+  ;; 				    line-end) nil t)
+  ;; 	(add-to-list 'parents (match-string-no-properties 1)))
+  ;;     (setq parents (mapcar (lambda (long)
+  ;; 			      (substring-no-properties long 0 8))
+  ;; 			    (nreverse parents)))
+  ;;     (egg--ediff-file-revs file commit nil (car parents) nil (cadr parents) nil)))
+  )
 
 (defun egg--diff-do-ediff-file-revs (diff-info file)
   (let ((default-directory (egg-work-tree-dir))
