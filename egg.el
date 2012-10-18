@@ -1180,7 +1180,7 @@ END-RE is the regexp to match the end of a record."
 
 (defun egg-pretty-short-rev (rev)
   (let ((rev (egg-name-rev rev))
-	(short-sha (substring (egg-git-to-string "rev-parse" rev) 0 8)))
+	(short-sha (and rev (substring (egg-git-to-string "rev-parse" rev) 0 8))))
     (save-match-data
       (when (string-match "\\`\\(remotes\\|tags\\)/" rev)
 	(setq rev (substring rev (match-end 0)))))
@@ -1331,6 +1331,8 @@ The string is built based on the current state STATE."
                                 "(rebasing)")
                                ((plist-get state :merge-heads)
                                 "(merging)")
+			       ((plist-get state :squash-head)
+                                "(squashing)")
                                ((plist-get state :branch)
                                 (plist-get state :branch))
                                (t "(detached)")))))
@@ -1598,7 +1600,8 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 this is for rebase -m variant."
   (let ((patch-files (directory-files rebase-dir nil "\\`[0-9]+\\'")))
     (list :rebase-dir rebase-dir
-        :rebase-head (egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
+        :rebase-head (egg-pretty-short-rev 
+		      (egg-file-as-string (concat rebase-dir "head-name")))
         :rebase-upstream
         (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
         :rebase-step (string-to-number (car patch-files))
@@ -1609,7 +1612,7 @@ this is for rebase -m variant."
 this is for rebase -m variant."
   (list :rebase-dir rebase-dir
         :rebase-head
-        (egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
+        (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "head-name")))
         :rebase-upstream
         (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto_name")))
         :rebase-step			;; string-to-number?
@@ -1622,7 +1625,7 @@ this is for rebase -m variant."
 this is for rebase -i variant."
   (list :rebase-dir rebase-dir
         :rebase-head
-        (egg-name-rev (egg-file-as-string (concat rebase-dir "head-name")))
+        (egg-pretty-short-rev (egg-file-as-string (concat rebase-dir "head-name")))
         :rebase-upstream
         (egg-describe-rev (egg-file-as-string (concat rebase-dir "onto")))
         :rebase-num
@@ -1679,13 +1682,19 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
   (let* ((git-dir (egg-git-dir (memq :error-if-not-git extras)))
          (head-file (concat git-dir "/HEAD"))
          (merge-file (concat git-dir "/MERGE_HEAD"))
+	 (squash-file (concat git-dir "/SQUASH_MSG"))
          (branch (egg-get-symbolic-HEAD head-file))
          (branch-full-name (egg-get-full-symbolic-HEAD head-file))
          (sha1 (egg-get-current-sha1))
          (merge-heads
-          (mapcar 'egg-name-rev
+          (mapcar 'egg-pretty-short-rev
                   (if (file-readable-p merge-file)
                       (egg-pick-file-records merge-file "^" "$"))))
+	 (squash-head (when (file-readable-p squash-file)
+			(egg-pick-file-contents squash-file (rx line-start "commit " 
+								(group (= 40 hex-digit))
+								line-end)
+						1)))
 	 (rebase-apply (if (file-directory-p (concat git-dir "/rebase-apply"))
 			   (concat git-dir "/rebase-apply/")))
          (rebase-dir
@@ -1706,6 +1715,7 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
                              :head branch-full-name
                              :branch branch
                              :sha1 sha1
+			     :squash-head (and squash-head (egg-pretty-short-rev squash-head))
                              :merge-heads merge-heads)
                        rebase-state))
          files)
@@ -1751,12 +1761,18 @@ use STATE as repo state if it was not nil. Otherwise re-read the repo state."
   (and
    (null (plist-get state :rebase-num))
    (null (plist-get state :merge-heads))
+   (null (plist-get state :squash-head))
    (not (if (memq :unstaged state)
             (plist-get state :unstaged)
           (egg-wdir-clean)))
    (not (if (memq :staged state)
             (plist-get state :staged)
           (egg-index-empty)))))
+
+(defsubst egg-is-merging (state)
+  (or (plist-get state :merge-heads)
+      (plist-get state :rebase-dir)
+      (plist-get state :squash-head)))
 
 (defun egg-wdir-dirty () (plist-get (egg-repo-state :unstaged) :unstaged))
 (defun egg-staged-changes () (plist-get (egg-repo-state :staged) :staged))
@@ -1797,14 +1813,19 @@ as repo state instead of re-read from disc."
          (branch (plist-get state :branch))
          (merge-heads (plist-get state :merge-heads))
          (rebase-head (plist-get state :rebase-head))
+         (squash-head (plist-get state :squash-head))
          (rebase-upstream (plist-get state :rebase-upstream))
          (sha1 (plist-get state :sha1)))
     (cond ((and branch merge-heads)
            (concat "Merging to " branch " from: "
                    (mapconcat 'identity merge-heads ",")))
           (merge-heads
-           (concat "Merging to " (egg-name-rev sha1) " from: "
+           (concat "Merging to " (egg-pretty-short-rev sha1) " from: "
                    (mapconcat 'identity merge-heads ",")))
+	  ((and branch squash-head)
+           (concat "Squashed " squash-head " onto " branch))
+          (squash-head
+           (concat "Squashed " squash-head "  onto " (egg-pretty-short-rev sha1)))
           ((and rebase-head rebase-upstream)
            (format "Rebasing %s onto %s" rebase-head rebase-upstream))
           (branch branch)
@@ -4942,6 +4963,7 @@ See `egg-buffer-hide-help-on-start'."
 If INIT was not nil, then perform 1st-time initializations as well."
   (with-current-buffer buf
     (let ((inhibit-read-only t)
+	  (state (egg-repo-state))
           (win (get-buffer-window buf)))
       ;; Emacs tries to be too smart, if we erase and re-fill the buffer
       ;; that is currently being displayed in the other window,
@@ -4955,8 +4977,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (erase-buffer)
         (dolist (sect egg-status-buffer-sections)
           (cond ((eq sect 'repo) (egg-sb-insert-repo-section))
-                ((eq sect 'unstaged) (egg-sb-insert-unstaged-section "Unstaged Changes:"))
-                ((eq sect 'staged) (egg-sb-insert-staged-section "Staged Changes:"))
+                ((eq sect 'unstaged) 
+		 (egg-sb-insert-unstaged-section (if (egg-is-merging state)
+						     "Unmerged Changes:"
+						   "Unstaged Changes:")))
+                ((eq sect 'staged) (egg-sb-insert-staged-section 
+				    (if (egg-is-merging state)
+					"Merged Changes"
+				      "Staged Changes:")))
                 ((eq sect 'untracked) (egg-sb-insert-untracked-section))
 		((eq sect 'stash) (egg-sb-insert-stash-section))))
         (egg-calculate-hunk-ranges)
@@ -5316,8 +5344,7 @@ If the file was a newly created file, it will be removed from the index.
 If the file was added after a merge resolution, it will reverted back to
 conflicted state. Otherwise, its stage will be reset to HEAD."
   (interactive "d")
-  (let ((is-merging (or (plist-get (egg-repo-state) :merge-heads)
-			(plist-get (egg-repo-state) :rebase-dir)))
+  (let ((is-merging (egg-is-merging (egg-repo-state)))
 	(diff-info (get-text-property pos :diff))
 	file newfile)
     (setq newfile (memq 'newfile diff-info)
@@ -7906,7 +7933,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
           ((stringp commit)
            (concat prefix " Commit: "
                    (file-name-nondirectory
-                    (egg-name-rev commit))))
+                    (egg-pretty-short-rev commit))))
           (t "No Commit Here"))))
 
 (defun egg-log-commit-mouse-menu-heading (&optional prefix)
