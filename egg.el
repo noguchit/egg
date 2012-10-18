@@ -989,6 +989,45 @@ if BUF was nil then use current-buffer"
                       'split-string
                       (egg-git-to-lines "ls-files" "--full-name" "-u")))))))
 
+(defun egg--get-status-code ()
+  (let ((lines (egg-git-to-lines "status" "--porcelain" "--untracked-files=no"))
+	alist code index dir status)
+    (dolist (line lines)
+      (setq code (substring line 0 2))
+      (setq index (aref code 0)
+	    dir (aref code 1))
+      (setq status nil)
+
+      (cond ((and (= dir ? ) (memq index '(?M ?A ?R ?C))) 
+	     (add-to-list 'status :wdir-index))
+	    ((and (= dir ?M) (memq index '(?M ?A ?R ?C ? ))) 
+	     (add-to-list 'status :wdir-modified))
+	    ((= dir ?D)
+	     (if (memq index '(?M ?A ?R ?C ? ))
+		 (add-to-list 'status :wdir-deleted)
+	       (add-to-list 'status :unmerged)
+	       (cond ((= index ?D) (add-to-list 'status :both-deleted))
+		     ((= index ?U) (add-to-list 'status :they-deleted)))))
+	    ((= dir ?U)
+	     (add-to-list 'status :unmerged)
+	     (cond ((= index ?A) (add-to-list 'status :we-added))
+		   ((= index ?D) (add-to-list 'status :we-deleted))
+		   ((= index ?U) (add-to-list 'status :both-modified))))
+	    ((= dir ?A)
+	     (add-to-list 'status :unmerged)
+	     (cond ((= index ?U) (add-to-list 'status :they-added))
+		   ((= index ?A) (add-to-list 'status :both-added)))))
+
+      (cond ((= index ? ) (add-to-list 'status :index-head))
+	    ((and (= index ?M) (memq dir '(?M ?D ? ))) (add-to-list 'status :index-modified))
+	    ((and (= index ?A) (memq dir '(?M ?D ? ))) (add-to-list 'status :index-added))
+	    ((and (= index ?D) (memq dir '(?M ? ))) (add-to-list 'status :index-deleted))
+	    ((and (= index ?R) (memq dir '(?M ?D ? ))) (add-to-list 'status :index-moved))
+	    ((and (= index ?C) (memq dir '(?M ?D ? ))) (add-to-list 'status :index-copied)))
+      
+      (add-to-list 'alist (cons (substring line 3) status)))
+    alist))
+
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
   (egg-git-to-lines "rev-parse" "--symbolic" "--branches"))
@@ -3191,6 +3230,16 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   "Keymap for a diff section in sequence of deltas between the workdir and
 the index. \\{egg-wdir-diff-section-map}")
 
+(defconst egg-unmerged-file-map
+  (let ((map (make-sparse-keymap "Egg:UnmergedFile")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "x") 'egg-unmerged-file-del-action)
+    (define-key map (kbd "s") 'egg-unmerged-file-add-action)
+    (define-key map (kbd "=") 'egg-unmerged-file-ediff-action)
+    (define-key map (kbd "RET") 'egg-unmerged-file-next-action)
+    map)
+  "Keymap for unmerged entries in the status buffer. \\{egg-unmerged-file-map}")
+
 (defconst egg-unstaged-diff-section-map
   (let ((map (make-sparse-keymap "Egg:UnstagedDiff")))
     (set-keymap-parent map egg-wdir-diff-section-map)
@@ -3469,9 +3518,9 @@ positions of the sequence as well as the decorations.
                   "\\)$"))
 
          ;; where the hunk end?
-         (hunk-end-re "^\\(?:diff\\|@@\\)")
+         (hunk-end-re "^\\(?:diff \\|@@\\|\\* \\)")
          ;; where the diff end?
-         (diff-end-re "^diff ")
+         (diff-end-re "^\\(?:diff \\|\\* \\)")
 
          sub-beg sub-end head-end m-b-0 m-e-0 m-b-x m-e-x
          last-diff last-cc current-delta-is)
@@ -4187,6 +4236,8 @@ rebase session."
     "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk/selected area  "
     "\\[egg-diff-section-cmd-undo]:undo file/hunk's modifications\n")))
 
+(defvar egg-status-buffer-changed-files-status nil)
+
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
   (let* ((state (egg-repo-state))
@@ -4389,9 +4440,44 @@ adding the contents."
     ;;(put-text-property (1+ inv-beg) end 'help-echo (egg-tooltip-func))
     ))
 
+(defun egg-sb-decorate-unmerged-entries-in-section (beg end sect-type)
+  (save-excursion
+    (goto-char beg)
+    (let (status tmp path)
+      (save-match-data
+	(while (re-search-forward (rx line-start "* Unmerged path " 
+				      (group (1+ not-newline)) line-end)
+				  end t)
+	  (setq path (match-string-no-properties 1))
+	  (setq tmp (propertize (concat "\n" (substring path 0 1))
+				'face 'egg-unmerged-diff-file-header))
+	  (add-text-properties (match-beginning 0) (1+ (match-beginning 1))
+			       (list 'display tmp 'intangible t))
+	  (put-text-property (1+ (match-beginning 1)) (match-end 1)
+			     'face 'egg-unmerged-diff-file-header)
+
+	  (setq status (assoc path egg-status-buffer-changed-files-status))
+	  (when status
+	    (egg-delimit-section sect-type status
+				 (match-beginning 0) (match-end 0) nil nil
+				 #'egg-compute-navigation)
+	    (put-text-property (match-beginning 0) (match-end 0)
+			       'keymap egg-unmerged-file-map)
+	    (setq tmp (buffer-substring-no-properties (match-end 0) (1+ (match-end 0))))
+	    (setq tmp (concat (cond ((memq :we-deleted status) ": deleted by us")
+				    ((memq :they-deleted status) ":  deleted by them")
+				    ((memq :both-deleted status) ":  deleted by both")
+				    ((memq :both-modified status) ":  modified by both, please resolve in worktree")
+				    ((memq :we-added status) ":  added by us, please resolve in worktree")
+				    ((memq :they-added status) ":  added by them, please resolve in worktree")
+				    ((memq :both-added status) ":  added by both, please reolsve in worktree")
+				    (t "")) tmp))
+	    
+	    (put-text-property (match-end 0) (1+ (match-end 0)) 'display tmp)))))))
+
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
-  (let ((beg (point)) inv-beg diff-beg end)
+  (let ((beg (point)) inv-beg diff-beg end path tmp status)
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
             "\n")
@@ -4413,6 +4499,7 @@ adding the contents."
                                :cc-diff-map egg-unmerged-diff-section-map
                                :cc-hunk-map egg-unmerged-hunk-section-map
                                :conflict-map egg-unmerged-hunk-section-map)
+    (egg-sb-decorate-unmerged-entries-in-section diff-beg end :unmerged)
     (put-text-property (- end 2) end 'intangible t)))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
@@ -4438,6 +4525,7 @@ adding the contents."
                                :dst-prefix "INDEX:/"
                                :diff-map egg-staged-diff-section-map
                                :hunk-map egg-staged-hunk-section-map)
+    (egg-sb-decorate-unmerged-entries-in-section diff-beg end :merged)
     (put-text-property (- end 2) end 'intangible t)))
 
 (defvar egg-hunk-ranges-cache nil
@@ -4902,6 +4990,52 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
                  (goto-char restore-pt)
                (goto-char (point-min)))))))
 
+(defun egg-unmerged-file-del-action (pos)
+  (interactive "d")
+  (let* ((status (or (get-text-property pos :unmerged) (get-text-property pos :merged)))
+	 (file (and status (car status))))
+    (unless (or (memq :we-deleted status) (memq :they-deleted status) (memq :both-deleted status))
+      (error "don't know how to handle status %S" status))
+    (if (y-or-n-p (format "delete file %s?" file))
+	(egg-status-buffer-handle-result (egg--git-rm-cmd (current-buffer) file))
+      (if (y-or-n-p (format "keep file %s alive?" file))
+	  (egg-status-buffer-handle-result (egg--git-add-cmd (current-buffer) file))
+	(message "deleted file %s is still unmerged!" file)))))
+
+(defun egg-unmerged-file-add-action (pos)
+  (interactive "d")
+  (let* ((status (or (get-text-property pos :unmerged) (get-text-property pos :merged)))
+	 (file (and status (car status))))
+    (unless (or (memq :we-added status) (memq :they-added status) (memq :both-added status))
+      (error "don't know how to handle status %S" status))
+    (if (y-or-n-p (format "add file %s?" file))
+	(egg-status-buffer-handle-result (egg--git-add-cmd (current-buffer) file))
+      (if (y-or-n-p (format "delete file %s" file))
+	  (egg-status-buffer-handle-result (egg--git-rm-cmd (current-buffer) file))
+	(message "added file %s is still unmerged!" file)))))
+
+(defun egg-unmerged-file-ediff-action (pos)
+  (interactive "d")  
+  (let* ((status (or (get-text-property pos :unmerged) (get-text-property pos :merged)))
+	 (file (and status (car status))))
+    (unless (memq :unmerged status)
+      (error "don't know how to handle status %S" status))
+    (egg-resolve-merge-with-ediff file)))
+
+(defun egg-unmerged-file-next-action (pos)
+  (interactive "d")
+  (let* ((status (or (get-text-property pos :unmerged) (get-text-property pos :merged)))
+	 (file (and status (car status))))
+    (unless (memq :unmerged status)
+      (error "don't know how to handle status %S" status))
+    (cond ((or (memq :we-added status) (memq :they-added status) (memq :both-added status))
+	   (egg-unmerged-file-add-action pos))
+	  ((or (memq :we-deleted status) (memq :they-deleted status) (memq :both-deleted status))
+	   (egg-unmerged-file-del-action pos))
+	  ((memq :both-modified status)
+	   (egg-unmerged-file-ediff-action pos))
+	  (t (message "don't know how to handle status %S" status)))))
+
 (defun egg-status-buffer-checkout-ref (&optional force name)
   "Prompt a revision to checkout. Default is name."
   (interactive (list current-prefix-arg (egg-ref-at-point)))
@@ -4965,6 +5099,10 @@ If INIT was not nil, then perform 1st-time initializations as well."
     (let ((inhibit-read-only t)
 	  (state (egg-repo-state))
           (win (get-buffer-window buf)))
+
+      (set (make-local-variable 'egg-status-buffer-changed-files-status)
+	   (egg--get-status-code))
+
       ;; Emacs tries to be too smart, if we erase and re-fill the buffer
       ;; that is currently being displayed in the other window,
       ;; it remembers it, and no matter where we move the point, it will
@@ -7290,18 +7428,20 @@ the command will prompt for the git reset mode to perform."
       (egg-log-buffer-handle-result
        (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))
 
-(defun egg-log-buffer-do-pick-partial-cherry (rev head-name files)
-  (if (not (y-or-n-p (format "pick selected files from %s and put i on %s"
-			     rev head-name)))
-      (message "Nah! that cherry (%s) looks rotten!!!" rev)
+(defun egg-log-buffer-do-pick-partial-cherry (rev head-name files &optional revert prompt cancel-msg)
+  (if (not (y-or-n-p (or prompt (format "pick selected files from %s and put i on %s"
+					rev head-name))))
+      (message (or cancel-msg (format "Nah! that cherry (%s) looks rotten!!!" rev)))
     (let ((dir (egg-work-tree-dir))
+	  (args (list "--3way"))
 	  patch)
       (with-temp-buffer
 	(setq default-directory dir)
 	(unless (apply 'egg-git-ok t "--no-pager" "show" "--no-color" rev "--" files)
 	  (error "Error retrieving rev %s" rev))
 	(setq patch (buffer-string)))
-      (egg--git-apply-cmd t patch "--3way"))))
+      (when revert (setq args (cons "--reverse" args)))
+      (egg--git-apply-cmd t patch args))))
 
 (defun egg-log-buffer-do-pick-1cherry (rev head-name edit-commit-msg)
   (if (not (y-or-n-p (format "pick %s and put it on %s%s? " rev head-name
@@ -7336,31 +7476,40 @@ With prefix, will not auto-commit but let the user re-compose the message."
 	       old-msg)
      t 'log)))
 
+(defsubst egg-log-buffer-do-revert-rev (rev use-default-commit-msg)
+  (if (not (y-or-n-p (format "undo changes introduced by %s%s? " rev
+			     (if use-default-commit-msg
+				 " (with git's default commit message)" ""))))
+      (message "Nah! that lump (%s) looks benign!!!" (egg-commit-subject rev))
+    (egg--git-revert-cmd t rev use-default-commit-msg)))
+
+(defsubst egg-log-buffer-do-selective-revert-rev (rev files)
+  (egg-log-buffer-do-pick-partial-cherry 
+   rev nil files t
+   (format "undo changes introduced by selected files in %s? " rev)
+   (format "Nah! that lump (%s) looks benign!!!" (egg-commit-subject rev))))
+
 (defun egg-log-buffer-revert-rev (pos &optional use-default-commit-msg)
   (interactive "d\nP")
   (let ((sha1 (egg-log-buffer-get-rev-at pos :sha1))
 	(rev (egg-log-buffer-get-rev-at pos :symbolic))
-	res modified-files old-subject cmd-ok)
+	(selection (cdr (get-text-property pos :selection)))
+	res)
     (unless (and rev (stringp rev))
       (error "No tumour to remove here! very healthy body!" ))
-    (when (string-equal rev "HEAD")
+    (when (and (string-equal rev "HEAD") (null selection))
       (error "Just chop your own HEAD (use anchor a.k.a git-reset)! no need to revert HEAD"))
     
-    (setq old-subject (egg-commit-subject rev))
-
-    (if (not (y-or-n-p (format "undo changes introduced by %s%s? " rev
-			       (if use-default-commit-msg
-				   " (with git's default commit message)" ""))))
-	(message "Nah! that lump (%s) looks benign!!!" old-subject)
-      
-      (setq res (egg--git-revert-cmd t rev use-default-commit-msg))
-      (egg--buffer-handle-result-with-commit
+    (setq res (if selection
+		  (egg-log-buffer-do-selective-revert-rev rev selection)
+		(egg-log-buffer-do-revert-rev rev use-default-commit-msg)))
+    (egg--buffer-handle-result-with-commit
        res (list (concat
 		  (egg-text "Undo Changes Introduced by:  " 'egg-text-3)
 		  (egg-text rev 'egg-branch)) 
 		 (egg-log-msg-mk-closure-input #'egg-log-msg-commit)
-		 (format "Revert \"%s\"\n\nThis reverts commit %s\n" old-subject sha1))
-       t 'log))))
+		 (format "Revert \"%s\"\n\nThis reverts commit %s\n" (egg-commit-subject sha1) sha1))
+       t 'log)))
 
 (defun egg-log-buffer-fetch-remote-ref (pos)
   "Download and update the remote tracking branch at POS."
