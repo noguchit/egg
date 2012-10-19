@@ -2818,17 +2818,13 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
     (egg-async-1-args (list #'egg--async-create-signed-commit-handler buffer-to-update)
 		      (cons "commit" args))))
 
-(defsubst egg-do-commit-with-region (beg end gpg-uid)
-  (funcall (if gpg-uid
-	       #'egg--async-create-signed-commit-cmd
-	     #'egg--git-commit-with-region-cmd)
-	   t beg end gpg-uid))
-
-(defsubst egg-do-amend-with-region (beg end gpg-uid)
-  (funcall (if gpg-uid
-	       #'egg--async-create-signed-commit-cmd
-	     #'egg--git-commit-with-region-cmd)
-	   t beg end gpg-uid "--amend"))
+(defun egg-cleanup-n-commit-msg (cmd-func beg end gpg-uid &rest extra-commit-options)
+  (apply cmd-func t beg end gpg-uid 
+	 (cons (if (and (save-excursion (goto-char beg) (re-search-forward "^#" end t))
+			(y-or-n-p (format "should lines beginning with # be removed? ")))
+		   "--cleanup=strip"
+		 "--cleanup=whitespace")
+	       extra-commit-options)))
 
 (defun egg--git-amend-no-edit-cmd (buffer-to-update &rest args)
   (egg--do-git-action
@@ -5816,12 +5812,18 @@ when the buffer was created.")
 (defsubst egg-log-msg-commit (prefix gpg-uid text-beg text-end &rest ignored)
   "Commit the index using the text between TEXT-BEG and TEXT-END as message.
 PREFIX and IGNORED are ignored."
-  (egg-do-commit-with-region text-beg text-end gpg-uid))
+  (egg-cleanup-n-commit-msg (if gpg-uid
+				#'egg--async-create-signed-commit-cmd
+			      #'egg--git-commit-with-region-cmd)
+			    text-beg text-end gpg-uid))
 
 (defsubst egg-log-msg-amend-commit (prefix gpg-uid text-beg text-end &rest ignored)
   "Amend the last commit with the index using the text between TEXT-BEG and TEXT-END
 as message. PREFIX and IGNORED are ignored."
-  (egg-do-amend-with-region text-beg text-end gpg-uid))
+  (egg-cleanup-n-commit-msg (if gpg-uid
+				#'egg--async-create-signed-commit-cmd
+			      #'egg--git-commit-with-region-cmd)
+			    text-beg text-end gpg-uid "--amend"))
 
 (defun egg-log-msg-buffer-toggle-signed ()
   (interactive)
@@ -7129,23 +7131,6 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 				     "reorder %s to follow: "
 				     "Need a commit for %s to follow!" t)
     (egg-log-buffer-do-mark pos (egg-log-buffer-edit-mark))))
-
-(defun egg-log-buffer-mark-append-old (pos)
-  (interactive "d")
-  (let* ((commit (egg-commit-at-point pos))
-	 (pretty (egg-pretty-short-rev commit))
-	 (parent (car (egg-commit-parents commit)))
-	 leader pos)
-    (unless (setq leader (egg-completing-read-sha1 commit (format "append commit %s to: " pretty) parent))
-      (error "Need a valid commit to append %s to!" pretty))
-    (unless (setq pos (egg-log-buffer-get-commit-pos leader))
-      (error "Can't find %s in buffer, please configure egg to display more commits" leader))
-    (save-excursion
-      (goto-char (+ pos egg-log-buffer-comment-column -10))
-      (unless (get-text-property (point) :mark)
-	(when (y-or-n-p (format "should %s be picked as well? " leader))
-	  (egg-log-buffer-do-mark (point) (egg-log-buffer-pick-mark)))))
-    (egg-log-buffer-do-mark pos (egg-log-buffer-append-mark) nil nil :append-to leader)))
 
 (defun egg-log-buffer-do-unmark-all ()
   (interactive)
@@ -9263,26 +9248,6 @@ This is just an alternative way to launch `egg-log'"
 		  (setq ref (egg-read-ref "show history of ref: " ref))
 		  (list ref (unless (equal head-name ref) head-name)))
 		 (t (list ref)))))))
-
-(defun egg-reflog-old (branch &optional branch2)
-  "Show commit DAG of BRANCH and its reflogs.
-This is just an alternative way to launch `egg-log'"
-  (interactive (let ((head-name (egg-branch-or-HEAD))
-		     (prefix (prefix-numeric-value current-prefix-arg))
-		     ref)
-		 (cond ((> prefix 15) 
-			(setq ref (egg-read-ref "show history of ref: " head-name))
-			(list ref
-			      (unless (equal head-name ref)
-				(when (and (y-or-n-p 
-					    (format "combine %s's history with %s? " 
-						    ref head-name)))
-				  head-name))))
-		       ((> prefix 3) 
-			(setq ref (egg-read-ref "show history of ref: " head-name))
-			(list ref (unless (equal head-name ref) head-name)))
-		       (t (list head-name)))))
-  (egg-log (delete nil (list branch branch2))))
 
 (defun egg-log-buffer-reflog-ref (pos &optional prefix)
   "Show reflogs for the ref at POS"
