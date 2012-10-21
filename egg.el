@@ -7160,32 +7160,97 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 	  (setq alist (cons (list (get-text-property pos :commit)
 				  (get-text-property pos :mark)
 				  subject marker
-				  (get-text-property pos :append-to))
+				  (get-text-property pos :append-to)
+				  (get-text-property pos :followed-by))
 			    alist)))))
     alist))
 
 (defun egg-log-buffer-get-rebase-marked-alist ()
   (let ((marked-alist 
+	 ;;
+	 ;; Reverse the list from egg-log-buffer-get-marked-alist()
+	 ;; this way, we process the youngest first, then prepend
+	 ;; one-by-one to the ordered list.
+	 ;; An older one will then preceded a younger one if
+	 ;; there was no constraints between them.
+	 ;;
 	 (nreverse 
 	  (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
 					   (egg-log-buffer-squash-mark)
 					   (egg-log-buffer-edit-mark)
 					   (egg-log-buffer-fixup-mark))))
-	add-func ordered-list follow-alist leader commit info)
+	add-func ordered-list follow-alist leader commit info second)
     (setq add-func
+	  ;;
+	  ;; Local function to add a commit into ordered-list considering
+	  ;; all the relationships.
+	  ;;
+	  ;; squashed and fixedup commits must be right after the leader/followee
+	  ;; second-in-command commit must be placed after the leader but also
+	  ;; after the leader's squashed/fixed-up commits.
+	  ;; 
 	  (lambda (commit-info)
-	    (dolist (follower-followee follow-alist)
-	      (let ((follower (car follower-followee))
-		    (followee (cdr follower-followee)))
-		(when (equal follower (car commit-info))
-		  (setcar follower-followee nil)
-		  (setcdr follower-followee nil)
-		  (funcall add-func followee))))
+	    (let ((commit-sha1 (car commit-info))
+		  (second-commit (nth 3 commit-info))
+		  second-info temp-list)
+	      ;; commits are prepending into ordered list so order is reversed.
+	      ;;
+	      ;; second-in-command are not squashed into the commit
+	      ;; must be added first to be behind the squashed commits.
+	      ;;
+	      ;; the full info of second is not avail here, so search the full
+	      ;; follow-alist for second's full information.
+	      ;;
+	      (when second-commit
+		(dolist (followee-follower follow-alist)
+		  (let ((followee (car followee-follower))
+			(follower (cdr followee-follower)))
+		    (when (and (equal followee commit-sha1) 
+			       (equal (car follower) second-commit))
+		      ;; found second's data
+		      ;; clear it from follow-alist
+		      ;; add it to ordered-list
+		      (setcar followee-follower nil)
+		      (setcdr followee-follower nil)
+		      (funcall add-func follower)))))
+	      
+	      ;;
+	      ;; Once second-in-command was added to ordered list,
+	      ;; add the squashed/fixedup commits that follow the current commit.
+	      ;; 
+	      (dolist (followee-follower follow-alist)
+		;;
+		;; for each commit in the follow-alist
+		;; if the followee is the current commit
+		;;    then add the follower into ordered-list
+		;;
+		(let ((followee (car followee-follower))
+		      (follower (cdr followee-follower)))
+		  (when (equal followee commit-sha1)
+		    (setcar followee-follower nil)
+		    (setcdr followee-follower nil)
+		    (funcall add-func follower)))))
+
+	    ;; now the ordered list contains the second-in-command and
+	    ;; the squashed/fixed-up commits
+	    ;; add the current commit to the ordered-list
 	    (add-to-list 'ordered-list commit-info)))
+
+    ;;
+    ;; For each commit, from youngest to oldest
+    ;;   if commit does not followed a leader
+    ;;      add commit to ordered-list
+    ;;   elif commit's leader is not in ordered-list
+    ;;      error: cannot follow younger commit
+    ;;   else
+    ;;      add (leader . commit) into the follow-alist'
+    ;;
+    ;;  follow-alist is the mapping followee<->follower
     (dolist (item marked-alist)
-      (setq leader (nth 4 item))
+      (setq leader (nth 4 item))	;; append-to
+      (setq second (nth 5 item))	;; followed-by
       (setq commit (nth 0 item))
-      (setq info (list commit (nth 1 item) (nth 2 item))) ;; commit/mark/subject
+      (setq info (list commit (nth 1 item) (nth 2 item) second)) ;;commit/mark/subject/second
       (cond ((null leader)
 	     (funcall add-func info))
 	    ((assoc leader ordered-list)
