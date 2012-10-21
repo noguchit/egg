@@ -574,7 +574,7 @@ will select the window unless prefixed with C-u."
 					   "--ignore-all-space"))))
 		 ))
 
-(defcustom egg-log-buffer-marks "+~.*_@"
+(defcustom egg-log-buffer-marks "+~.*_@>"
   "A vector of 4 characters used for marking commit in the log buffer.
 The first 3 elemements are used to mark a commit for the upcoming interactive rebase.
 The 1st element is used to mark a commit to be picked, the 2nd to be edited and
@@ -619,6 +619,12 @@ commit."
 			       (const :tag "●" #x25cf)
 			       (const :tag "✽" #x273d)
 			       (const :tag "☻" #x263b)
+			       character)
+			(radio :tag "Fixup Mark"
+			       (const :tag ">" ?>)
+			       (const :tag "⚒" #x2692)
+			       (const :tag "┅" #x2505)
+			       (const :tag "♻" #x267b)
 			       character))
 		string))
 
@@ -627,12 +633,6 @@ commit."
 (defsubst egg-log-buffer-squash-mark () (aref egg-log-buffer-marks 2))
 (defsubst egg-log-buffer-base-mark () (aref egg-log-buffer-marks 3))
 (defsubst egg-log-buffer-fixup-mark () (aref egg-log-buffer-marks 4))
-
-;; (defsubst egg-log-buffer-fixup-mark () (aref egg-log-buffer-marks 4))
-;; (defsubst egg-log-buffer-melt-mark () (aref egg-log-buffer-marks 5))
-
-;;(string #x2714 #x270d #x21b6 #x27a4)
-;;(string #x2588)
 
 (defcustom egg-commit-file-select-mark ?+
   "Character used to mark a commit's file to be used in the upcoming cherry picking."
@@ -6542,7 +6542,6 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
     (define-key map (kbd "_") 'egg-log-buffer-mark-fixup)
-    (define-key map (kbd "@") 'egg-log-buffer-mark-melt)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
     (define-key map (kbd "DEL") 'egg-log-buffer-unmark)
 
@@ -7200,7 +7199,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (let ((process-environment process-environment)
         (repo-state (or repo-state (egg-repo-state :staged :unstaged)))
         (orig-buffer (current-buffer))
-        orig-head-sha1)
+        orig-head-sha1 tmp)
     (setq orig-head-sha1 (plist-get repo-state :sha1))
     (unless (egg-repo-clean repo-state) (error "Repo not clean"))
     (unless onto (setq onto upstream))
@@ -7249,8 +7248,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                     (concat rebase-dir "git-rebase-todo"))
       (write-region (point-min) (point-max)
                     (concat rebase-dir "git-rebase-todo.backup"))
-      (write-region (point-min) (point-max)
-                    (concat (egg-work-tree-dir) "egg-rebase-todo.txt")))
+      (setq tmp (buffer-string)))
 
     (setenv "GIT_REFLOG_ACTION" (format "rebase -i (%s)" onto))
     (with-egg-debug-buffer
@@ -7260,6 +7258,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (insert "onto: " onto "\n")
       (insert "orig-head: " orig-head-sha1 "\n")
       (insert (plist-get repo-state :head) "\n")
+      (insert "TODO START:\n" tmp "TODO END:\n")
       
       (egg-git-ok nil "update-ref" "ORIG_HEAD" orig-head-sha1)
       (egg-git-ok nil "checkout" onto)
