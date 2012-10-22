@@ -2797,7 +2797,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
     (let* ((proc egg-async-process)
 	   (ret-code (process-exit-status proc))
 	   res)
-      (goto-char (match-end 0)) commit
+      (goto-char (match-end 0))
       (save-restriction
 	(narrow-to-region (point) (point-max))
 	(setq res (egg--do-show-output 
@@ -8163,11 +8163,12 @@ prompt for a remote repo."
       (insert (egg-text "Help" 'egg-help-header-1) "\n")
       (put-text-property help-beg (point) 'help-echo (egg-tooltip-func))
       (setq inv-beg (1- (point)))
-      (insert help "\n"))
+      (insert help))
     (setq beg (point))
     (when help-beg
       (egg-delimit-section :section :help help-beg (point)
                            inv-beg egg-section-map :help))
+    (insert "\n")
     (if init (egg-buffer-maybe-hide-help :help))
     (goto-char (or (funcall closure) beg))))
 
@@ -8683,7 +8684,7 @@ if FILE-NAME is non-nil, restrict the logs to the commits modifying FILE-NAME."
 			      (if ref-name 
 				  (egg-text ref-name 'egg-term)
 				(egg-text "all refs" 'egg-term))))
-         help paths decorating-func)
+         paths decorating-func)
     (with-current-buffer buf
       (when single-mom
 	(setq single-mom (list "--first-parent")))
