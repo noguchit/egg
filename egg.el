@@ -6471,29 +6471,37 @@ Jump to line LINE if it's not nil."
   (let* ((ref-info (get-text-property pos :ref))
 	 (reflog (unless ref-info (get-text-property pos :reflog)))
 	 (ref-type (and (cdr ref-info)))
-	 (mark (get-text-property pos :mark))
-	 (append-to (get-text-property pos :append-to))
-	 (followed-by (get-text-property pos :followed-by))
-	 (reflog-time (and reflog (get-text-property pos :time))))
+	 (mark-pos (if (get-text-property pos :mark)
+		       pos
+		     (if (get-text-property (1- pos) :mark) (1- pos))))
+	 (mark (get-text-property mark-pos :mark))
+	 (append-to (get-text-property mark-pos :append-to))
+	 (followed-by (get-text-property mark-pos :followed-by))
+	 (reflog-time (and reflog (get-text-property pos :time)))
+	 into is-squashed)
     (if (or ref-info mark)
 	(cond ((eq ref-type :head) (egg-show-branch (car ref-info)))
 	      ((eq ref-type :tag) (egg-show-atag (car ref-info)))
 	      ((eq ref-type :remote) (egg-show-remote-branch (car ref-info)))
+	      ((eq mark (egg-log-buffer-base-mark)) (message "BASE mark"))
 	      (mark
+	       (setq is-squashed 
+		     (memq mark (list (egg-log-buffer-squash-mark) (egg-log-buffer-fixup-mark)))
+		     into (if is-squashed "into" "right after"))
 	       (setq append-to (and append-to (egg-pretty-short-rev append-to)))
 	       (setq followed-by (and followed-by (egg-pretty-short-rev followed-by)))
 	       (message "marked to be %s%s in the upcoming interactive rebase"
-			(cond ((eq mark (egg-log-buffer-pick-mark)) "picked")
-			      ((eq mark (egg-log-buffer-edit-mark)) "edited")
-			      ((eq mark (egg-log-buffer-squash-mark)) "squashed")
-			      ((eq mark (egg-log-buffer-fixup-mark)) "absorbed")
-			      (t (error "unknow mark: %s" mark)))
-			(cond ((and append-to followed-by)
-			       (format " into %s and to be followed by %s" 
-				       append-to followed-by))
-			      (append-to (format " into %s" append-to))
-			      (followed-by (format " and followed by %s" followed-by))
-			      (t ""))))
+			  (cond ((eq mark (egg-log-buffer-pick-mark)) "picked")
+				((eq mark (egg-log-buffer-edit-mark)) "edited")
+				((eq mark (egg-log-buffer-squash-mark)) "squashed")
+				((eq mark (egg-log-buffer-fixup-mark)) "absorbed")
+				(t (error "unknown mark: %s" mark)))
+			  (cond ((and append-to followed-by)
+				 (format " %s %s and to be followed by %s" 
+					 into append-to followed-by))
+				(append-to (format " %s %s" into append-to))
+				(followed-by (format " and followed by %s" followed-by))
+				(t ""))))
 	      (t nil))
       (when reflog
 	(setq reflog (substring-no-properties reflog))
@@ -6541,7 +6549,6 @@ Jump to line LINE if it's not nil."
     (define-key map (kbd "+") 'egg-log-buffer-mark-pick)
     (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
     (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
-    (define-key map (kbd "_") 'egg-log-buffer-mark-fixup)
     (define-key map (kbd "-") 'egg-log-buffer-unmark)
     (define-key map (kbd "DEL") 'egg-log-buffer-unmark)
 
@@ -7037,12 +7044,14 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
   (let ((commit (get-text-property pos :commit))
         (inhibit-read-only t)
         (col (- egg-log-buffer-comment-column 10))
-        (step (if unmark -1 (if remove-first 0 1))))
+        (step (if unmark -1 (if remove-first 0 1)))
+	leader follower-of-leader)
     (when commit
       (when remove-first
         (egg-log-buffer-do-remove-mark char))
       (goto-char pos)
       (move-to-column col)
+      (setq leader (get-text-property (point) :append-to))
       (funcall (if unmark
                    #'remove-text-properties
                  #'add-text-properties)
@@ -7053,6 +7062,13 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 				 (egg-text (char-to-string char)
 					   'egg-log-buffer-mark)))
 		      extra-properties))
+      (when leader
+	(save-excursion
+	  (goto-char (egg-log-buffer-get-commit-pos leader))
+	  (move-to-column col)
+	  (setq follower-of-leader (get-text-property (point) :followed-by))
+	  (when (equal follower-of-leader commit)
+	    (put-text-property (point) (1+ (point)) :followed-by nil))))
       (forward-line step)
       (while (not (or (get-text-property (point) :commit)
                       (eobp) (bobp)))
@@ -7165,7 +7181,55 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 			    alist)))))
     alist))
 
+(defsubst egg-marked-commit-sha1 (commit) (nth 0 commit))
+(defsubst egg-marked-commit-mark (commit) (nth 1 commit))
+(defsubst egg-marked-commit-leader (commit) (nth 4 commit))
+(defsubst egg-marked-commit-follower (commit) (nth 5 commit))
+
 (defun egg-log-buffer-get-rebase-marked-alist ()
+  (let* ((tbd (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
+					       (egg-log-buffer-squash-mark)
+					       (egg-log-buffer-edit-mark)
+					       (egg-log-buffer-fixup-mark)))
+	 done commit add-func)
+    (setq add-func 
+	  (lambda (commit)
+	    ;;
+	    ;; add the commit to the done list
+	    ;; prepending is ok because it will be reversed at the end
+	    ;;
+	    (add-to-list 'done commit)
+	    (let ((sha1 (egg-marked-commit-sha1 commit))
+		  (second-sha1 (egg-marked-commit-follower commit))
+		  (youngers tbd)
+		  younger younger second)
+	      ;;
+	      ;; Look for younger ones that must be squashed into commit
+	      ;;
+	      (dolist (younger youngers)
+		(when (and (equal (egg-marked-commit-leader younger) sha1)
+			   (not (memq younger done)))
+		  ;;
+		  ;; put add the younger one into done if it wasn't second in command
+		  ;; save the second in commad for later, it must be added after all
+		  ;; the squashed ones.
+		  ;;
+		  (setq tbd (delq younger tbd))
+		  (if (equal (egg-marked-commit-sha1 younger) second-sha1)
+		      (setq second younger)
+		    (funcall add-func younger))))
+	      ;;
+	      ;; Now that all the squashed ones were added, add second-in-command
+	      ;;
+	      (when second
+		(funcall add-func second)))))
+    (while tbd
+      (setq commit (car tbd) tbd (cdr tbd))
+      (unless (memq commit done)
+	(funcall add-func commit)))
+    (nreverse done)))
+
+(defun egg-log-buffer-get-rebase-marked-alist-old ()
   (let ((marked-alist 
 	 ;;
 	 ;; Reverse the list from egg-log-buffer-get-marked-alist()
@@ -8148,8 +8212,15 @@ prompt for a remote repo."
         (desc (plist-get egg-internal-log-buffer-closure :description))
         (closure (plist-get egg-internal-log-buffer-closure :closure))
         (help (plist-get egg-internal-log-buffer-closure :help))
+	(rebase-commits (plist-get egg-internal-log-buffer-closure :rebase-commits))
         (inhibit-read-only t)
-        inv-beg beg help-beg)
+        inv-beg beg pos help-beg marked-list)
+    (unless init
+      (setq marked-list (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
+							 (egg-log-buffer-squash-mark)
+							 (egg-log-buffer-edit-mark)
+							 (egg-log-buffer-fixup-mark)
+							 (egg-log-buffer-base-mark))))
     (erase-buffer)
     (insert title
             (if subtitle (concat "\n" subtitle "\n") "\n")
@@ -8163,14 +8234,21 @@ prompt for a remote repo."
       (insert (egg-text "Help" 'egg-help-header-1) "\n")
       (put-text-property help-beg (point) 'help-echo (egg-tooltip-func))
       (setq inv-beg (1- (point)))
-      (insert help))
-    (setq beg (point))
-    (when help-beg
+      (insert help)
       (egg-delimit-section :section :help help-beg (point)
-                           inv-beg egg-section-map :help))
-    (insert "\n")
-    (if init (egg-buffer-maybe-hide-help :help))
-    (goto-char (or (funcall closure) beg))))
+                           inv-beg egg-section-map :help)
+      (insert "\n")
+      (if init (egg-buffer-maybe-hide-help :help)))
+    (setq pos (point))
+    (setq beg (or (funcall closure) pos))
+    (mapc (lambda (marked-commit)
+	    (egg-log-buffer-do-mark (egg-log-buffer-get-commit-pos (egg-marked-commit-sha1 marked-commit))
+				    (egg-marked-commit-mark marked-commit)
+				    nil nil
+				    :followed-by (egg-marked-commit-follower marked-commit)
+				    :append-to (egg-marked-commit-leader marked-commit)))
+	  marked-list)
+    (goto-char beg)))
 
 (defun egg-log-buffer-redisplay (buffer &optional init)
   (with-current-buffer buffer
