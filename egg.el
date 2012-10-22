@@ -7475,7 +7475,9 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 		      :rebase-amend :rebase-commit)))
 
       (cond ((eq res :rebase-done)
-             (message "GIT-REBASE-INTERACTIVE: %s" msg))
+             (message "GIT-REBASE-INTERACTIVE> %s" msg)
+	     (with-current-buffer (egg-get-log-buffer)
+	       (egg-log-buffer-do-unmark-all)))
 
 	    ((null res)
              (message "EGG got confused by rebase's output")
@@ -9729,10 +9731,10 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
     (error "Current buffer has no associated file!"))
   (let* ((file buffer-file-name)
 	 (short-file (file-name-nondirectory file))
-         (dst (if ask-for-dst (egg-read-ref (format "(ediff) %s's newer version: "
+         (dst (if ask-for-dst (egg-read-rev (format "(ediff) %s's newer version: "
 						    short-file)
 					    (egg-branch-or-HEAD))))
-	 (src (egg-read-ref (if dst (format "(ediff) %s's %s vs older version: "
+	 (src (egg-read-rev (if dst (format "(ediff) %s's %s vs older version: "
 					    short-file  dst)
 			      (format "(ediff) %s vs version: " short-file)))))
     (egg--ediff-file-revs file dst nil src nil)))
