@@ -7183,6 +7183,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
 (defsubst egg-marked-commit-sha1 (commit) (nth 0 commit))
 (defsubst egg-marked-commit-mark (commit) (nth 1 commit))
+(defsubst egg-marked-commit-subject (commit) (nth 2 commit))
+(defsubst egg-marked-commit-marker (commit) (nth 3 commit))
 (defsubst egg-marked-commit-leader (commit) (nth 4 commit))
 (defsubst egg-marked-commit-follower (commit) (nth 5 commit))
 
@@ -8203,6 +8205,33 @@ prompt for a remote repo."
     (unless (equal (get-text-property pos :commit) sha1)
       (egg-log-buffer-do-insert-commit pos pickaxe-args highlight pickaxed-paths))))
 
+(defun egg-log-show-marked-commits (marked-list)
+  (when marked-list
+    (let ((beg (point)) end sha1)
+      (mapc (lambda (marked-commit)
+	      (egg-log-buffer-do-mark (egg-log-buffer-get-commit-pos (egg-marked-commit-sha1 marked-commit))
+				      (egg-marked-commit-mark marked-commit)
+				      nil nil
+				      :followed-by (egg-marked-commit-follower marked-commit)
+				      :append-to (egg-marked-commit-leader marked-commit)))
+	    marked-list)
+      (goto-char beg)
+      (insert (egg-text "Commits marked for interactive rebase!\n" 'egg-header))
+      (dolist (commit marked-list)
+	(setq sha1 (egg-marked-commit-sha1 commit))
+	(insert " " 
+		(egg-text (string (egg-marked-commit-mark commit)) 'egg-log-buffer-mark)
+		" " 
+		(egg-text (substring sha1 0 8) 'font-lock-constant-face)
+		" "
+		(egg-text (egg-marked-commit-subject commit) 'egg-text-2))
+	(add-text-properties (line-end-position) (point)
+			     (list :commit-sha1 sha1
+				   :commit-pos (egg-marked-commit-marker commit)))
+	(insert "\n"))
+      (setq end (point))
+      (insert "\n"))))
+
 (defun egg-generic-display-logs (data &optional init)
   (buffer-disable-undo)
   (and init (setq buffer-invisibility-spec nil))
@@ -8214,13 +8243,8 @@ prompt for a remote repo."
         (help (plist-get egg-internal-log-buffer-closure :help))
 	(rebase-commits (plist-get egg-internal-log-buffer-closure :rebase-commits))
         (inhibit-read-only t)
-        inv-beg beg pos help-beg marked-list)
-    (unless init
-      (setq marked-list (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
-							 (egg-log-buffer-squash-mark)
-							 (egg-log-buffer-edit-mark)
-							 (egg-log-buffer-fixup-mark)
-							 (egg-log-buffer-base-mark))))
+        inv-beg beg pos help-beg marked-alist)
+    (setq marked-alist (unless init (egg-log-buffer-get-rebase-marked-alist)))
     (erase-buffer)
     (insert title
             (if subtitle (concat "\n" subtitle "\n") "\n")
@@ -8241,13 +8265,9 @@ prompt for a remote repo."
       (if init (egg-buffer-maybe-hide-help :help)))
     (setq pos (point))
     (setq beg (or (funcall closure) pos))
-    (mapc (lambda (marked-commit)
-	    (egg-log-buffer-do-mark (egg-log-buffer-get-commit-pos (egg-marked-commit-sha1 marked-commit))
-				    (egg-marked-commit-mark marked-commit)
-				    nil nil
-				    :followed-by (egg-marked-commit-follower marked-commit)
-				    :append-to (egg-marked-commit-leader marked-commit)))
-	  marked-list)
+    (when marked-alist
+      (goto-char pos)
+      (egg-log-show-marked-commits marked-alist))
     (goto-char beg)))
 
 (defun egg-log-buffer-redisplay (buffer &optional init)
