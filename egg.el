@@ -3282,7 +3282,7 @@ the index. \\{egg-wdir-diff-section-map}")
 (defconst egg-unmerged-file-map
   (let ((map (make-sparse-keymap "Egg:UnmergedFile")))
     (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "x") 'egg-unmerged-file-del-action)
+    (define-key map (kbd "DEL") 'egg-unmerged-file-del-action)
     (define-key map (kbd "s") 'egg-unmerged-file-add-action)
     (define-key map (kbd "=") 'egg-unmerged-file-ediff-action)
     (define-key map (kbd "RET") 'egg-unmerged-file-next-action)
@@ -5786,7 +5786,8 @@ if the next action is IGNORED-ACTION then it won't be taken."
 			 (when (string-match "stopped before committing as requested" line)
 			   (setq line 
 				 "Auto-merge went well, please prepare the merge message")
-			   (plist-put merge-res :line line))))))))
+			   (plist-put merge-res :line line)))))
+		   merge-res)))
 	  ((member merge-mode-flag '("--no-commit" "--squash"))
 	   (setq force-commit-to-status t)))
 
