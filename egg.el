@@ -839,6 +839,26 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
   (put-text-property 0 1 'display prefix str)
   str)
 
+(defsubst egg-cmd-ok (program buffer &rest args)
+  "run PROGRAM with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
+  (= (apply 'call-process program nil buffer nil args) 0))
+
+(defsubst egg-git-ok (buffer &rest args)
+  "run GIT with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
+  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+
+(defsubst egg-git-ok-args (buffer args)
+  "run GIT with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
+  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+
+
+
 (defsubst egg-commit-contents (rev)
   "Retrieve the raw-contents of the commit REV."
   (with-temp-buffer
@@ -867,31 +887,6 @@ If OTHER-PROPERTIES was non-nil, apply it to STR."
 					  (match-beginning 0)
 					(point-max))))))
 
-(defun egg-commit-parents (rev)
-  (let ((default-directory (egg-work-tree-dir))
-	parents)
-    (with-temp-buffer
-      (egg-git-ok t "--no-pager" "cat-file" "-p" rev)
-      (goto-char (point-min))
-      (while (re-search-forward (rx line-start 
-				    "parent " (group (= 40 hex-digit)) 
-				    (0+ space)
-				    line-end) nil t)
-	(add-to-list 'parents (match-string-no-properties 1)))
-      (setq parents (mapcar (lambda (long)
-			      (substring-no-properties long 0 8))
-			    (nreverse parents))))
-    parents))
-
-(defun egg-completing-read-sha1 (from prompt &optional default max-back)
-  (let* ((max-count (or max-back 100))
-	 (sha1-list (egg-git-to-lines "rev-list" "--topo-order"
-				      (format "--max-count=%d" max-count)
-				      "--abbrev-commit" 
-				     from))
-	 (sha1-hist (copy-sequence sha1-list)))
-    (egg-sha1 (completing-read prompt sha1-list nil nil default 'sha1-hist))))
-
 (defsubst egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
@@ -910,24 +905,6 @@ ARGS is a list of arguments to pass to PROGRAM."
 (defsubst egg-git-to-string (&rest args)
   "run GIT wih ARGS and return the output as a string."
   (egg-cmd-to-string-1 egg-git-command args))
-
-(defsubst egg-cmd-ok (program buffer &rest args)
-  "run PROGRAM with ARGS and insert output into BUFFER at point.
-return the t if the exit-code was 0. if BUFFER was t then
-current-buffer would be used."
-  (= (apply 'call-process program nil buffer nil args) 0))
-
-(defsubst egg-git-ok (buffer &rest args)
-  "run GIT with ARGS and insert output into BUFFER at point.
-return the t if the exit-code was 0. if BUFFER was t then
-current-buffer would be used."
-  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
-
-(defsubst egg-git-ok-args (buffer args)
-  "run GIT with ARGS and insert output into BUFFER at point.
-return the t if the exit-code was 0. if BUFFER was t then
-current-buffer would be used."
-  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
 
 (defun egg-git-show-file-args (buffer file rev args)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
@@ -1107,90 +1084,6 @@ if BUF was nil then use current-buffer"
 	     (substring upstream 8)
 	   upstream))))
 
-(defun egg-show-branch (branch)
-  (interactive (list (egg-head-at-point)))
-  (let* ((info (and (stringp branch)
-		    (egg-git-to-string-list "for-each-ref"
-					    "--format=%(refname:short) %(refname) %(upstream:short)"
-					    (concat "refs/heads/" branch))))
-	 (name (nth 0 info))
-	 (full (nth 1 info))
-	 (upstream (nth 2 info)))
-    (when (stringp name)
-      (message "local-branch:%s full-name:%s upstream:%s" 
-	       (egg-text name 'bold) 
-	       (egg-text full 'bold)
-	       (if upstream (egg-text upstream 'bold) "none")))))
-
-(defvar egg-atag-info-buffer (get-buffer-create "*tag-info*"))
-
-(defun egg-show-atag (tag)
-  (interactive (list (egg-tag-at-point)))
-  (let ((dir (egg-work-tree-dir))
-	(buf egg-atag-info-buffer)
-	(new-buf-name (concat "*tag@" (egg-repo-name) ":" tag "*"))
-	(inhibit-read-only t)
-	target-type sig-beg sig-end verify pos)
-    (with-current-buffer buf
-      (setq default-directory dir)
-      (setq target-type (egg-git-to-string "for-each-ref" "--format=%(objecttype)"
-					   (concat "refs/tags/" tag)))
-      (unless (equal target-type "tag")
-	(error "Not an annotated tag: %s" tag))
-      (unless (string-equal (buffer-name) new-buf-name)
-	(rename-buffer new-buf-name))
-      (erase-buffer)
-      (unless (egg-git-ok t "show" "-s" tag)
-	(error "Failed to show tag %s" tag))
-      (save-match-data
-	(goto-char (point-min))
-	(re-search-forward "^tag ")
-	(put-text-property (match-end 0) (line-end-position) 'face 'egg-branch)
-	(re-search-forward "^Tagger:\\s-+")
-	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
-	(re-search-forward "^Date:\\s-+")
-	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
-	(setq pos (line-end-position))
-	(when (re-search-forward "-----BEGIN PGP SIGNATURE-----" nil t)
-	  (setq sig-beg (match-beginning 0))
-	  (re-search-forward "-----END PGP SIGNATURE-----\n")
-	  (setq sig-end (match-end 0))
-	  (goto-char sig-beg)
-	  (delete-region sig-beg sig-end)
-	  (with-temp-buffer
-	    (egg-git-ok t "tag" "-v" tag)
-	    (goto-char (point-min))
-	    (re-search-forward "^gpg:")
-	    (setq verify (buffer-substring-no-properties (match-beginning 0)
-							 (point-max))))
-	  (insert verify "\n"))
-	(goto-char pos)
-	(re-search-forward "^\\(commit\\|gpg:\\)")
-	(put-text-property pos (match-beginning 0) 'face 'egg-text-1)
-	(re-search-forward "^Author:\\s-+")
-	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
-	(re-search-forward "^Date:\\s-+")
-	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
-	(put-text-property (line-end-position) (point-max) 'face 'egg-text-1))
-      (set-buffer-modified-p nil))
-    (pop-to-buffer buf)))
-
-(defun egg-show-remote-branch (branch)
-  (interactive (list (egg-remote-at-point)))
-  (let* ((info (and (stringp branch)
-		    (egg-git-to-string-list "for-each-ref"
-					    "--format=%(refname:short) %(refname)"
-					    (concat "refs/remotes/" branch))))
-	 (name (nth 0 info))
-	 (full (nth 1 info))
-	 (site (and (stringp name) (egg-rbranch-to-remote name)))
-	 (url (and site (egg-git-to-string "ls-remote" "--get-url" site))))
-    (when (stringp name)
-      (message "remote-tracking-branch:%s full-name:%s site:%s" 
-	       (egg-text name 'bold) 
-	       (egg-text full 'bold)
-	       (egg-text url 'bold)))))
-
 (defsubst egg-rbranch-to-remote (rbranch)
   "Return the remote name in the remote-branch RBRANCH.
 E.g: `foo' in `foo/bar'"
@@ -1292,6 +1185,15 @@ END-RE is the regexp to match the end of a record."
   "get the SHA1 of REV."
   (egg-git-to-string "rev-parse" (concat rev "~0")))
 
+(defun egg-completing-read-sha1 (from prompt &optional default max-back)
+  (let* ((max-count (or max-back 100))
+	 (sha1-list (egg-git-to-lines "rev-list" "--topo-order"
+				      (format "--max-count=%d" max-count)
+				      "--abbrev-commit" 
+				     from))
+	 (sha1-hist (copy-sequence sha1-list)))
+    (egg-sha1 (completing-read prompt sha1-list nil nil default 'sha1-hist))))
+
 (defun egg-read-git-dir ()
   "call GIT to read the git directory of default-directory."
   (let* ((dotgit-parent (locate-dominating-file default-directory ".git"))
@@ -1337,6 +1239,22 @@ END-RE is the regexp to match the end of a record."
   "return the (pre-read) git-dir of BUFFER."
   (with-current-buffer buffer
     (egg-git-dir)))
+
+(defun egg-commit-parents (rev)
+  (let ((default-directory (egg-work-tree-dir))
+	parents)
+    (with-temp-buffer
+      (egg-git-ok t "--no-pager" "cat-file" "-p" rev)
+      (goto-char (point-min))
+      (while (re-search-forward (rx line-start 
+				    "parent " (group (= 40 hex-digit)) 
+				    (0+ space)
+				    line-end) nil t)
+	(add-to-list 'parents (match-string-no-properties 1)))
+      (setq parents (mapcar (lambda (long)
+			      (substring-no-properties long 0 8))
+			    (nreverse parents))))
+    parents))
 
 (defun egg-HEAD ()
   "return HEAD. Either a symbolic ref or a sha1."
@@ -1414,6 +1332,90 @@ END-RE is the regexp to match the end of a record."
 
 (defsubst egg-delta-hunk-at (pos &optional object)
   (car (get-text-property pos :hunk object)))
+
+(defun egg-show-branch (branch)
+  (interactive (list (egg-head-at-point)))
+  (let* ((info (and (stringp branch)
+		    (egg-git-to-string-list "for-each-ref"
+					    "--format=%(refname:short) %(refname) %(upstream:short)"
+					    (concat "refs/heads/" branch))))
+	 (name (nth 0 info))
+	 (full (nth 1 info))
+	 (upstream (nth 2 info)))
+    (when (stringp name)
+      (message "local-branch:%s full-name:%s upstream:%s" 
+	       (egg-text name 'bold) 
+	       (egg-text full 'bold)
+	       (if upstream (egg-text upstream 'bold) "none")))))
+
+(defvar egg-atag-info-buffer (get-buffer-create "*tag-info*"))
+
+(defun egg-show-atag (tag)
+  (interactive (list (egg-tag-at-point)))
+  (let ((dir (egg-work-tree-dir))
+	(buf egg-atag-info-buffer)
+	(new-buf-name (concat "*tag@" (egg-repo-name) ":" tag "*"))
+	(inhibit-read-only t)
+	target-type sig-beg sig-end verify pos)
+    (with-current-buffer buf
+      (setq default-directory dir)
+      (setq target-type (egg-git-to-string "for-each-ref" "--format=%(objecttype)"
+					   (concat "refs/tags/" tag)))
+      (unless (equal target-type "tag")
+	(error "Not an annotated tag: %s" tag))
+      (unless (string-equal (buffer-name) new-buf-name)
+	(rename-buffer new-buf-name))
+      (erase-buffer)
+      (unless (egg-git-ok t "show" "-s" tag)
+	(error "Failed to show tag %s" tag))
+      (save-match-data
+	(goto-char (point-min))
+	(re-search-forward "^tag ")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-branch)
+	(re-search-forward "^Tagger:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(re-search-forward "^Date:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(setq pos (line-end-position))
+	(when (re-search-forward "-----BEGIN PGP SIGNATURE-----" nil t)
+	  (setq sig-beg (match-beginning 0))
+	  (re-search-forward "-----END PGP SIGNATURE-----\n")
+	  (setq sig-end (match-end 0))
+	  (goto-char sig-beg)
+	  (delete-region sig-beg sig-end)
+	  (with-temp-buffer
+	    (egg-git-ok t "tag" "-v" tag)
+	    (goto-char (point-min))
+	    (re-search-forward "^gpg:")
+	    (setq verify (buffer-substring-no-properties (match-beginning 0)
+							 (point-max))))
+	  (insert verify "\n"))
+	(goto-char pos)
+	(re-search-forward "^\\(commit\\|gpg:\\)")
+	(put-text-property pos (match-beginning 0) 'face 'egg-text-1)
+	(re-search-forward "^Author:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(re-search-forward "^Date:\\s-+")
+	(put-text-property (match-end 0) (line-end-position) 'face 'egg-text-2)
+	(put-text-property (line-end-position) (point-max) 'face 'egg-text-1))
+      (set-buffer-modified-p nil))
+    (pop-to-buffer buf)))
+
+(defun egg-show-remote-branch (branch)
+  (interactive (list (egg-remote-at-point)))
+  (let* ((info (and (stringp branch)
+		    (egg-git-to-string-list "for-each-ref"
+					    "--format=%(refname:short) %(refname)"
+					    (concat "refs/remotes/" branch))))
+	 (name (nth 0 info))
+	 (full (nth 1 info))
+	 (site (and (stringp name) (egg-rbranch-to-remote name)))
+	 (url (and site (egg-git-to-string "ls-remote" "--get-url" site))))
+    (when (stringp name)
+      (message "remote-tracking-branch:%s full-name:%s site:%s" 
+	       (egg-text name 'bold) 
+	       (egg-text full 'bold)
+	       (egg-text url 'bold)))))
 
 (defsubst egg-set-mode-info (state)
   "Set the mode-line string for buffers visiting files in the current repo.
@@ -1874,13 +1876,13 @@ use STATE as repo state if it was not nil. Otherwise re-read the repo state."
 was not nil then use it as repo state instead of re-read from disc."
   (plist-get (or state (egg-repo-state)) :branch))
 
-(defsubst egg-short-sha1 (&optional sha1)
-  (egg-git-to-string "rev-parse" "--short" (or sha1 (egg-current-sha1))))
-
 (defsubst egg-current-sha1 (&optional state)
   "The immutable sha1 of HEAD.  if STATE was not nil then use it
 as repo state instead of re-read from disc."
   (plist-get (or state (egg-repo-state)) :sha1))
+
+(defsubst egg-short-sha1 (&optional sha1)
+  (egg-git-to-string "rev-parse" "--short" (or sha1 (egg-current-sha1))))
 
 (defsubst egg-user-name (&optional state)
   "The configured user name."
@@ -4083,7 +4085,7 @@ exit code ACCEPTED-CODE is considered a success."
                       (list (current-buffer)))
                 args))
 
-(defsubst egg-run-buffers-update-hook (&optional newly-read-state)
+(defun egg-run-buffers-update-hook (&optional newly-read-state)
   "Update all egg special buffers."
   (let ((egg-internal-current-state
          (or newly-read-state (egg-get-repo-state))))
