@@ -3279,15 +3279,25 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   "Keymap for a diff section in sequence of deltas between the workdir and
 the index. \\{egg-wdir-diff-section-map}")
 
-(defconst egg-unmerged-file-map
-  (let ((map (make-sparse-keymap "Egg:UnmergedFile")))
+(defconst egg-unmerged-wdir-file-map
+  (let ((map (make-sparse-keymap "Egg:UnmergedWdirFile")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "DEL") 'egg-unmerged-file-del-action)
     (define-key map (kbd "s") 'egg-unmerged-file-add-action)
     (define-key map (kbd "=") 'egg-unmerged-file-ediff-action)
-    (define-key map (kbd "RET") 'egg-unmerged-file-next-action)
+    (define-key map (kbd "RET") 'egg-unmerged-wdir-file-next-action)
     map)
-  "Keymap for unmerged entries in the status buffer. \\{egg-unmerged-file-map}")
+  "Keymap for unmerged entries in the status buffer. \\{egg-unmerged-wdir-file-map}")
+
+(defconst egg-unmerged-index-file-map
+  (let ((map (make-sparse-keymap "Egg:UnmergedIndexFile")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "DEL") 'egg-unmerged-file-del-action)
+    (define-key map (kbd "s") 'egg-unmerged-file-checkout-action)
+    (define-key map (kbd "=") 'egg-unmerged-file-ediff-action)
+    (define-key map (kbd "RET") 'egg-unmerged-index-file-next-action)
+    map)
+  "Keymap for unmerged entries in the status buffer. \\{egg-unmerged-index-file-map}")
 
 (defconst egg-unstaged-diff-section-map
   (let ((map (make-sparse-keymap "Egg:UnstagedDiff")))
@@ -3366,7 +3376,8 @@ the index. \\{egg-wdir-diff-section-map}")
 (defconst egg-unmerged-conflict-map
   (let ((map (make-sparse-keymap "Egg:Conflict")))
     (set-keymap-parent map egg-wdir-hunk-section-map)
-    (define-key map (kbd "m") 'egg-unmerged-conflict-checkout-side)
+    (define-key map (kbd "m") 'egg-unmerged-conflict-take-side)
+    (define-key map (kbd "M") 'egg-unmerged-conflict-checkout-side)
     map)
   "Keymap for a hunk in a unmerged diff section.
 \\{egg-unmerged-conflict-map}")
@@ -3624,7 +3635,8 @@ positions of the sequence as well as the decorations.
 						      :conflict-head tmp))
                  ;; mark the whole conflict section
                  (setq sub-end (egg-safe-search "^++>>>>>>>.+\n" end nil nil t))
-                 (put-text-property m-b-0 sub-end 'keymap conflict-map))
+		 (egg-delimit-section :conflict (cons sub-beg sub-end) sub-beg sub-end
+				      (+ m-b-0 9) conflict-map 'egg-compute-navigation))
 
                 ((match-beginning conf-end-no) ;;++>>>>>>>
                  (setq m-b-x (match-beginning conf-end-no)
@@ -3843,6 +3855,15 @@ not called"
     (goto-char (point-min))
     (forward-line (1- line))))
 
+(defun egg-unmerged-conflict-checkout-side (pos)
+  (interactive "d")
+  (let* ((side (get-text-property pos :conflict-side))
+	 (head (get-text-property pos :conflict-head))
+	 (file (car (get-text-property pos :diff))))
+    (when (y-or-n-p (format "use %s's contents for unmerged file %s? " head file))
+      (egg-status-buffer-handle-result 
+       (egg--git-co-files-cmd (current-buffer) file (concat "--" (symbol-name side)))))))
+
 (defun egg-unmerged-conflict-take-side (pos)
   (interactive "d")
   (let* ((hunk-info (egg-hunk-info-at pos))
@@ -3857,7 +3878,7 @@ not called"
     (save-window-excursion
       (save-excursion
 	(with-current-buffer (find-file-noselect file)
-	  (display-buffer (current-buffer))
+	  (select-window (display-buffer (current-buffer)))
 	  (let (conf-beg conf-end ours-beg ours-end theirs-beg theirs-end
 			 ours theirs conflict bg)
 	    (goto-char (point-min))
@@ -4609,7 +4630,9 @@ adding the contents."
 				 (match-beginning 0) (match-end 0) nil nil
 				 #'egg-compute-navigation)
 	    (put-text-property (match-beginning 0) (match-end 0)
-			       'keymap egg-unmerged-file-map)
+			       'keymap (if (eq sect-type :merged) 
+					   egg-unmerged-index-file-map
+					 egg-unmerged-wdir-file-map))
 	    (setq tmp (buffer-substring-no-properties (match-end 0) (1+ (match-end 0))))
 	    (setq tmp (concat (cond ((memq :we-deleted status) ": deleted by us")
 				    ((memq :they-deleted status) ":  deleted by them")
@@ -4645,7 +4668,7 @@ adding the contents."
                                :hunk-map egg-unstaged-hunk-section-map
                                :cc-diff-map egg-unmerged-diff-section-map
                                :cc-hunk-map egg-unmerged-hunk-section-map
-                               :conflict-map egg-unmerged-hunk-section-map)
+                               :conflict-map egg-unmerged-conflict-map)
     (egg-sb-decorate-unmerged-entries-in-section diff-beg end :unmerged)
     (put-text-property (- end 2) end 'intangible t)))
 
@@ -5161,6 +5184,15 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
 	  (egg-status-buffer-handle-result (egg--git-rm-cmd (current-buffer) file))
 	(message "added file %s is still unmerged!" file)))))
 
+(defun egg-unmerged-file-checkout-action (pos)
+  (interactive "d")
+  (let* ((status (get-text-property pos :merged))
+	 (file (and status (car status))))
+    (unless (memq :unmerged status)
+      (error "don't know how to handle status %S" status))
+    (when (y-or-n-p (format "undo all merge results in %s? " file))
+      (egg-status-buffer-handle-result (egg--git-co-files-cmd (current-buffer) file "-m")))))
+
 (defun egg-unmerged-file-ediff-action (pos)
   (interactive "d")  
   (let* ((status (or (get-text-property pos :unmerged) (get-text-property pos :merged)))
@@ -5169,15 +5201,27 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
       (error "don't know how to handle status %S" status))
     (egg-resolve-merge-with-ediff file)))
 
-(defun egg-unmerged-file-next-action (pos)
+(defun egg-unmerged-wdir-file-next-action (pos)
   (interactive "d")
-  (let* ((status (or (get-text-property pos :unmerged) (get-text-property pos :merged)))
+  (let* ((status (get-text-property pos :unmerged))
 	 (file (and status (car status))))
     (unless (memq :unmerged status)
       (error "don't know how to handle status %S" status))
     (cond ((or (memq :we-added status) (memq :they-added status) (memq :both-added status))
 	   (egg-unmerged-file-add-action pos))
 	  ((or (memq :we-deleted status) (memq :they-deleted status) (memq :both-deleted status))
+	   (egg-unmerged-file-del-action pos))
+	  ((memq :both-modified status)
+	   (egg-unmerged-file-ediff-action pos))
+	  (t (message "don't know how to handle status %S" status)))))
+
+(defun egg-unmerged-index-file-next-action (pos)
+  (interactive "d")
+  (let* ((status (get-text-property pos :merged))
+	 (file (and status (car status))))
+    (unless (memq :unmerged status)
+      (error "don't know how to handle status %S" status))
+    (cond ((or (memq :we-deleted status) (memq :they-deleted status) (memq :both-deleted status))
 	   (egg-unmerged-file-del-action pos))
 	  ((memq :both-modified status)
 	   (egg-unmerged-file-ediff-action pos))
@@ -5607,12 +5651,6 @@ POS."
               (y-or-n-p "irreversibly remove the hunk under cursor? "))
     (error "Too chicken to proceed with undo operation!"))
   (egg-hunk-section-apply-cmd pos "-p1" "--reverse"))
-
-(defun egg-unmerged-conflict-checkout-side (pos)
-  (interactive "d")
-  (let ((side (get-text-property pos :conflict-side))
-	(name (get-text-property pos :conflict-head)))
-    ()))
 
 (defun egg-diff-section-cmd-stage (pos)
   "Update the index with the file at POS.
