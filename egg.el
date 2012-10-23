@@ -273,6 +273,14 @@ Many Egg faces inherit from this one by default."
   "Face for diff hunk headers."
   :group 'egg-faces)
 
+(defface egg-conflict-resolution
+  '((((class color) (background light))
+     :background "grey95")
+    (((class color) (background dark))
+     :background "grey35"))
+  "Face highlighting the resolution selection."
+  :group 'egg-faces)
+
 (defface egg-diff-add
   '((((class color) (background light))
      :foreground "blue1")
@@ -3355,6 +3363,14 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a unmerged diff section.
 \\{egg-unmerged-hunk-section-map}")
 
+(defconst egg-unmerged-conflict-map
+  (let ((map (make-sparse-keymap "Egg:Conflict")))
+    (set-keymap-parent map egg-wdir-hunk-section-map)
+    (define-key map (kbd "m") 'egg-unmerged-conflict-checkout-side)
+    map)
+  "Keymap for a hunk in a unmerged diff section.
+\\{egg-unmerged-conflict-map}")
+
 (defun list-tp ()
   (interactive)
   (message "tp: %S" (text-properties-at (point))))
@@ -3382,11 +3398,11 @@ the index. \\{egg-wdir-diff-section-map}")
 (defsubst egg-point-in-section (section-id)
   (eq (get-text-property (point) :section) section-id))
 
-(defsubst egg-safe-search (re limit &optional no)
+(defsubst egg-safe-search (re limit &optional no backward end)
   (save-excursion
     (save-match-data
-      (and (re-search-forward re limit t)
-           (match-beginning (or no 0))))))
+      (and (funcall (if backward #'re-search-backward #'re-search-forward) re limit t)
+           (funcall (if end #'match-end #'match-beginning) (or no 0))))))
 
 (defsubst egg-safe-search-pickup (re &optional limit no)
   (save-excursion
@@ -3548,9 +3564,9 @@ positions of the sequence as well as the decorations.
                   "--- " a "\\(.+\\)\\|"		;5 src
                   "\\+\\+\\+ " b "\\(.+\\)\\|"		;6 dst
                   "index \\(.+\\)\\|"			;7 index
-                  "\\+\\+<<<<<<< \\(.+\\)\\(?::.+\\)\\|";8 conflict start
+                  "\\+\\+<<<<<<< \\(.+\\)\\(?::.+\\)?\\|";8 conflict start
                   "\\(\\+\\+=======\\)\\|"		;9 conflict div
-                  "\\+\\+>>>>>>> \\(.+\\)\\(?::.+\\)\\|";10 conflict end
+                  "\\+\\+>>>>>>> \\(.+\\)\\(?::.+\\)?\\|";10 conflict end
                   "\\( -.*\\)\\|"			;11 cc-del
                   "\\( \\+.*\\)\\|"			;12 cc-add
                   "\\(-.*\\)\\|"			;13 del
@@ -3564,7 +3580,7 @@ positions of the sequence as well as the decorations.
          (diff-end-re "^\\(?:diff \\|\\* \\)")
 
          sub-beg sub-end head-end m-b-0 m-e-0 m-b-x m-e-x
-         last-diff last-cc current-delta-is)
+         last-diff last-cc current-delta-is tmp pos)
 
     (save-match-data
       (save-excursion
@@ -3598,21 +3614,30 @@ positions of the sequence as well as the decorations.
 
                 ((match-beginning conf-beg-no) ;;++<<<<<<<
                  (setq m-b-x (match-beginning conf-beg-no)
-                       m-e-x (match-end conf-beg-no))
+                       m-e-x (match-end conf-beg-no)
+		       tmp (match-string-no-properties conf-beg-no))
                  (put-text-property m-b-0 m-b-x 'face 'egg-diff-conflict)
                  (put-text-property m-b-x m-e-x 'face 'egg-branch-mono)
                  (put-text-property m-e-x m-e-0 'face 'egg-diff-none)
+		 (setq pos (egg-safe-search "^++=======" end))
+		 (add-text-properties m-b-0 pos (list :conflict-side 'ours
+						      :conflict-head tmp))
                  ;; mark the whole conflict section
-                 (setq sub-end (egg-safe-search "^++>>>>>>>.+$" end))
-                 (put-text-property m-b-0 sub-end 'keymap
-                                    conflict-map))
+                 (setq sub-end (egg-safe-search "^++>>>>>>>.+\n" end nil nil t))
+                 (put-text-property m-b-0 sub-end 'keymap conflict-map))
 
-                ((match-beginning conf-end-no)
+                ((match-beginning conf-end-no) ;;++>>>>>>>
                  (setq m-b-x (match-beginning conf-end-no)
-                       m-e-x (match-end conf-end-no))
+                       m-e-x (match-end conf-end-no)
+		       tmp (match-string-no-properties conf-end-no))
                  ;; just decorate, no mark.
                  ;; the section was already mark when the conf-beg-no
                  ;; matched.
+
+		 (setq pos (egg-safe-search "^++=======" beg nil t t))
+		 (add-text-properties pos (1+ m-e-0) (list :conflict-side 'theirs
+						      :conflict-head tmp))
+
                  (put-text-property m-b-0 m-b-x 'face 'egg-diff-conflict)
                  (put-text-property m-b-x m-e-x 'face 'egg-branch-mono)
                  (put-text-property m-e-x m-e-0 'face 'egg-diff-none))
@@ -3817,6 +3842,86 @@ not called"
     (find-file-other-window file)
     (goto-char (point-min))
     (forward-line (1- line))))
+
+(defun egg-unmerged-conflict-take-side (pos)
+  (interactive "d")
+  (let* ((hunk-info (egg-hunk-info-at pos))
+	 (file (and hunk-info (car hunk-info)))
+	 (hunk-header (and hunk-info (nth 1 hunk-info)))
+	 (hunk-beg (and hunk-info (nth 2 hunk-info)))
+	 (hunk-end (and hunk-info (nth 3 hunk-info)))
+	 (hunk-ranges (and hunk-info (nth 4 hunk-info)))
+	 (line (and hunk-info (egg-hunk-compute-line-no hunk-header hunk-beg hunk-ranges)))
+	 (side (get-text-property pos :conflict-side))
+	 our-head their-head resolution)
+    (save-window-excursion
+      (save-excursion
+	(with-current-buffer (find-file-noselect file)
+	  (display-buffer (current-buffer))
+	  (let (conf-beg conf-end ours-beg ours-end theirs-beg theirs-end
+			 ours theirs conflict bg)
+	    (goto-char (point-min))
+	    (forward-line (1- line))
+	    (if (eq side 'theirs)
+		(progn
+		  (unless (re-search-backward "^<<<<<<< \\(.+\\)\n" nil t)
+		    (error "Failed searching for <<<<<<<"))
+		  (setq our-head (match-string-no-properties 1))
+		  (setq conf-beg (copy-marker (match-beginning 0) nil))
+		  (setq ours-beg (match-end 0))
+		  (unless (re-search-forward "^=======\n" nil t)
+		    (error "Failed searching for ======="))
+		  (setq ours-end (match-beginning 0))
+		  (setq theirs-beg (match-end 0))
+		  (unless (re-search-forward "^>>>>>>> \\(.+\\)\n")
+		    (error "Failed searching for >>>>>>>"))
+		  (setq their-head (match-string-no-properties 1))
+		  (setq theirs-end (match-beginning 0))
+		  (setq conf-end (copy-marker (match-end 0) t)))
+	      (unless (re-search-forward "^>>>>>>> \\(.+\\)\n")
+		(error "Failed searching for >>>>>>>"))
+	      (setq their-head (match-string-no-properties 1))
+	      (setq theirs-end (match-beginning 0))
+	      (setq conf-end (copy-marker (match-end 0) t))
+	      (unless (re-search-backward "^=======\n" nil t)
+		(error "Failed searching for ======="))
+	      (setq ours-end (match-beginning 0))
+	      (setq theirs-beg (match-end 0))
+	      (unless (re-search-backward "^<<<<<<< \\(.+\\)\n" nil t)
+		(error "Failed searching for <<<<<<<"))
+	      (setq our-head (match-string-no-properties 1))
+	      (setq ours-beg (match-end 0))
+	      (setq conf-beg (copy-marker (match-beginning 0) nil)))
+	    (setq ours (buffer-substring-no-properties ours-beg ours-end))
+	    (setq theirs (buffer-substring-no-properties theirs-beg theirs-end))
+	    (setq conflict (buffer-substring-no-properties conf-beg conf-end))
+
+	    (goto-char conf-beg)
+	    (delete-region conf-beg conf-end)
+	    (insert (if (eq side 'theirs) theirs ours))
+	    (setq bg (make-overlay conf-beg conf-end nil nil t))
+	    (overlay-put bg 'face 'egg-conflict-resolution)
+	    (setq resolution 
+		  (if (y-or-n-p (format "keep %s's delta? " 
+					(if (eq side 'theirs) their-head our-head)))
+		      side
+		    (goto-char conf-beg)
+		    (delete-region conf-beg conf-end)
+		    (insert (if (eq side 'theirs) ours theirs))
+		    (setq bg (move-overlay bg conf-beg conf-end))
+		    (if (y-or-n-p (format "keep %s's delta? " 
+					  (if (eq side 'theirs) our-head their-head)))
+			(if (eq side 'theirs) 'ours 'theirs)
+		      nil)))
+	    (if resolution
+		(basic-save-buffer)
+	      (goto-char conf-beg)
+	      (delete-region conf-beg conf-end)
+	      (insert conflict)
+	      (set-buffer-modified-p nil))
+	    (delete-overlay bg)))))
+    (when resolution
+      (egg-buffer-cmd-refresh))))
 
 (defun egg-section-cmd-toggle-hide-show (nav)
   "Toggle the hidden state of the current navigation section of type NAV."
@@ -5502,6 +5607,12 @@ POS."
               (y-or-n-p "irreversibly remove the hunk under cursor? "))
     (error "Too chicken to proceed with undo operation!"))
   (egg-hunk-section-apply-cmd pos "-p1" "--reverse"))
+
+(defun egg-unmerged-conflict-checkout-side (pos)
+  (interactive "d")
+  (let ((side (get-text-property pos :conflict-side))
+	(name (get-text-property pos :conflict-head)))
+    ()))
 
 (defun egg-diff-section-cmd-stage (pos)
   "Update the index with the file at POS.
