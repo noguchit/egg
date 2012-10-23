@@ -3861,8 +3861,10 @@ not called"
 	 (head (get-text-property pos :conflict-head))
 	 (file (car (get-text-property pos :diff))))
     (when (y-or-n-p (format "use %s's contents for unmerged file %s? " head file))
-      (egg-status-buffer-handle-result 
-       (egg--git-co-files-cmd (current-buffer) file (concat "--" (symbol-name side)))))))
+      (when (egg-status-buffer-handle-result 
+	     (egg--git-co-files-cmd (current-buffer) file (concat "--" (symbol-name side))))
+	(when (y-or-n-p (format "stage %s? " file))
+	  (egg-status-buffer-handle-result (egg--git-add-cmd (current-buffer) file)))))))
 
 (defun egg-unmerged-conflict-take-side (pos)
   (interactive "d")
@@ -3942,7 +3944,11 @@ not called"
 	      (set-buffer-modified-p nil))
 	    (delete-overlay bg)))))
     (when resolution
-      (egg-buffer-cmd-refresh))))
+      (egg-buffer-cmd-refresh)
+      ;; (when (egg-git-ok nil "diff" "--cc" "--quiet" file)
+      ;; 	(when (y-or-n-p (format "no more conflict in %s, stage %s? " file file))
+      ;; 	  (egg-status-buffer-handle-result (egg--git-add-cmd (current-buffer) file))))
+      )))
 
 (defun egg-section-cmd-toggle-hide-show (nav)
   "Toggle the hidden state of the current navigation section of type NAV."
