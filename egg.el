@@ -6517,7 +6517,9 @@ nil then compare the index and the work-dir."
     (if (memq :diff egg-show-key-help-in-buffers)
         (egg-diff-info-add-help info))
     (if (stringp file)
-        (setq file (list file))
+        (progn
+	  (plist-put info :file file)
+	  (setq file (list file)))
       (setq tmp (plist-get info :args))
       (setq tmp (cons "-M" tmp))
       (plist-put info :args tmp))
@@ -9394,7 +9396,7 @@ DEFAULT-TERM is the default search term."
 	 (revs (and start-rev (list (concat start-rev "^.." head-name))))
 	 (pickaxe (egg-buffer-prompt-pickaxe 
 		   (if revs (concat "search " (car revs))
-		     (format "search %s'shistory" head-name))
+		     (format "search %s's history" head-name))
 		   :string default-term 
 		   (> prefix 15) (> prefix 3) t))
 	 closure)
