@@ -587,6 +587,34 @@ will select the window unless prefixed with C-u."
 					   "--ignore-all-space"))))
 		 ))
 
+(defcustom egg-git-merge-option-list nil
+  "Merge options"
+  :group 'egg
+  :type 
+  '(choice :tag "Strategy"
+	   (const :tag "Merge uses Git's Default" nil)
+	   (cons :tag "Recursive" 
+		 (const :tag "Merge uses Recursive Strategy" "--strategy=recursive")
+		 (set :tag "Recursive Options"
+		      (radio :tag "Favour 1 side"
+			     (const :tag "Favour Their Side" "--strategy-option=theirs")
+			     (const :tag "Favour Our Side" "--strategy-option=ours"))
+		      (const :tag "Be Patience" "--strategy-option=patience")
+		      (radio :tag "Ignore Space"
+			     (const :tag "Ignore Space Change at EOL"
+				    "--strategy-option=ignore-space-at-eol")
+			     (const :tag "Ignore Space Change"
+				    "--strategy-option=ignore-space-change")
+			     (const :tag "Ignore All Space"
+				    "--strategy-option=ignore-all-space"))))
+	   (list :tag "Resolve" (const :tag "Merge uses Resolve Strategy" 
+				       "--strategy=resolve"))
+	   (list :tag "Octopus" (const :tag "Merge uses Octopus Strategy" 
+				       "--strategy=octopus"))
+	   (list :tag "Ours" (const :tag "Merge just keeps Our Side" 
+				       "--strategy=octopus"))
+	   ))
+
 (defcustom egg-log-buffer-marks "+~.*_@>"
   "A vector of 4 characters used for marking commit in the log buffer.
 The first 3 elemements are used to mark a commit for the upcoming interactive rebase.
@@ -2545,7 +2573,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 	     (egg--git-pp-grab-line-no -1)))
 	(t (egg--git-pp-fatal-result))))
 
-(defun egg--git-merge-cmd (buffer-to-update pp-func &rest args)
+(defun egg--git-merge-cmd-args (buffer-to-update pp-func &optional args)
   "Peform the git merge command synchronously with ARGS as arguments.
 Update BUFFER-TO-UPDATE if needed. The relevant line from the
 output of the underlying git command will be displayed as
@@ -2558,6 +2586,9 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
        (cons #'egg--git-merge-pp-func pp-func)
      #'egg--git-merge-pp-func)
    args))
+
+(defun egg--git-merge-cmd (buffer-to-update pp-func &rest args)
+  (egg--git-merge-cmd-args buffer-to-update pp-func args))
 
 (defun egg--git-merge-cmd-test (ff-only from)
   (interactive "P\nsMerge: ")
@@ -4331,7 +4362,7 @@ rebase session."
     (with-egg-debug-buffer
       (egg-do-async-rebase-continue
        #'egg-handle-rebase-interactive-exit
-       (egg-pick-file-contents (concat (egg-git-rebase-dir) "head") "^.+$")
+       (egg-pick-file-contents (concat (egg-git-rebase-dir) "head-name") "^.+$")
        action))))
 
 (defun egg-buffer-selective-rebase-continue ()
@@ -5333,7 +5364,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 						   "Unstaged Changes:")))
                 ((eq sect 'staged) (egg-sb-insert-staged-section 
 				    (if (egg-is-merging state)
-					"Merged Changes"
+					"Merged Changes:"
 				      "Staged Changes:")))
                 ((eq sect 'untracked) (egg-sb-insert-untracked-section))
 		((eq sect 'stash) (egg-sb-insert-stash-section))))
@@ -5829,11 +5860,12 @@ MSG will be used for the merge commit.
 Thecommand  usually take the next action recommended by the results, but
 if the next action is IGNORED-ACTION then it won't be taken."
   (let ((msg (or msg (concat "merging in " rev)))
-        merge-cmd-ok res modified-files 
+        merge-cmd-ok res modified-files options
 	need-commit force-commit-to-status line fix-line-func)
-    
+
     (setq modified-files (egg-git-to-lines "diff" "--name-only" rev))
     (cond ((equal merge-mode-flag "--commit")
+	   (setq options egg-git-merge-option-list)
 	   (setq need-commit t)
 	   (setq merge-mode-flag "--no-commit")
 	   (setq fix-line-func
@@ -5848,9 +5880,12 @@ if the next action is IGNORED-ACTION then it won't be taken."
 			   (plist-put merge-res :line line)))))
 		   merge-res)))
 	  ((member merge-mode-flag '("--no-commit" "--squash"))
+	   (setq options egg-git-merge-option-list)
 	   (setq force-commit-to-status t)))
 
-    (setq res (nconc (egg--git-merge-cmd 'all fix-line-func merge-mode-flag "--log" rev)
+    (setq res (nconc (egg--git-merge-cmd-args 'all fix-line-func
+					      (append (cons merge-mode-flag options)
+						      (list "--log" rev)))
 		     (list :files modified-files)))
     (if need-commit
 	(egg--buffer-handle-result-with-commit
@@ -6634,6 +6669,8 @@ Jump to line LINE if it's not nil."
 			(list (format "--max-count=%d" egg-log-HEAD-max-len))))
 		  (t (error "Invalid ref: %s" ref)))
 	    git-log-extra-options
+	    (when (and paths (null (cdr paths)))
+	      (list "--follow"))
 	    (cond ((null ref) (list "--all"))
 		  ((stringp ref) (list ref))
 		  ((consp ref) ref))
@@ -7521,8 +7558,6 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
                     (concat rebase-dir "head-name"))
       (erase-buffer)
       (insert (plist-get repo-state :sha1) "\n")
-      (write-region (point-min) (point-max) ;; no longer needed
-                    (concat rebase-dir "head"))
       (write-region (point-min) (point-max)
                     (concat rebase-dir "orig-head"))
       (erase-buffer)
