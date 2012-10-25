@@ -6647,9 +6647,9 @@ Jump to line LINE if it's not nil."
 	 (mark-pos (if (get-text-property pos :mark)
 		       pos
 		     (if (get-text-property (1- pos) :mark) (1- pos))))
-	 (mark (get-text-property mark-pos :mark))
-	 (append-to (get-text-property mark-pos :append-to))
-	 (followed-by (get-text-property mark-pos :followed-by))
+	 (mark (and mark-pos (get-text-property mark-pos :mark)))
+	 (append-to (and mark-pos (get-text-property mark-pos :append-to)))
+	 (followed-by (and mark-pos (get-text-property mark-pos :followed-by)))
 	 (reflog-time (and reflog (get-text-property pos :time)))
 	 into is-squashed)
     (if (or ref-info mark)
