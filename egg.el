@@ -401,6 +401,11 @@ Many Egg faces inherit from this one by default."
                     (radio (const :tag "Section" :section)
                            (const :tag "File" :diff)
                            (const :tag "Hunk" :hunk)))
+	      (cons :tag "Log Buffer"
+                    (const :tag "Hide Blocks of type"
+                           egg-log-buffer-mode)
+                    (radio (const :tag "File" :diff)
+                           (const :tag "Hunk" :hunk)))
               (cons :tag "Commit Log Buffer"
                     (const :tag "Hide Blocks of type"
                            egg-commit-buffer-mode)
@@ -1725,11 +1730,11 @@ this is for rebase -i variant."
         :rebase-num
         (length
          (egg-pick-file-records (concat rebase-dir "git-rebase-todo.backup")
-                                "^[pes]" "$"))
+                                "^[pesf]" "$"))
         :rebase-step
         (if (file-exists-p (concat rebase-dir "done"))
             (length (egg-pick-file-records (concat rebase-dir "done")
-                                           "^[pes]" "$"))
+                                           "^[pesf]" "$"))
           0)
 	:rebase-stopped
 	(if (file-exists-p (concat rebase-dir "stopped-sha"))
@@ -1738,7 +1743,7 @@ this is for rebase -i variant."
         (if (file-exists-p (concat rebase-dir "done"))
             (car (egg-pick-file-records
                   (concat rebase-dir "done")
-                  "^[pes]" "$")))))
+                  "^[pesf]" "$")))))
 
 (defsubst egg-git-rebase-dir (&optional git-dir)
   (concat (or git-dir (egg-git-dir)) "/" egg-git-rebase-subdir "/"))
@@ -4134,12 +4139,17 @@ exit code ACCEPTED-CODE is considered a success."
 		    (goto-char (egg-previous-non-hidden
 				(+ (line-beginning-position) column))))))))))))
 
+;; (defun egg-buffer-cmd-refresh ()
+;;   "Refresh the current egg special buffer."
+;;   (interactive)
+;;   (when (and (egg-git-dir)
+;;              (functionp egg-buffer-refresh-func))
+;;     (funcall egg-buffer-refresh-func (current-buffer))))
 (defun egg-buffer-cmd-refresh ()
   "Refresh the current egg special buffer."
   (interactive)
-  (when (and (egg-git-dir)
-             (functionp egg-buffer-refresh-func))
-    (funcall egg-buffer-refresh-func (current-buffer))))
+  (when (egg-git-dir) 
+    (egg-refresh-buffer (current-buffer))))
 
 (defun egg-buffer-cmd-next-block (nav-prop)
   "Move to the next block indentified by text property NAV-PROP."
@@ -5264,10 +5274,13 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
 
 
 
-(defsubst egg-buffer-hide-section-type (sect-type)
+(defsubst egg-buffer-hide-section-type (sect-type &optional beg end)
   "Hide sections of SECT-TYPE in current special egg buffer."
-  (let ((pos (point-min)) nav)
-    (while (setq pos (next-single-property-change (1+ pos) sect-type))
+  (let ((pos (or beg (point-min)))
+	(end (or end (point-max))) 
+	nav)
+    (while (and (setq pos (next-single-property-change (1+ pos) sect-type))
+		(< pos end))
       (when (get-text-property pos sect-type)
         (setq nav (get-text-property pos :navigation))
         (add-to-invisibility-spec (cons nav t))))))
@@ -7314,7 +7327,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (while (setq pos (next-single-property-change (1+ pos) :mark))
       (remove-text-properties pos (1+ pos)
                               (list :mark nil 'display nil 
-				    :append-to nil :followed-by nil)))))
+				    :append-to nil :followed-by nil)))
+    (egg-refresh-buffer (current-buffer))))
 
 (defun egg-log-buffer-unmark (pos &optional all)
   (interactive "d\nP")
@@ -8283,8 +8297,9 @@ prompt for a remote repo."
           (inhibit-read-only t)
           (indent-column egg-log-buffer-comment-column)
           (indent-spaces (make-string egg-log-buffer-comment-column ? ))
-          beg end diff-beg diff-end is-cc-diff face-end)
+          commit-beg beg end diff-beg diff-end is-cc-diff face-end hide-sect-type)
       (goto-char pos)
+      (setq commit-beg (line-beginning-position))
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
       (unless (egg-git-ok-args 
@@ -8302,7 +8317,8 @@ prompt for a remote repo."
 
       ;; car is the sha1 of the commit
       ;; cdr is a list of selected files from the commit.
-      (put-text-property beg end :selection (list sha1))
+      ;; use commit-beg to include the commit line as well
+      (put-text-property commit-beg end :selection (list sha1))
 
       (save-excursion
 	(save-match-data
@@ -8323,8 +8339,7 @@ prompt for a remote repo."
 				 :cc-diff-map egg-log-diff-map
                                  :cc-hunk-map egg-log-hunk-map)
       (goto-char beg)
-      (setq end (or (next-single-property-change beg :diff) end)
-	    diff-beg end)
+      (setq diff-beg (or (next-single-property-change beg :diff) end))
 
       (while (< (point) diff-beg)
 	(if (equal (buffer-substring-no-properties (line-beginning-position)
@@ -8341,16 +8356,12 @@ prompt for a remote repo."
 			     'face 'egg-text-2))
 	(forward-line 1)
 	(goto-char (line-end-position)))
-      ;; (put-text-property beg (+ indent-column beg) 'face 'egg-diff-none)
-      ;; (put-text-property (+  indent-column beg) (line-end-position)
-      ;;                    'face 'egg-text-2)
-      ;; (forward-line 1)
-      ;; (put-text-property (point) (+ indent-column (point)) 'face 'egg-diff-none)
-      ;; (put-text-property (+ indent-column (point)) end 'face 'egg-text-2)
 
       (when (stringp highlight-regexp)
 	(egg-buffer-highlight-pickaxe highlight-regexp diff-beg diff-end is-cc-diff))
-      ;;(egg-log-buffer-box-inserted-commit beg diff-end)
+      (when (setq hide-sect-type (cdr (assq 'egg-log-buffer-mode 
+					    egg-buffer-hide-section-type-on-start)))
+	(egg-buffer-hide-section-type hide-sect-type beg end))
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
