@@ -587,7 +587,7 @@ will select the window unless prefixed with C-u."
 					   "--ignore-all-space"))))
 		 ))
 
-(defcustom egg-git-merge-option-list nil
+(defcustom egg-git-merge-strategy-options nil
   "Merge options"
   :group 'egg
   :type 
@@ -5933,7 +5933,7 @@ if the next action is IGNORED-ACTION then it won't be taken."
 
     (setq modified-files (egg-git-to-lines "diff" "--name-only" rev))
     (cond ((equal merge-mode-flag "--commit")
-	   (setq options egg-git-merge-option-list)
+	   (setq options egg-git-merge-strategy-options)
 	   (setq need-commit t)
 	   (setq merge-mode-flag "--no-commit")
 	   (setq fix-line-func
@@ -5948,7 +5948,7 @@ if the next action is IGNORED-ACTION then it won't be taken."
 			   (plist-put merge-res :line line)))))
 		   merge-res)))
 	  ((member merge-mode-flag '("--no-commit" "--squash"))
-	   (setq options egg-git-merge-option-list)
+	   (setq options egg-git-merge-strategy-options)
 	   (setq force-commit-to-status t)))
 
     (setq res (nconc (egg--git-merge-cmd-args 'all fix-line-func
@@ -5988,7 +5988,7 @@ perform the indicated rebase action."
       (setq cmd-res
             (cond ((and (stringp onto) (stringp upstream-or-action))
 		   (egg--git-rebase-merge-cmd-args 
-		    t nil (append egg-git-merge-option-list
+		    t nil (append egg-git-merge-strategy-options
 				  (list "-m" "--onto" onto upstream-or-action))))
                   ((eq upstream-or-action :abort)
                    (egg--git-rebase-merge-cmd t nil "--abort"))
@@ -5998,7 +5998,7 @@ perform the indicated rebase action."
                    (egg--git-rebase-merge-cmd t nil "--continue"))
                   ((stringp upstream-or-action)
                    (egg--git-rebase-merge-cmd-args
-		    t nil (append egg-git-merge-option-list
+		    t nil (append egg-git-merge-strategy-options
 				  (list "-m" upstream-or-action))))))
       (setq modified-files (egg-git-to-lines "diff" "--name-only" pre-merge))
       (when (consp cmd-res) (plist-put cmd-res :files modified-files))
@@ -7614,7 +7614,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
       (save-match-data
 	(let* ((split-string-default-separators "=")
-	       (strategy-alist (mapcar 'split-string egg-git-merge-option-list))
+	       (strategy-alist (mapcar 'split-string egg-git-merge-strategy-options))
 	       (strategy (cadr (assoc "--strategy" strategy-alist)))
 	       (strategy-opts 
 		(delq nil 
