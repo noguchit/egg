@@ -4406,7 +4406,7 @@ See `egg-do-rebase-head'."
                                                  action
                                                  exit-code)
   "Continue the current rebase session asynchronously."
-  (let ((process-environment process-environment)
+  (let ((process-environment (copy-sequence process-environment))
         (action (or action "--continue"))
         (buffer (current-buffer))
         proc)
@@ -7583,7 +7583,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
 
 (defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
-  (let ((process-environment process-environment)
+  (let ((process-environment (copy-sequence process-environment))
         (repo-state (or repo-state (egg-repo-state :staged :unstaged)))
         (orig-buffer (current-buffer))
         orig-head-sha1 tmp)
@@ -7668,7 +7668,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
 (defun egg-sentinel-commit-n-continue-rebase (prefix gpg-uid text-beg text-end next-beg
 						     rebase-dir orig-buffer orig-sha1 commit-func)
-  (let ((process-environment process-environment))
+  (let ((process-environment (copy-sequence process-environment)))
     (mapc (lambda (env-lst)
 	    (setenv (car env-lst) (cadr env-lst)))
 	  (egg-rebase-author-info rebase-dir))
