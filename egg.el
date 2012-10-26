@@ -2596,6 +2596,74 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
       (egg--git-merge-cmd t "-v" "--ff-only" from)
     (egg--git-merge-cmd t "-v" from)))
 
+
+(defun egg--git-rebase-merge-pp-func (ret-code)
+  (cond ((= ret-code 0)
+	 (or (egg--git-pp-grab-line-matching "All done" "rebase was successful!"
+					     :success t :next-action 'log)
+	     (egg--git-pp-grab-line-matching "HEAD is now at" ;; --abort
+					     :success t :next-action 'log)
+	     (egg--git-pp-grab-line-matching "Fast-forwarded" ;; onto is proper descendant
+					     :success t :next-action 'log)
+	     (egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
+	(t
+	 (or (egg--git-pp-grab-line-matching "You still have unmerged paths in your index"
+					     "please add conflict resolution(s) into index"
+					     :success t :next-action 'status)
+	     (egg--git-pp-grab-line-matching "Commit failed, please do not call"
+					     "troubles! failed to commit this cherry"
+					     :success nil :next-action 'status)
+	     (egg--git-pp-grab-1st-line-matching 
+	      '("When you have resolved this problem" 
+		"Strategy: .+ failed, try another"
+		"You must edit all merge conflicts"
+		"error: could not apply"
+		"Automatic cherry-pick failed")
+	      "please resolve merge conflicts"
+	      :success t :next-action 'status)
+	     (egg--git-pp-grab-1st-line-matching
+	      '("You are not currently on a branch" "There is no tracking information")
+	      "rebase failed to determine upstream for the current branch"
+	      :success nil :next-action 'log)
+	     (egg--git-pp-grab-1st-line-matching
+	      '("there are more than one merge bases" 
+		"there is no merge base"
+		"Does not point to a valid commit") nil
+		:success nil :next-action 'log)
+	     (egg--git-pp-grab-line-matching
+	      "I wonder if you are in the middle of another rebase"
+	      "a rebase is already in progress!"
+	      :success nil :next-action 'status)
+	     (egg--git-pp-grab-1st-line-matching 
+	      '("The pre-rebase hook refused to rebase" "No rebase in progress"
+		"fatal: no such branch:")
+	      nil :success nil :next-action 'log)
+	     (egg--git-pp-fatal-result)))))
+
+(defun egg--git-rebase-merge-cmd-args (buffer-to-update pp-func args)
+  "Peform the git rebase -m command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE if needed. The relevant line from the
+output of the underlying git command will be displayed as
+feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
+  (egg--do-git-action 
+   "rebase" buffer-to-update
+   (if (functionp pp-func)
+       (cons #'egg--git-rebase-merge-pp-func pp-func)
+     #'egg--git-rebase-merge-pp-func)
+   args))
+
+(defsubst egg--git-rebase-merge-cmd (buffer-to-update pp-func &rest args)
+  "Peform the git rebase -m command synchronously with ARGS as arguments.
+Update BUFFER-TO-UPDATE if needed. The relevant line from the
+output of the underlying git command will be displayed as
+feedback of emacs command.
+
+See documentation of `egg--git-action-cmd-doc' for the return structure."
+  (egg--git-rebase-merge-cmd-args buffer-to-update pp-func args))
+
+
 (defun egg--git-add-cmd (buffer-to-update &rest args)
   "Run git add command synchronously with ARGS as arguments.
 Update BUFFER-TO-UPDATE as needed.
@@ -4311,7 +4379,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
   "Context keymap for the repo section of the status buffer when
   rebase is in progress.\\{egg-status-buffer-rebase-map}")
 
-(defun egg-buffer-do-rebase (upstream-or-action &optional onto)
+(defun egg-buffer-do-rebase (upstream-or-action &optional onto current-action)
   "Perform rebase action from an egg special buffer.
 See `egg-do-rebase-head'."
   (let ((rebase-dir (plist-get (egg-repo-state :rebase-dir) :rebase-dir))
@@ -4324,17 +4392,15 @@ See `egg-do-rebase-head'."
       (unless rebase-dir
         (error "No rebase in progress in directory %s"
                (egg-work-tree-dir git-dir))))
-    (setq res (egg-do-rebase-head upstream-or-action onto))
-    (egg-revert-visited-files (plist-get res :files))
-    (message "GIT-REBASE> %s" (plist-get res :message))
-    (plist-get res :success)))
+    (egg-do-rebase-head upstream-or-action onto current-action)))
 
 (defun egg-buffer-rebase-continue ()
   "Continue the current rebase session."
   (interactive)
   (message "continue with current rebase")
-  (unless (egg-buffer-do-rebase :continue)
-    (egg-status nil t)))
+  (egg-buffer-do-rebase :continue nil
+			(cdr (assq major-mode '((egg-status-buffer-mode . status)
+						(egg-log-buffer-mode . log))))))
 
 (defsubst egg-do-async-rebase-continue (callback closure &optional
                                                  action
@@ -4354,8 +4420,9 @@ See `egg-do-rebase-head'."
 The mode, sync or async, will depend on the nature of the current
 rebase session."
   (if (not (egg-interactive-rebase-in-progress))
-      (unless (egg-buffer-do-rebase action)
-        (egg-status nil t))
+      (egg-buffer-do-rebase action nil 
+			    (cdr (assq major-mode '((egg-status-buffer-mode . status)
+						    (egg-log-buffer-mode . log)))))
     (setq action (cdr (assq action '((:skip . "--skip")
                                      (:continue . "--continue")
                                      (:abort . "--abort")))))
@@ -4384,8 +4451,9 @@ rebase session."
 (defun egg-buffer-rebase-abort ()
   (interactive)
   (message "abort current rebase")
-  (egg-buffer-do-rebase :abort)
-  (egg-status nil t))
+  (egg-buffer-do-rebase :abort  nil
+			(cdr (assq major-mode '((egg-status-buffer-mode . status)
+						(egg-log-buffer-mode . log))))))
 
 (defun egg-rebase-in-progress ()
   (plist-get (egg-repo-state) :rebase-step))
@@ -5904,7 +5972,7 @@ if the next action is IGNORED-ACTION then it won't be taken."
 see `egg-buffer-do-merge-to-head'."
   (egg-buffer-do-merge-to-head rev merge-mode-flag nil 'log))
 
-(defun egg-do-rebase-head (upstream-or-action &optional onto)
+(defun egg-do-rebase-head (upstream-or-action &optional onto current-action)
   "Rebase HEAD based on UPSTREAM-OR-ACTION.
 If UPSTREAM-OR-ACTION is a string then it used as upstream for the rebase operation.
 If ONTO is non-nil, then rebase HEAD onto ONTO using UPSTREAM-OR-ACTION as upstream.
@@ -5916,48 +5984,25 @@ perform the indicated rebase action."
 
       (unless (eq upstream-or-action :abort) ;; keep for debugging
 	(erase-buffer))
-
-
-      ;; (when (and (stringp upstream-or-action) ;; start a rebase
-      ;;            (eq old-base t))	      ;; ask for old-base
-      ;;   (unless (egg-git-ok (current-buffer) "rev-list"
-      ;;                       "--topo-order" "--reverse"
-      ;;                       (concat upstream-or-action "..HEAD^"))
-      ;;     (error "Failed to find rev between %s and HEAD^: %s"
-      ;;            upstream-or-action (buffer-string)))
-      ;;   (unless (egg-git-region-ok (point-min) (point-max)
-      ;;                              "name-rev" "--stdin")
-      ;;     (error "Failed to translate revisions: %s" (buffer-string)))
-      ;;   (save-match-data
-      ;;     (goto-char (point-min))
-      ;;     (while (re-search-forward "^.+(\\(.+\\))$" nil t)
-      ;;       (setq old-choices (cons (match-string-no-properties 1)
-      ;;                               old-choices))))
-      ;;   (setq old-base
-      ;;         (completing-read (or prompt "old base: ") old-choices))
-      ;;   (erase-buffer))
       
       (setq cmd-res
             (cond ((and (stringp onto) (stringp upstream-or-action))
-                   (egg-git-ok (current-buffer) "rebase" "-m" "--onto" onto upstream-or-action))
+		   (egg--git-rebase-merge-cmd-args 
+		    t nil (append egg-git-merge-option-list
+				  (list "-m" "--onto" onto upstream-or-action))))
                   ((eq upstream-or-action :abort)
-                   (egg-git-ok (current-buffer) "rebase" "--abort"))
+                   (egg--git-rebase-merge-cmd t nil "--abort"))
                   ((eq upstream-or-action :skip)
-                   (egg-git-ok (current-buffer) "rebase" "--skip"))
+                   (egg--git-rebase-merge-cmd t nil "--skip"))
                   ((eq upstream-or-action :continue)
-                   (egg-git-ok (current-buffer) "rebase" "--continue"))
+                   (egg--git-rebase-merge-cmd t nil "--continue"))
                   ((stringp upstream-or-action)
-                   (egg-git-ok (current-buffer) "rebase" "-m" upstream-or-action))))
-      (goto-char (point-min))
-      (setq feed-back
-            (egg-safe-search-pickup
-             "^\\(?:CONFLICT\\|All done\\|HEAD is now at\\|Fast-forwarded\\|You must edit all merge conflicts\\).+$"))
-      (setq modified-files
-            (egg-git-to-lines "diff" "--name-only" pre-merge))
-      (egg-run-buffers-update-hook)
-      (list :success cmd-res
-            :message feed-back
-            :files modified-files))))
+                   (egg--git-rebase-merge-cmd-args
+		    t nil (append egg-git-merge-option-list
+				  (list "-m" upstream-or-action))))))
+      (setq modified-files (egg-git-to-lines "diff" "--name-only" pre-merge))
+      (when (consp cmd-res) (plist-put cmd-res :files modified-files))
+      (egg--buffer-handle-result cmd-res t current-action))))
 
 ;;;========================================================
 ;;; log message
@@ -7835,8 +7880,7 @@ cursor using the BASE commit as upstream."
 	(message (if onto
 		     (format "cancelled rebasing %s..%s onto %s!" upstream head-name onto)
 		   (format "cancelled rebasing %s on %s!" head-name upstream)) ))
-    (unless (egg-buffer-do-rebase upstream onto)
-      (egg-status nil t))))
+    (egg-buffer-do-rebase upstream onto 'log)))
 
 (defun egg-log-buffer-rebase-interactive (pos)
   "Start an interactive rebase session using the marked commits.
