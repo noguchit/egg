@@ -4057,7 +4057,7 @@ not called"
       )))
 
 (defun egg-section-cmd-toggle-hide-show (nav)
-  "Toggle the hidden state of the current navigation section of type NAV."
+  "Toggle the hidden state of the current section."
   (interactive (list (get-text-property (point) :navigation)))
 
   ;; emacs's bug? caused by tooltip
@@ -4070,7 +4070,7 @@ not called"
   (force-window-update (current-buffer)))
 
 (defun egg-section-cmd-toggle-hide-show-children (pos sect-type)
-  "Toggle the hidden state of the subsections of the current navigation section at POS."
+  "Toggle the hidden state of the subsections of the current section."
   (interactive (list (previous-single-property-change (1+ (point))
                                                       :navigation)
                      (get-text-property (point) :sect-type)))
@@ -6722,6 +6722,7 @@ Jump to line LINE if it's not nil."
 	    (when paths (cons "--" paths)))))
 
 (defun egg-log-show-ref (pos)
+  "Show information about ref at POS."
   (interactive "d")
   (let* ((ref-info (get-text-property pos :ref))
 	 (reflog (unless ref-info (get-text-property pos :reflog)))
@@ -7331,6 +7332,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
       (move-to-column col))))
 
 (defun egg-log-buffer-mark (pos)
+  "Mark commit at POS as the BASE commit."
   (interactive "d")
   (egg-log-buffer-do-mark pos (egg-log-buffer-base-mark) nil t))
 
@@ -7373,6 +7375,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
 
 (defun egg-log-buffer-mark-pick (pos &optional append-to) 
+  "Mark commit at POS to be picked in the upcoming interactive rebase.
+With C-u prefix, prompt for reordering."
   (interactive "d\nP")
   (if append-to
       (egg-log-buffer-do-mark-append pos (egg-log-buffer-pick-mark)
@@ -7381,6 +7385,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (egg-log-buffer-do-mark pos (egg-log-buffer-pick-mark))))
 
 (defun egg-log-buffer-mark-squash (pos &optional append-to)
+  "Mark commit at POS to be squashed in the upcoming interactive rebase.
+With C-u prefix, prompt for reordering."
   (interactive "d\nP")
   (if append-to
       (egg-log-buffer-do-mark-append 
@@ -7395,6 +7401,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (egg-log-buffer-do-mark pos (egg-log-buffer-squash-mark))))
 
 (defun egg-log-buffer-mark-edit (pos &optional append-to)
+  "Mark commit at POS to be edited in the upcoming interactive rebase.
+With C-u prefix, prompt for reordering."
   (interactive "d\nP")
   (if append-to
       (egg-log-buffer-do-mark-append pos (egg-log-buffer-edit-mark)
@@ -7403,6 +7411,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (egg-log-buffer-do-mark pos (egg-log-buffer-edit-mark))))
 
 (defun egg-log-buffer-do-unmark-all ()
+  "Unmark all commits."
   (interactive)
   (let ((pos (point-min))
         (inhibit-read-only t))
@@ -7413,6 +7422,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
     (egg-refresh-buffer (current-buffer))))
 
 (defun egg-log-buffer-unmark (pos &optional all)
+  "Unmark commit at POS.
+With C-u prefix, unmark all."
   (interactive "d\nP")
   (if all
       (egg-log-buffer-do-unmark-all)
@@ -7824,7 +7835,7 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
              (message "Automatic rebase failed!"))))))
 
 (defun egg-log-buffer-merge (pos &optional level)
-  "Merge to HEAD the path starting from the commit at POS.
+  "Merge to HEAD the path starting from commit at POS.
 With C-u prefix, do not auto commit the merge result.
 With C-u C-u prefix, prompt the user for the type of merge to perform."
   (interactive "d\np")
@@ -7873,7 +7884,7 @@ With C-u C-u prefix, prompt the user for the type of merge to perform."
   (egg-log-buffer-do-merge-to-head (egg-log-buffer-get-rev-at pos :short :no-HEAD) "--squash"))
 
 (defun egg-log-buffer-rebase (pos)
-  "Rebase HEAD using the commit under POS as upstream.
+  "Rebase HEAD using commit at POS as upstream.
 If there was a commit marked as BASE, then rebase HEAD onto the commit under the
 cursor using the BASE commit as upstream."
   (interactive "d")
@@ -7898,8 +7909,7 @@ cursor using the BASE commit as upstream."
     (egg-buffer-do-rebase upstream onto 'log)))
 
 (defun egg-log-buffer-rebase-interactive (pos)
-  "Start an interactive rebase session using the marked commits.
-The commit at POS is the where the chain of marked commits will rebased onto."
+  "Start an interactive session to rebase the marked commits onto commit at POS."
   (interactive "d")
   (let* ((state (egg-repo-state :staged :unstaged))
          (rebase-dir (concat (plist-get state :gitdir) "/"
@@ -7926,8 +7936,9 @@ The commit at POS is the where the chain of marked commits will rebased onto."
     (egg-status nil t)))
 
 (defun egg-log-buffer-checkout-commit (pos &optional force)
-  "Checkout the commit at POS.
-With prefix, force the checkout even if the index was different from the new commit."
+  "Checkout commit at POS.
+With C-u prefix, force the checkout even if the index was different
+from the new commit."
   (interactive "d\nP")
   (let ((ref (egg-read-rev "checkout: "
 	      (egg-log-buffer-get-rev-at pos :short :no-HEAD))))
@@ -7936,9 +7947,9 @@ With prefix, force the checkout even if the index was different from the new com
       (egg-log-buffer-do-co-rev ref))))
 
 (defun egg-log-buffer-tag-commit (pos &optional force)
-  "Tag the commit at POS.
-With prefix, force the creation of the tag even if it replace an
-existing one with the same name."
+  "Tag commit at POS.
+With C-u prefix, force the creation of the tag
+even if it replace an existing one with the same name."
   (interactive "d\nP")
   (let* ((rev (egg-log-buffer-get-rev-at pos :short))
 	 (name (read-string (format "tag %s with name: " rev)))
@@ -7947,8 +7958,8 @@ existing one with the same name."
     (egg-log-buffer-do-tag-commit name rev force)))
 
 (defun egg-log-buffer-atag-commit (pos &optional sign-tag)
-  "Start composing the message for an annotated tag on the commit at POS.
-With prefix, the tag will be gpg-signed."
+  "Start composing the message to create an annotated tag on commit at POS.
+With C-u prefix, the tag will be gpg-signed."
   (interactive "d\np")
   (let* ((commit (get-text-property pos :commit))
 	 (name (read-string (format "create annotated tag on %s with name: "
@@ -7965,7 +7976,8 @@ With prefix, the tag will be gpg-signed."
     (egg-create-annotated-tag name commit gpg-uid)))
 
 (defun egg-log-buffer-create-new-branch (pos &optional force)
-  "Create a new branch, without checking it out."
+  "Create a new branch pointing to commit at POS, without checking it out.
+With C-u prefix, force the branch creation by deleting the old one with the same name."
   (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos :short))
 	(upstream (egg-head-at pos)))
@@ -7974,7 +7986,8 @@ With prefix, the tag will be gpg-signed."
      rev force upstream 'log)))
 
 (defun egg-log-buffer-start-new-branch (pos &optional force)
-  "Create a new branch, and make it a new HEAD"
+  "Create a new branch pointing to commit at POS, and make it the new HEAD.
+With C-u prefix, force the creation by deleting the old branch with the same name."
   (interactive "d\nP")
   (let ((rev (egg-log-buffer-get-rev-at pos :short :no-HEAD))
 	(upstream (egg-head-at pos))
@@ -7991,13 +8004,13 @@ With prefix, the tag will be gpg-signed."
      (egg--git-co-rev-cmd t rev force name track))))
 
 (defun egg-log-buffer-anchor-head (pos &optional strict-level)
-  "Move the current branch or the detached HEAD to the commit at POS.
+  "Move the current branch or the detached HEAD to commit at POS.
 The index will be reset and files will in worktree updated. If a file that is
 different between the original commit and the new commit, the git command will
-abort. This is basically git reset --keep. With C-u prefix, HEAD will be moved,
-index will be reset and the work tree updated by throwing away all local
-modifications (this is basically git reset --hard). With C-u C-u prefix,
-the command will prompt for the git reset mode to perform."
+abort. This is basically git reset --keep.
+With C-u prefix, HEAD will be moved, index will be reset and the work tree updated
+by throwing away all local modifications (this is basically git reset --hard).
+With C-u C-u prefix, prompt for the git reset mode to perform."
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :short :no-HEAD))
          (commit (egg-commit-at-point pos))
@@ -8035,6 +8048,7 @@ the command will prompt for the git reset mode to perform."
   (interactive "d\nP")
   (let ((refs (egg-references-at-point pos))
         (candidate (egg-ref-at-point pos))
+	(full-name (get-text-property pos :full-name))
         victim parts delete-on-remote remote-site name-at-remote
 	remote-ok)
     (if (invoked-interactively-p)
@@ -8086,8 +8100,8 @@ the command will prompt for the git reset mode to perform."
     (egg--git-cherry-pick-cmd t rev (if edit-commit-msg "--no-commit" "--ff"))))
 
 (defun egg-log-buffer-pick-1cherry (pos &optional edit-commit-msg)
-  "Pick one cherry at POS and put on HEAD.
-With prefix, will not auto-commit but let the user re-compose the message."
+  "Pick commit at POS and put on HEAD.
+With C-u prefix, will not auto-commit but let the user re-compose the message."
   (interactive "d\nP")
   
   (let ((rev (egg-log-buffer-get-rev-at pos :short :no-HEAD))
@@ -8186,7 +8200,7 @@ With prefix, will not auto-commit but let the user re-compose the message."
                                      name remote name))))))
 
 (defun egg-log-buffer-push-to-local (pos &optional level)
-  "Push a ref or a commit at POS onto HEAD.
+  "Push commit at POS onto HEAD.
 With C-u, instead of HEAD, prompt for another ref as destination.
 With C-u C-u, will force the push evel if it would be non-ff.
 When the destination of the push is HEAD, the underlying git command
@@ -8459,7 +8473,7 @@ prompt for a remote repo."
       (set-buffer-modified-p nil))))
 
 (defun egg-log-buffer-insert-commit (pos)
-  "Load and show the details of the commit at POS."
+  "Load and show the details of commit at POS."
   (interactive "d")
   (let* ((next (next-single-property-change pos :diff))
          (sha1 (and next (get-text-property next :commit)))
@@ -8918,7 +8932,10 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
 
 
 (defun egg-log-buffer-diff-revs (pos &optional do-pickaxe pickaxe)
-  "Compare HEAD against the rev at POS.
+  "Compare HEAD against commit at POS.
+With C-u prefix, prompt for a string and restrict to diffs introducing/removing it.
+With C-u C-u prefix, prompt for a regexp and restrict to diffs introducing/removing it.
+With C-u C-u C-u prefix, prompt for a pickaxe mode.
 A ready made PICKAXE info can be provided by the caller when called non-interactively."
   (interactive "d\np")
   (let* ((rev (egg-log-buffer-get-rev-at pos :symbolic))
@@ -8952,7 +8969,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (pop-to-buffer buf)))
 
 (defun egg-log-buffer-diff-upstream (pos &optional do-pickaxe)
-  "Compare REF at POS against its upstream."
+  "Compare commit at POS against its upstream."
   (interactive "d\np")
   (let* ((ref (egg-ref-at-point pos :head))
          (mark (egg-log-buffer-find-first-mark (egg-log-buffer-base-mark)))
