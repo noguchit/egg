@@ -7936,7 +7936,7 @@ cursor using the BASE commit as upstream."
     (egg-status nil t)))
 
 (defun egg-log-buffer-checkout-commit (pos &optional force)
-  "Checkout commit at POS.
+  "Checkout ref or commit at POS.
 With C-u prefix, force the checkout even if the index was different
 from the new commit."
   (interactive "d\nP")
@@ -8234,7 +8234,7 @@ would be a pull (by default --ff-only)."
       (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-head-to-local (pos &optional non-ff)
-  "WTF."
+  "Push HEAD to the ref at POS."
   (interactive "d\nP")
   (let* ((dst (egg-ref-at-point pos)))
     (unless dst
@@ -8290,6 +8290,7 @@ prompt for a remote repo."
                            remote spec))))
 
 (defun egg-log-buffer-push (pos)
+  "Push some refs to the remote site at POS"
   (interactive "d")
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
