@@ -92,6 +92,28 @@ works around the deprecation of 'interactive-p' after Emacs 23.2"
          `(propertize "<internal-bug>" 'face ,face))
         (t `(propertize ,text 'face ,face))))
 
+(defsubst egg-pretty-help-text (&rest strings)
+  "Perform key bindings substitutions and highlighting in STRINGS."
+  (let* ((map (current-local-map)) last-found)
+    (with-temp-buffer
+      (use-local-map map)
+      (save-match-data
+        ;; key substitutions
+        (insert (substitute-command-keys
+                 (mapconcat 'identity strings "")))
+        (goto-char (point-min))
+        ;; key highlighting
+        (while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~*=-]\\):" nil t)
+          (put-text-property (match-beginning 1) (match-end 1)'face 'egg-help-key)
+          (if last-found
+              (put-text-property last-found (1- (match-beginning 0))
+                                 'face 'egg-text-help))
+          (setq last-found (point)))
+        (if last-found
+            (put-text-property last-found (line-end-position) 'face 'egg-text-help))
+        ;; return the total
+        (buffer-string)))))
+
 (defmacro egg-prop (text &rest prop)
   "Propertize TEXT with properties list PROP at compile-time or run-time."
   (if (stringp text)

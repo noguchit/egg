@@ -24,6 +24,8 @@
 ;;
 
 (require 'egg)
+(require 'rx)
+(require 'electric)
 
 (defun egg-key-set-prompt-key (var key)
   (custom-set-default var key)

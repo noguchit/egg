@@ -61,6 +61,7 @@
 
 (require 'egg-custom)
 (require 'egg-base)
+(require 'egg-const)
 (require 'cl)
 (require 'electric)
 (require 'ediff)
@@ -2511,160 +2512,6 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
   (interactive "e")
   (egg-mouse-do-command event 'egg-section-cmd-toggle-hide-show))
 
-(defconst egg-hide-show-map
-  (let ((map (make-sparse-keymap "Egg:HideShow")))
-    (define-key map (kbd "h") 'egg-section-cmd-toggle-hide-show)
-    (define-key map (kbd "H") 'egg-section-cmd-toggle-hide-show-children)
-    (define-key map [mouse-2] 'egg-mouse-hide-show-cmd)
-    map)
-  "Keymap for a section than can be hidden/shown.\\{egg-hide-show-map}")
-
-(defconst egg-section-map
-  (let ((map (make-sparse-keymap "Egg:Section")))
-    (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
-    (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
-    map)
-  "Keymap for a section in sequence that can be navigated back and forth.
-\\{egg-section-map}")
-
-(defconst egg-diff-section-map
-  (let ((map (make-sparse-keymap "Egg:Diff")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-diff-section-cmd-visit-file-other-window)
-    (define-key map (kbd "f") 'egg-diff-section-cmd-visit-file)
-    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
-    map)
-  "Keymap for a diff section in sequence of deltas.
-\\{egg-diff-section-map}")
-
-(defconst egg-staged-diff-section-map
-  (let ((map (make-sparse-keymap "Egg:StagedDiff")))
-    (set-keymap-parent map egg-diff-section-map)
-    (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
-    (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
-    (define-key map (kbd "DEL") 'egg-diff-section-cmd-revert-to-head)
-    (define-key map [C-down-mouse-2] 'egg-status-popup-staged-diff-menu)
-    (define-key map [C-mouse-2] 'egg-status-popup-staged-diff-menu)
-
-    map)
-  "Keymap for a diff section in sequence of staged deltas.
-\\{egg-staged-diff-section-map}")
-
-(defconst egg-wdir-diff-section-map
-  (let ((map (make-sparse-keymap "Egg:WdirDiff")))
-    (set-keymap-parent map egg-diff-section-map)
-    (define-key map (kbd "u") 'egg-diff-section-cmd-undo)
-    map)
-  "Keymap for a diff section in sequence of deltas between the workdir and
-the index. \\{egg-wdir-diff-section-map}")
-
-(defconst egg-unmerged-wdir-file-map
-  (let ((map (make-sparse-keymap "Egg:UnmergedWdirFile")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "DEL") 'egg-unmerged-file-del-action)
-    (define-key map (kbd "s") 'egg-unmerged-file-add-action)
-    (define-key map (kbd "=") 'egg-unmerged-file-ediff-action)
-    (define-key map (kbd "RET") 'egg-unmerged-wdir-file-next-action)
-    map)
-  "Keymap for unmerged entries in the status buffer. \\{egg-unmerged-wdir-file-map}")
-
-(defconst egg-unmerged-index-file-map
-  (let ((map (make-sparse-keymap "Egg:UnmergedIndexFile")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "DEL") 'egg-unmerged-file-del-action)
-    (define-key map (kbd "s") 'egg-unmerged-file-checkout-action)
-    (define-key map (kbd "=") 'egg-unmerged-file-ediff-action)
-    (define-key map (kbd "RET") 'egg-unmerged-index-file-next-action)
-    map)
-  "Keymap for unmerged entries in the status buffer. \\{egg-unmerged-index-file-map}")
-
-(defconst egg-unstaged-diff-section-map
-  (let ((map (make-sparse-keymap "Egg:UnstagedDiff")))
-    (set-keymap-parent map egg-wdir-diff-section-map)
-    (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
-    (define-key map (kbd "s") 'egg-diff-section-cmd-stage)
-    (define-key map (kbd "DEL") 'egg-diff-section-cmd-revert-to-head)
-
-    (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-diff-menu)
-    (define-key map [C-mouse-2] 'egg-status-popup-unstaged-diff-menu)
-
-    map)
-  "Keymap for a diff section in sequence of unstaged deltas.
-\\{egg-unstaged-diff-section-map}")
-
-(defconst egg-unmerged-diff-section-map
-  (let ((map (make-sparse-keymap "Egg:UnmergedDiff")))
-    (set-keymap-parent map egg-unstaged-diff-section-map)
-    (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
-    map)
-  "Keymap for a diff section in sequence of unmerged deltas.
-\\{egg-unmerged-diff-section-map}")
-
-(defconst egg-hunk-section-map
-  (let ((map (make-sparse-keymap "Egg:Hunk")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-hunk-section-cmd-visit-file-other-window)
-    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
-    (define-key map (kbd "f") 'egg-hunk-section-cmd-visit-file)
-    map)
-  "Keymap for a hunk in a diff section. \\{egg-hunk-section-map}")
-
-(defconst egg-staged-hunk-section-map
-  (let ((map (make-sparse-keymap "Egg:StagedHunk")))
-    (set-keymap-parent map egg-hunk-section-map)
-    (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
-    (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
-
-    (define-key map [C-down-mouse-2] 'egg-status-popup-staged-hunk-menu)
-    (define-key map [C-mouse-2] 'egg-status-popup-staged-hunk-menu)
-
-    map)
-  "Keymap for a hunk in a staged diff section.
-\\{egg-staged-hunk-section-map}")
-
-(defconst egg-wdir-hunk-section-map
-  (let ((map (make-sparse-keymap "Egg:WdirHunk")))
-    (set-keymap-parent map egg-hunk-section-map)
-    (define-key map (kbd "u") 'egg-hunk-section-cmd-undo)
-    map)
-  "Keymap for a hunk in a diff section between the workdir and the index.
-\\{egg-wdir-hunk-section-map}")
-
-(defconst egg-unstaged-hunk-section-map
-  (let ((map (make-sparse-keymap "Egg:UnstagedHunk")))
-    (set-keymap-parent map egg-wdir-hunk-section-map)
-    (define-key map (kbd "=") 'egg-unstaged-section-cmd-ediff)
-    (define-key map (kbd "s") 'egg-hunk-section-cmd-stage)
-
-    (define-key map [C-down-mouse-2] 'egg-status-popup-unstaged-hunk-menu)
-    (define-key map [C-mouse-2] 'egg-status-popup-unstaged-hunk-menu)
-
-    map)
-  "Keymap for a hunk in a unstaged diff section.
-\\{egg-unstaged-hunk-section-map}")
-
-(defconst egg-unmerged-hunk-section-map
-  (let ((map (make-sparse-keymap "Egg:UnmergedHunk")))
-    ;; no hunking staging in unmerged file
-    (set-keymap-parent map egg-wdir-hunk-section-map)
-    (define-key map (kbd "=") 'egg-unmerged-section-cmd-ediff3)
-    map)
-  "Keymap for a hunk in a unmerged diff section.
-\\{egg-unmerged-hunk-section-map}")
-
-(defconst egg-unmerged-conflict-map
-  (let ((map (make-sparse-keymap "Egg:Conflict")))
-    (set-keymap-parent map egg-wdir-hunk-section-map)
-    (define-key map (kbd "m") 'egg-unmerged-conflict-take-side)
-    (define-key map (kbd "M") 'egg-unmerged-conflict-checkout-side)
-    map)
-  "Keymap for a hunk in a unmerged diff section.
-\\{egg-unmerged-conflict-map}")
-
-(defun list-tp ()
-  (interactive)
-  (message "tp: %S" (text-properties-at (point))))
 
 (defun list-nav ()
   (interactive)
@@ -3448,17 +3295,6 @@ exit code ACCEPTED-CODE is considered a success."
    (if (not at-level) :navigation
      (or (get-text-property (point) :sect-type) :navigation))))
 
-(defconst egg-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:Buffer")))
-    (define-key map (kbd "q") 'egg-quit-buffer)
-    (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
-    (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
-    (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
-    (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
-    (define-key map (kbd "C-c C-h") 'egg-buffer-hide-all)
-    map)
-  "Common map for an egg special buffer.\\{egg-buffer-mode-map}" )
-
 (defun egg-get-buffer (fmt create)
   "Get a special egg buffer. If buffer doesn't exist and CREATE was not nil then
 creat the buffer. FMT is used to construct the buffer name. The name is built
@@ -3632,68 +3468,7 @@ rebase session."
 (defun egg-rebase-in-progress ()
   (plist-get (egg-repo-state) :rebase-step))
 
-(defsubst egg-pretty-help-text (&rest strings)
-  "Perform key bindings substitutions and highlighting in STRINGS."
-  (let* ((map (current-local-map)) last-found)
-    (with-temp-buffer
-      (use-local-map map)
-      (save-match-data
-        ;; key substitutions
-        (insert (substitute-command-keys
-                 (mapconcat 'identity strings "")))
-        (goto-char (point-min))
-        ;; key highlighting
-        (while (re-search-forward "\\(\\<[^\n \t:]+\\|[/+.~*=-]\\):" nil t)
-          (put-text-property (match-beginning 1) (match-end 1)'face 'egg-help-key)
-          (if last-found
-              (put-text-property last-found (1- (match-beginning 0))
-                                 'face 'egg-text-help))
-          (setq last-found (point)))
-        (if last-found
-            (put-text-property last-found (line-end-position) 'face 'egg-text-help))
-        ;; return the total
-        (buffer-string)))))
 
-(defconst egg-status-buffer-common-help-text
-  (concat
-   (egg-text "Common Key Bindings:" 'egg-help-header-2)
-   (egg-pretty-help-text
-    "\\<egg-status-buffer-mode-map>\n"
-    "\\[egg-buffer-cmd-navigate-prev]:previous block  "
-    "\\[egg-buffer-cmd-navigate-next]:next block  "
-    "\\[egg-commit-log-edit]:commit staged modifications  "
-    "\\[egg-log]:show repo's history\n"
-    "\\[egg-stage-all-files]:stage all modifications  "
-    "\\[egg-unstage-all-files]:unstage all modifications  "
-    "\\[egg-diff-ref]:diff other revision\n"
-    "\\[egg-status-buffer-undo-wdir]: throw away ALL modifications  "
-    "\\<egg-unstaged-diff-section-map>"
-    "\\[egg-diff-section-cmd-revert-to-head]:throw away file's modifications\n"
-    "\\<egg-hide-show-map>"
-    "\\[egg-section-cmd-toggle-hide-show]:hide/show block  "
-    "\\[egg-section-cmd-toggle-hide-show-children]:hide sub-blocks  "
-    "\\<egg-buffer-mode-map>"
-    "\\[egg-buffer-cmd-refresh]:redisplay  "
-    "\\[egg-quit-buffer]:quit\n")))
-
-(defconst egg-status-buffer-rebase-help-text
-  (concat
-   (egg-text "Key Bindings for Rebase Operations:" 'egg-help-header-2)
-   (egg-pretty-help-text
-    "\\<egg-status-buffer-rebase-map>\n"
-    "\\[egg-buffer-selective-rebase-continue]:resume rebase  "
-    "\\[egg-buffer-selective-rebase-skip]:skip this rebase step  "
-    "\\[egg-buffer-rebase-abort]:abort current rebase session\n")))
-
-(defconst egg-status-buffer-diff-help-text
-  (concat
-   (egg-text "Extra Key Bindings for the Diff Sections:"
-             'egg-help-header-2)
-   (egg-pretty-help-text
-    "\\<egg-unstaged-diff-section-map>\n"
-    "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line  "
-    "\\[egg-diff-section-cmd-stage]:stage/unstage file/hunk/selected area  "
-    "\\[egg-diff-section-cmd-undo]:undo file/hunk's modifications\n")))
 
 (defvar egg-status-buffer-changed-files-status nil)
 
@@ -3811,16 +3586,6 @@ adding the contents."
     (when (apply 'egg--git-add-cmd (current-buffer) args)
       (message "%s %s to git." (if no-stage "registered" "added") files-string))))
 
-(defconst egg-untracked-file-map
-  (let ((map (make-sparse-keymap "Egg:UntrackedFile")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-find-file-at-point)
-    (define-key map (kbd "DEL") 'egg-ignore-pattern-from-string-at-point)
-    (define-key map "s" 'egg-status-buffer-stage-untracked-file)
-    (define-key map "i" 'egg-status-buffer-stage-untracked-file)
-    map)
-  "Keymap for a section of untracked file.
-\\{egg-untracked-file-map}")
 
 (defun egg-sb-insert-untracked-section ()
   "Insert the untracked files section into the status buffer."
@@ -3851,15 +3616,6 @@ adding the contents."
     (unless (equal (get-text-property pos :stash) stash)
       (egg-buffer-do-insert-stash pos))))
 
-(defconst egg-stash-map
-  (let ((map (make-sparse-keymap "Egg:Stash")))
-    (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "SPC") 'egg-sb-buffer-show-stash)
-    (define-key map (kbd "RET") 'egg-sb-buffer-apply-stash)
-    (define-key map "a" 'egg-sb-buffer-apply-stash)
-    (define-key map (kbd "DEL") 'egg-sb-buffer-drop-stash)
-    (define-key map "o" 'egg-sb-buffer-pop-stash)
-    map))
 
 (defun egg-decorate-stash-list (start line-map section-prefix)
   (let (stash-beg stash-end beg end msg-beg msg-end name msg)
@@ -4647,12 +4403,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defvar egg-internal-status-buffer-names-list nil)
 (defvar egg-internal-background-jobs-timer nil)
 
-(defun egg-status-buffer-background-job ()
-  (when egg-refresh-index-in-backround
-    (mapcar #'egg-internal-background-refresh-index
-            egg-internal-status-buffer-names-list)))
-
-(defsubst egg-internal-background-jobs-restart ()
+(defun egg-internal-background-jobs-restart ()
   (cancel-function-timers #'egg-status-buffer-background-job)
   (setq egg-internal-background-jobs-timer
         (run-with-idle-timer egg-background-idle-period t
@@ -4665,8 +4416,14 @@ If INIT was not nil, then perform 1st-time initializations as well."
 (defcustom egg-background-idle-period 30
   "How long emacs has been idle before we trigger background jobs."
   :group 'egg
-  :set 'egg-set-background-idle-period
+  :set #'egg-set-background-idle-period
   :type 'integer)
+
+
+(defun egg-status-buffer-background-job ()
+  (when egg-refresh-index-in-backround
+    (mapcar #'egg-internal-background-refresh-index
+            egg-internal-status-buffer-names-list)))
 
 (egg-internal-background-jobs-restart)
 
@@ -5648,42 +5405,7 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
   (setq buffer-invisibility-spec nil)
   (run-mode-hooks 'egg-diff-buffer-mode-hook))
 
-(defconst egg-diff-buffer-common-help-text
-  (concat
-   (egg-text "Common Key Bindings:" 'egg-help-header-2)
-   (egg-pretty-help-text
-    "\\<egg-buffer-mode-map>\n"
-    "\\[egg-buffer-cmd-navigate-prev]:previous block  "
-    "\\[egg-buffer-cmd-navigate-next]:next block  "
-    "\\[egg-buffer-cmd-refresh]:redisplay  "
-    "\\[egg-quit-buffer]:quit\n")))
 
-(defconst egg-diff-buffer-diff-help-heading
-  (egg-text "Extra Bindings for Diff blocks:" 'egg-help-header-2))
-
-(defconst egg-unstaged-diff-help-text
-  (egg-pretty-help-text
-   "\\<egg-unstaged-diff-section-map>\n"
-   "\\[egg-diff-section-cmd-stage]:stage file/hunk  "
-   "\\[egg-diff-section-cmd-undo]:undo file/hunk  "
-   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n"))
-
-(defconst egg-staged-diff-help-text
-  (egg-pretty-help-text
-   "\\<egg-staged-diff-section-map>\n"
-   "\\[egg-diff-section-cmd-stage]:unstage file/hunk  "
-   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n"))
-
-(defconst egg-plain-diff-help-text
-  (egg-pretty-help-text
-   "\\<egg-diff-section-map>\n"
-   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n"))
-
-(defconst egg-wdir-diff-help-text
-  (egg-pretty-help-text
-   "\\<egg-wdir-diff-section-map>\n"
-   "\\[egg-diff-section-cmd-undo]:undo file/hunk  "
-   "\\[egg-diff-section-cmd-visit-file-other-window]:visit file/line\n"))
 
 (defun egg-diff-info-add-help (info)
   (let ((map (plist-get info :diff-map)) help)
@@ -5942,155 +5664,6 @@ Jump to line LINE if it's not nil."
 	(put-text-property 0 (length reflog-time) 'face 'bold reflog-time)
 	(message "reflog:%s created:%s" reflog reflog-time)))))
 
-(defconst egg-log-commit-base-map
-  (let ((map (make-sparse-keymap "Egg:LogCommitBase")))
-    (set-keymap-parent map egg-hide-show-map)
-    (define-key map (kbd "SPC") 'egg-log-buffer-insert-commit)
-    (define-key map (kbd "B") 'egg-log-buffer-create-new-branch)
-    (define-key map (kbd "b") 'egg-log-buffer-start-new-branch)
-    (define-key map (kbd "o") 'egg-log-buffer-checkout-commit)
-    (define-key map (kbd "t") 'egg-log-buffer-tag-commit)
-    (define-key map (kbd "T") 'egg-log-buffer-atag-commit)
-    (define-key map (kbd "a") 'egg-log-buffer-anchor-head)
-    (define-key map (kbd "m") 'egg-log-buffer-merge)
-    (define-key map (kbd "r") 'egg-log-buffer-rebase)
-    (define-key map (kbd "c") 'egg-log-buffer-pick-1cherry)
-    (define-key map (kbd "i") 'egg-log-show-ref)
-    map))
-
-(defconst egg-secondary-log-commit-map
-  (let ((map (make-sparse-keymap "Egg:LogCommitSimple")))
-    (set-keymap-parent map egg-log-commit-base-map)
-    (define-key map (kbd "RET") 'egg-log-locate-commit)
-    (define-key map (kbd "C-c C-c") 'egg-log-locate-commit)
-    map))
-
-(defconst egg-file-log-commit-map
-  (let ((map (make-sparse-keymap "Egg:FileLogCommit")))
-    (set-keymap-parent map egg-secondary-log-commit-map)
-    (define-key map (kbd "M-SPC") 'egg-file-log-walk-current-rev)
-    (define-key map (kbd "M-n") 'egg-file-log-walk-rev-next)
-    (define-key map (kbd "M-p") 'egg-file-log-walk-rev-prev)
-    map))
-
-
-(defconst egg-log-commit-map
-  (let ((map (make-sparse-keymap "Egg:LogCommit")))
-    (set-keymap-parent map egg-log-commit-base-map)
-    (define-key map (kbd "R") 'egg-log-buffer-rebase-interactive)
-    (define-key map (kbd "+") 'egg-log-buffer-mark-pick)
-    (define-key map (kbd ".") 'egg-log-buffer-mark-squash)
-    (define-key map (kbd "~") 'egg-log-buffer-mark-edit)
-    (define-key map (kbd "-") 'egg-log-buffer-unmark)
-    (define-key map (kbd "DEL") 'egg-log-buffer-unmark)
-
-    (define-key map (kbd "*") 'egg-log-buffer-mark)
-    (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
-
-    (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
-    
-    (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
-    (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
-
-    map)
-  "Keymap for a commit line in the log buffer.\\{egg-log-commit-map}}")
-
-(defconst egg-log-ref-map
-  (let ((map (make-sparse-keymap "Egg:LogRef")))
-    (set-keymap-parent map egg-log-commit-map)
-    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
-    (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
-    map))
-
-(defconst egg-secondary-log-ref-map
-  (let ((map (make-sparse-keymap "Egg:SecondaryLogRef")))
-    (set-keymap-parent map egg-secondary-log-commit-map)
-    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
-    (define-key map (kbd "x") 'egg-log-buffer-rm-ref)
-    map))
-
-(defconst egg-log-local-ref-map
-  (let ((map (make-sparse-keymap "Egg:LogLocalRef")))
-    (set-keymap-parent map egg-log-ref-map)
-    (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
-    (define-key map (kbd "d") 'egg-log-buffer-push-head-to-local)
-
-    (define-key map [C-down-mouse-2] 'egg-log-popup-local-ref-menu)
-    (define-key map [C-mouse-2] 'egg-log-popup-local-ref-menu)
-
-    map)
-  "\\{egg-log-local-ref-map}")
-
-(defconst egg-log-local-branch-map
-  (let ((map (make-sparse-keymap "Egg:LogLocalBranch")))
-    (set-keymap-parent map egg-log-local-ref-map)
-    (define-key map (kbd "C-c C-=") 'egg-log-buffer-diff-upstream)
-    map)
-  "\\{egg-log-local-branch-map}")
-
-(defconst egg-log-remote-branch-map
-  (let ((map (make-sparse-keymap "Egg:LogRemoteRef")))
-    (set-keymap-parent map egg-log-ref-map)
-    (define-key map (kbd "D") 'egg-log-buffer-fetch-remote-ref)
-
-    (define-key map [C-down-mouse-2] 'egg-log-popup-remote-ref-menu)
-    (define-key map [C-mouse-2] 'egg-log-popup-remote-ref-menu)
-
-    map)
-  "\\{egg-log-remote-branch-map}")
-
-(defconst egg-log-remote-site-map
-  (let ((map (make-sparse-keymap "Egg:LogRemoteSite")))
-    (set-keymap-parent map egg-log-commit-map)
-    (define-key map (kbd "D") 'egg-log-buffer-fetch)
-    (define-key map (kbd "U") 'egg-log-buffer-push)
-
-    (define-key map [C-down-mouse-2] 'egg-log-popup-remote-site-menu)
-    (define-key map [C-mouse-2] 'egg-log-popup-remote-site-menu)
-
-    map))
-
-(defconst egg-log-diff-map
-  (let ((map (make-sparse-keymap "Egg:LogDiff")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-log-diff-cmd-visit-file-other-window)
-    (define-key map (kbd "f") 'egg-log-diff-cmd-visit-file)
-    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
-    (define-key map (kbd "SPC") 'egg-log-diff-toggle-file-selection)
-    map))
-
-(defconst egg-log-hunk-map
-  (let ((map (make-sparse-keymap "Egg:LogHunk")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "RET") 'egg-log-hunk-cmd-visit-file-other-window)
-    (define-key map (kbd "f") 'egg-log-hunk-cmd-visit-file)
-    (define-key map (kbd "=") 'egg-diff-section-cmd-ediff)
-    (define-key map (kbd "SPC") 'egg-log-diff-toggle-file-selection)
-    map))
-
-(defconst egg-log-buffer-base-map
-  (let ((map (make-sparse-keymap "Egg:LogBufferBase")))
-    (set-keymap-parent map egg-buffer-mode-map)
-    (define-key map "G" 'egg-log-buffer-style-command)
-    (define-key map "n" 'egg-log-buffer-next-ref)
-    (define-key map "s" 'egg-status)
-    (define-key map "p" 'egg-log-buffer-prev-ref)
-    map))
-
-(defconst egg-log-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:LogBuffer")))
-    (set-keymap-parent map egg-log-buffer-base-map)
-    (define-key map "L" 'egg-log-buffer-reflog-ref)
-    (define-key map "/" 'egg-search-changes)
-    map)  
-  "Keymap for the log buffer.\\{egg-log-buffer-mode-map}")
-
-(defconst egg-log-style-buffer-map
-  (let ((map (make-sparse-keymap "Egg:LogBuffer")))
-    (set-keymap-parent map egg-log-buffer-base-map)
-    (define-key map "s" 'egg-status)
-    (define-key map "l" 'egg-log)
-    map))
 
 (defun egg-log-buffer-style-command ()
   "Re-run the command that create the buffer."
@@ -8968,19 +8541,6 @@ if INCLUDE-UNTRACKED is non-nil."
       (when (egg-status-buffer-handle-result res)
 	(egg-buffer-goto-section "stash-stash@{0}")))))
 
-(defconst egg-stash-help-text
-  (concat
-   (egg-text "Extra Key Bindings for a Stash line:" 'egg-help-header-2) "\n"
-   (egg-pretty-help-text
-    "\\<egg-stash-map>"
-    "\\[egg-sb-buffer-show-stash]:load details  "
-    ;; "\\[egg-section-cmd-toggle-hide-show]:hide/show details  "
-    "\\[egg-sb-buffer-apply-stash]:apply  "
-    "\\[egg-sb-buffer-pop-stash]:pop and apply stash "
-    "\\[egg-sb-buffer-drop-stash]:delete stash  "
-    )
-   "\n"
-   ))
 
 ;;;========================================================
 ;;; annotated tag
