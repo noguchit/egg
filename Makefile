@@ -1,23 +1,23 @@
 EMACS := emacs -q --no-site-file
-SRCS  := egg-custom.el egg-base.el egg-const.el egg.el egg-grep.el egg-key.el
+SRCS  := egg-custom.el egg-base.el egg-const.el egg-git.el egg.el egg-grep.el egg-key.el
 ELCS  := $(patsubst %.el,%.elc,$(SRCS))
+DEPS  := $(patsubst %.el,.%.d,$(SRCS))
 
-.PHONY: all foo
+.PHONY: all
 
 %.elc : %.el
 	$(EMACS) -L . -batch -f batch-byte-compile $<
 
-all : $(ELCS)
+.%.d : %.el
+	@echo Generating dependencies for $<
+	@echo "$@ : $< " > $@
+	@echo -n "$*.elc : $< " >> $@
+	@sed -ne "s/^(require '\(egg.*\))/\1.elc/p" $< | tr '\n' ' ' >> $@
+	@echo "" >> $@
+
+all : $(DEPS) $(ELCS)
 
 clean :
-	-rm $(ELCS)
+	-rm $(ELCS) $(DEPS)
 
-foo :
-	echo $(ELCS)
-
-egg-custom.elc : egg-custom.el
-egg-base.elc : egg-base.el egg-custom.el
-egg-const.elc : egg-const.el egg-custom.el
-egg.elc : egg.el egg-custom.el egg-base.el
-egg-grep.elc : egg-grep.el egg.el egg-base.el egg-custom.el
-egg-key.elc : egg-key.el egg.el egg-base.el egg-custom.el
+-include $(DEPS)

@@ -1,6 +1,7 @@
 ;;; egg-custom.el --- Emacs Got Git - Emacs interface to Git
-
-;; Copyright (C) 2012  Linh Dang
+;;
+;; Copyright (C) 2008  Linh Dang
+;; Copyright (C) 2011-12 byplayer
 ;; Author: Bogolisk <bogolisk@gmail.com>
 ;; Created: 27 Oct 2012
 ;; Keywords: git, version control, release management

@@ -1,9 +1,6 @@
 ;;; egg-base.el --- Emacs Got Git - Emacs interface to Git
 
 ;; Copyright (C) 2008  Linh Dang
-;; Copyright (C) 2008  Marius Vollmer
-;; Copyright (C) 2009  Tim Moore
-;; Copyright (C) 2010  Alexander Prusov
 ;; Copyright (C) 2011-12 byplayer
 ;;
 ;; Author: Bogolisk <bogolisk@gmail.com>
@@ -60,6 +57,7 @@
 ;;   '(egg-mode-key-prefix "C-c v"))
 
 (require 'egg-custom)
+(require 'ediff)
 (eval-when-compile (require 'cl))
 
 ;;;========================================================
@@ -209,6 +207,92 @@ E.g: `bar' in `foo/bar'"
      (point-min) (if (> (point-max) (point-min))
                      (1- (point-max)) (point-max)))))
 
+(defsubst egg-commit-at-point (&optional pos object)
+  (interactive "d")
+  (get-text-property (or pos (point)) :commit object))
+
+(defun egg-ref-at-point (&optional pos type object)
+  (interactive "d")
+  (let ((ref (get-text-property (or pos (point)) :ref object)))
+    (when ref
+      (if type
+	  (and (if (consp type)
+		   (memq (cdr ref) type)
+		 (eq (cdr ref) type)) 
+	       (car ref))
+	(car ref)))))
+
+(defsubst egg-ref-at (pos &optional object)
+  (egg-ref-at-point pos nil object))
+
+(defsubst egg-head-at-point (&optional pos object)
+  (interactive "d")
+  (egg-ref-at-point pos :head object))
+
+(defsubst egg-head-at (pos)
+  (egg-ref-at-point pos '(:remote :head)))
+
+(defsubst egg-tag-at-point (&optional pos object)
+  (interactive "d")
+  (egg-ref-at-point pos :tag object))
+
+(defsubst egg-remote-at-point (&optional pos object)
+  (interactive "d")
+  (egg-ref-at-point pos :remote object))
+
+(defsubst egg-references-at-point (&optional pos object)
+  (interactive "d")
+  (get-text-property (or pos (point)) :references object))
+
+(defsubst egg-ref-or-commit-at (pos &optional object)
+  (or (egg-ref-at-point pos object) (egg-commit-at-point pos object)))
+
+(defsubst egg-commit-at (pos &optional object)
+  (egg-commit-at-point pos object))
+
+(defsubst egg-rsite-at (pos &optional object)
+  (egg-rbranch-to-remote (egg-remote-at-point pos object)))
+
+(defsubst egg-delta-file-at (pos &optional object)
+  (car (get-text-property pos :diff object)))
+
+(defsubst egg-delta-hunk-at (pos &optional object)
+  (car (get-text-property pos :hunk object)))
+
+
+
+;;;========================================================
+;;; Ediff hooks
+;;;========================================================
+(defvar egg--ediffing-temp-buffers nil)
+(defun egg--add-ediffing-temp-buffers (&rest buffers)
+  (dolist (buf buffers)
+    (when (and (bufferp buf)(buffer-live-p buf))
+      (add-to-list 'egg--ediffing-temp-buffers buf))))
+
+(defun egg--kill-ediffing-temp-buffers ()
+  (let ((lst egg--ediffing-temp-buffers))
+    (setq egg--ediffing-temp-buffers nil)
+    (message "kill ediffing buffers: job-name=%s buffers=%S" ediff-job-name lst)
+    (dolist (buf lst)
+      (when (buffer-live-p buf)
+	(message "egg killing buffer: %s" (if (bufferp buf) (buffer-name buf) buf))
+	(bury-buffer buf)
+	(kill-buffer buf)))))
+
+(defvar egg--ediff-saved-window-config nil)
+(defun egg--ediff-save-windows-config-hook ()
+  (setq egg--ediff-saved-window-config (current-window-configuration)))
+
+(defun egg--ediff-restore-windows-config-hook ()
+  (and (window-configuration-p egg--ediff-saved-window-config)
+       (set-window-configuration egg--ediff-saved-window-config)))
+
+
+;;;========================================================
+;;; GPG
+;;;========================================================
+
 (defvar egg-gpg-agent-info nil)
 (defun egg-gpg-agent-info (&optional action-if-not-set)
   (or egg-gpg-agent-info
@@ -251,7 +335,10 @@ E.g: `bar' in `foo/bar'"
 
 
 
-;; misc
+;;;========================================================
+;;; Documentation helpers
+;;;========================================================
+
 (defun egg-insert-texi-for-command ()
   (interactive)
   (let* ((func (symbol-at-point))
