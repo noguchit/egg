@@ -169,6 +169,15 @@ Many Egg faces inherit from this one by default."
   "Face for a reflog identifier."
   :group 'egg-faces)
 
+(defface egg-low-prio-mono-text
+  '((((class color) (background light))
+     :foreground "gray70" :inherit egg-stash-mono)
+    (((class color) (background dark))
+     :foreground "gray30" :inherit egg-stash-mono)
+    (t :weight bold))
+  "Face low priority monospaced text."
+  :group 'egg-faces)
+
 (defface egg-remote-mono
   '((((class color) (background light))
      :foreground "Orchid" :inherit bold)

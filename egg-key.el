@@ -56,19 +56,35 @@
 
 (defun egg-key-get-cmd-doc (cmd regex-name-alist &optional sub-no)
   (let ((case-fold-search nil)
-	line-1 desc re name re-name)
+	lines line-1 desc re name re-name
+	other-lines ctrl-u-lines)
     (save-match-data
-      (setq line-1 (car (split-string (documentation cmd) "\n")))
-      (setq desc line-1)
+      (setq lines (split-string (documentation cmd) "\n"))
+      (setq line-1 (car lines))
+      (setq other-lines (cdr lines))
+
+      (setq desc (egg-text line-1 'egg-text-1))
+      (dolist (line other-lines)
+	(when (string-match "\\`With \\(?:C-u \\)+prefix, ?\\(.+\\)\\'" line)
+	  (add-to-list 'ctrl-u-lines 
+		       (egg-text (match-string-no-properties 1 line)
+				 'egg-text-1))))
+      
       (while regex-name-alist
 	(setq re-name (car regex-name-alist))
 	(setq regex-name-alist (cdr regex-name-alist))
 	(setq re (car re-name))
 	(setq name (cdr re-name))
-	(when (and (stringp re) (stringp name)
-		   (string-match re desc))
-	  (setq desc (replace-match name t t desc sub-no)))))
-    desc))
+	(when (stringp re) 
+	  (when (and (stringp name) (string-match re desc))
+	    (setq desc (replace-match name t t desc sub-no)))
+	  (setq ctrl-u-lines
+		(mapcar (lambda (line)
+			  (if (string-match re line)
+			      (replace-match line t t line sub-no)
+			    line))
+			ctrl-u-lines)))))
+    (cons desc ctrl-u-lines)))
 
 (defconst egg-key-map-to-heading-alist
   '(("Egg:Section"          . "Operations on Section %s")
@@ -111,7 +127,7 @@
 	     
 	     ;; just add support for C-c C-c
 	     (setq desc (egg-key-get-cmd-doc cmd regex-name-alist sub-no))
-	     (add-to-list 'alist (list key cmd desc)))
+	     (add-to-list 'alist (nconc (list key cmd) desc)))
 	    ((and (stringp mapping) (null heading))
 	     (setq heading (egg-key-get-menu-heading mapping name func)))))
     (cons heading (nreverse alist))))
@@ -208,6 +224,22 @@ See also `with-temp-file' and `with-output-to-string'."
 	     (progn ,@body)
            )))))
 
+(defun egg-key-insert-key-line (key desc-list)
+  (let ((desc (car desc-list))
+	(ctrl-u-lines (cdr desc-list))
+	(key-string (propertize (edmacro-format-keys (string key)) 'face 'bold))
+	(pos (point))
+	(prefix "       ")
+	(sep (egg-text "-" 'egg-low-prio-mono-text))
+	(ctrl-u (egg-text "C-u " 'egg-low-prio-mono-text))
+	(fmt-main " %3s %s %s\n")
+	(fmt-ctrl-u "%s%s%s %s %s\n"))
+    (insert (format fmt-main key-string sep desc))
+    (dolist (line ctrl-u-lines)
+      (insert (format fmt-ctrl-u prefix ctrl-u key-string sep line))
+      (setq prefix (concat prefix ctrl-u)))
+    (put-text-property pos (point) :selected-key (vector key))))
+
 (defun egg-key-electric (heading alist)
   (let ((egg-key-electric-in-progress-p t)
         (old-buffer (current-buffer))
@@ -236,12 +268,13 @@ See also `with-temp-file' and `with-output-to-string'."
 		       (setq key (nth 0 mapping)
 			     cmd (nth 1 mapping)
 			     desc (nth 2 mapping))
-		       (setq pos (point))
-		       (insert (format " %3s - %s\n"
-				       (propertize (edmacro-format-keys (string key))
-						   'face 'bold)
-				       desc))
-		       (put-text-property pos (point) :selected-key (vector key)))
+		       (egg-key-insert-key-line key (nthcdr 2 mapping)))
+		       ;; (setq pos (point))
+		       ;; (insert (format " %3s - %s\n"
+		       ;; 		       (propertize (edmacro-format-keys (string key))
+		       ;; 				   'face 'bold)
+		       ;; 		       desc))
+		       ;; (put-text-property pos (point) :selected-key (vector key)))
 		     (goto-char beg)
 		     (set-buffer-modified-p nil)
 		     (setq buffer-read-only t))

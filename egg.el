@@ -1227,7 +1227,8 @@ reversed patch if REVERSE was non-nil."
                                               nil (point-min))))
 
 (defun egg-buffer-cmd-navigate-next (&optional at-level)
-  "Move to the next section."
+  "Move to the next section.
+With C-u prefix, move to the next section of the same type."
   (interactive "P")
   (egg-buffer-cmd-next-block
    (if (not at-level) :navigation
@@ -4822,8 +4823,8 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
 
 (defun egg-log-buffer-push-to-local (pos &optional level)
   "Push commit at POS onto HEAD.
-With C-u, instead of HEAD, prompt for another ref as destination.
-With C-u C-u, will force the push evel if it would be non-ff.
+With C-u prefix, instead of HEAD, prompt for another ref as destination.
+With C-u C-u prefix, will force the push evel if it would be non-ff.
 When the destination of the push is HEAD, the underlying git command
 would be a pull (by default --ff-only)."
   (interactive "d\np")
