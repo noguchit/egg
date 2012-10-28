@@ -62,7 +62,7 @@
 	(setq re (car re-name))
 	(setq name (cdr re-name))
 	(when (and (stringp re) (stringp name)
-		   (string-match re line-1))
+		   (string-match re desc))
 	  (setq desc (replace-match name t t desc sub-no)))))
     desc))
 
@@ -107,7 +107,7 @@
 	     (add-to-list 'alist (list key cmd desc)))
 	    ((and (stringp mapping) (null heading))
 	     (setq heading (egg-key-get-menu-heading mapping name func)))))
-    (cons heading alist)))
+    (cons heading (nreverse alist))))
 
 (defun egg-key-make-commit-heading (fmt name map-name)
   (let ((name (propertize name 'face 'egg-branch))
