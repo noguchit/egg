@@ -259,7 +259,64 @@ E.g: `bar' in `foo/bar'"
 (defsubst egg-delta-hunk-at (pos &optional object)
   (car (get-text-property pos :hunk object)))
 
+(defsubst egg-navigation-at-point ()
+  (get-text-property (point) :navigation))
 
+(defsubst egg-invisible-spec-at-point ()
+  (get-text-property (point) 'invisible))
+
+(defsubst egg-hunk-at-point ()
+  (get-text-property (point) :hunk))
+
+(defsubst egg-diff-at-point ()
+  (get-text-property (point) :diff))
+
+(defsubst egg-point-in-section (section-id)
+  (eq (get-text-property (point) :section) section-id))
+
+(defsubst egg-use-region-p ()
+  (if (fboundp 'use-region-p)
+      (use-region-p)
+    (and transient-mark-mode mark-active)))
+
+(defsubst egg-safe-search (re limit &optional no backward end)
+  (save-excursion
+    (save-match-data
+      (and (funcall (if backward #'re-search-backward #'re-search-forward) re limit t)
+           (funcall (if end #'match-end #'match-beginning) (or no 0))))))
+
+(defsubst egg-safe-search-pickup (re &optional limit no)
+  (save-excursion
+    (save-match-data
+      (and (re-search-forward re limit t)
+           (match-string-no-properties (or no 0))))))
+
+(defun egg-section-relative-pos (pos)
+  (cond ((equal (point-min) pos) 0)
+	((equal (get-text-property (1- pos) :navigation)
+		(get-text-property pos :navigation))
+	 (- (point)
+	    (previous-single-property-change pos :navigation nil (point-min))))
+	(t 0)))
+
+(defun egg-buffer-goto-section (section &optional offset)
+  (let ((pos (point-min)))
+    (while (and pos
+		(not (equal (get-text-property pos :navigation) section)))
+      (setq pos (next-single-property-change pos :navigation)))
+    (when pos (goto-char (if offset (+ offset pos) pos)))))
+
+
+(defsubst egg-current-line-string ()
+  (buffer-substring-no-properties
+   (line-beginning-position) (line-beginning-position 2)))
+
+(defsubst egg-insert-string-buffer (string buf)
+  (with-current-buffer buf
+     (insert string)))
+
+(defsubst egg-insert-current-line-buffer (buf)
+  (egg-insert-string-buffer (egg-current-line-string) buf))
 
 ;;;========================================================
 ;;; Ediff hooks
@@ -287,6 +344,26 @@ E.g: `bar' in `foo/bar'"
 (defun egg--ediff-restore-windows-config-hook ()
   (and (window-configuration-p egg--ediff-saved-window-config)
        (set-window-configuration egg--ediff-saved-window-config)))
+
+(defun egg-subst-ucs-char-in-buffer (start from to)
+  (unless (= from to)
+    (let ((skip (if (= from ?\\)
+		    (string ?^ from from)
+		  (string ?^ from))))
+      (goto-char (1- start))
+	(while (and (> (skip-chars-forward skip) 0) (not (eobp)))
+	  (insert-char to 1)
+	  (delete-char 1)))))
+
+(defun egg-redraw-chars-in-region (beg end map)
+  (let (pair)
+    (while (< beg end)
+      (setq pair (assq (char-after beg) map))
+      (when pair
+	(goto-char beg)
+	(insert-char (cdr pair) 1)
+	(delete-char 1))
+      (setq beg (1+ beg)))))
 
 
 ;;;========================================================
