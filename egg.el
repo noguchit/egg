@@ -3813,6 +3813,7 @@ adding the contents."
 
 (defconst egg-untracked-file-map
   (let ((map (make-sparse-keymap "Egg:UntrackedFile")))
+    (set-keymap-parent map egg-section-map)
     (define-key map (kbd "RET") 'egg-find-file-at-point)
     (define-key map (kbd "DEL") 'egg-ignore-pattern-from-string-at-point)
     (define-key map "s" 'egg-status-buffer-stage-untracked-file)
@@ -3843,6 +3844,7 @@ adding the contents."
   (egg-git-ok t "stash" "list"))
 
 (defun egg-sb-buffer-show-stash (pos)
+  "Load the details of the stash at POS."
   (interactive "d")
   (let* ((next (next-single-property-change pos :diff))
          (stash (and next (get-text-property next :stash))))
@@ -6038,7 +6040,7 @@ Jump to line LINE if it's not nil."
   "\\{egg-log-remote-branch-map}")
 
 (defconst egg-log-remote-site-map
-  (let ((map (make-sparse-keymap "Egg:LogRef")))
+  (let ((map (make-sparse-keymap "Egg:LogRemoteSite")))
     (set-keymap-parent map egg-log-commit-map)
     (define-key map (kbd "D") 'egg-log-buffer-fetch)
     (define-key map (kbd "U") 'egg-log-buffer-push)
@@ -7353,6 +7355,7 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
                                    name ref)))))
 
 (defun egg-log-buffer-fetch (pos)
+  "Fetch some refs from remote at POS."
   (interactive "d")
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
@@ -7464,7 +7467,7 @@ prompt for a remote repo."
                            remote spec))))
 
 (defun egg-log-buffer-push (pos)
-  "Push some refs to the remote site at POS"
+  "Push some refs to the remote at POS"
   (interactive "d")
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
@@ -8922,20 +8925,23 @@ This is just an alternative way to launch `egg-log'"
     (egg-status-buffer-handle-result (egg--git-stash-unstash-cmd t cmd args))))
 
 (defun egg-sb-buffer-apply-stash (pos &optional no-confirm)
+  "Apply the stash at POS."
   (interactive "d\nP")
- (let ((stash (get-text-property pos :stash)))
+  (let ((stash (get-text-property pos :stash)))
     (when (and stash (stringp stash)
                (or no-confirm
                    (y-or-n-p (format "apply WIP %s to repo? " stash))))
       (egg-sb-buffer-do-unstash "apply" "--index" stash))))
 
 (defun egg-sb-buffer-pop-stash (&optional no-confirm)
+  "Pop and apply the stash at POS."
   (interactive "P")
   (when (or no-confirm
             (y-or-n-p "pop and apply last WIP to repo? "))
     (egg-sb-buffer-do-unstash "pop" "--index")))
 
 (defun egg-sb-buffer-drop-stash (pos &optional all)
+  "Drop the stash at POS."
   (interactive "d\nP")
   (let ((stash (get-text-property pos :stash)))
     (unless stash
