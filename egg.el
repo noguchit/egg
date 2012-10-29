@@ -845,7 +845,7 @@ positions of the sequence as well as the decorations.
                        m-e-x (match-end diff-no)
                        sub-end (or (egg-safe-search diff-end-re end) end)
                        ;; find the end of the header
-                       head-end (or (egg-safe-search "^@@" end) end))
+                       head-end (or (egg-safe-search "^\\(@@\\|diff\\)" end) end))
                  ;; decorate the header
                  (egg-decorate-diff-header m-b-x m-e-x m-b-0 m-e-0)
                  ;; mark the whole diff
@@ -864,7 +864,7 @@ positions of the sequence as well as the decorations.
                        m-e-x (match-end cc-diff-no)
                        sub-end (or (egg-safe-search diff-end-re end) end)
                        ;; find the end of the header
-                       head-end (or (egg-safe-search "^@@@" end) end))
+                       head-end (or (egg-safe-search "^\\(@@@\\|diff\\)" end) end))
                  ;; decorate the header
                  (egg-decorate-cc-diff-header m-b-x m-e-x m-b-0 m-e-0)
                  ;; mark the whole diff
@@ -875,7 +875,7 @@ positions of the sequence as well as the decorations.
                                sub-beg sub-end head-end))
                   sub-beg sub-end m-e-0 cc-diff-map
                   'egg-compute-navigation)
-		 (put-text-property (- sub-end 2) end 'intangible t)
+		 (put-text-property (- sub-end 2) sub-end 'intangible t)
 		 (setq current-delta-is 'cc-diff))
 
                 ((match-beginning index-no) ;; index
