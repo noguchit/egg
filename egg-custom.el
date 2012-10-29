@@ -410,10 +410,13 @@ Many Egg faces inherit from this one by default."
   :group 'egg
   :type 'boolean)
 
-(defcustom egg-confirm-undo t
-  "Always prompt for confirmation before removing delta from workdir."
+(defcustom egg-confirm-undo 'show
+  "How to ask for confirmation before (un)applying hunk"
   :group 'egg
-  :type 'boolean)
+  :type '(radio :tag "Confirmation before (un)applying Hunk"
+		(const :tag "Ask" prompt)
+		(const :tag "Show and Ask" show)
+		(const :tag "Just do It!" nil)))
 
 (defcustom egg-status-buffer-sections '(repo unstaged staged untracked stash)
   "Sections to be listed in the status buffer and their order."
@@ -689,5 +692,6 @@ The 5th char is the diagonal line from upper-lef to lower-right."
 			       (const :tag "\\" ?\\)
 			       (const :tag "╲" ?╲))
 			)))
+
 
 (provide 'egg-custom)
