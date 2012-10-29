@@ -58,7 +58,6 @@
 
 (require 'egg-custom)
 (require 'ediff)
-(eval-when-compile (require 'cl))
 
 (autoload 'edmacro-subseq "edmacro" "Return the subsequence of SEQ from START to END.")
 
@@ -66,18 +65,28 @@
 ;;; simple routines
 ;;;========================================================
 
+(defmacro dolist-done (spec &rest body)
+  "Loop over a list.
+Evaluate BODY with VAR bound to each car from LIST, in turn.
+if DONE then stops the loop and return DONE.
+\(fn (VAR LIST DONE) BODY...)"
+  (declare (indent 1) (debug ((symbolp form &optional form) body)))
+  (let ((temp '--dolist-tail--))
+    `(let ((,temp ,(nth 1 spec))
+	   ,(car spec) ,(nth 2 spec))
+       (while (and (not ,(nth 2 spec)),temp)
+	 (setq ,(car spec) (car ,temp))
+	 ,@body
+	 (setq ,temp (cdr ,temp)))
+       ,(nth 2 spec))))
+
 ;; avoid cl
 (defsubst subseq (seq start &optional end) (edmacro-subseq seq start end))
 
 (defun find-if (predicate seq)
-  (let ((lst (mapcar 'identity seq))
-	item found)
-    (while (and lst (not found))
-      (setq item (car lst)
-	    lst (cdr lst))
-      (when (funcall predicate item)
-	(setq found item)))
-    found))
+  (dolist-done (item seq found)
+    (when (funcall predicate item)
+      (setq found item))))
 
 (defsubst egg-unquote-posix-regexp (string)
   (while (string-match "\\\\[\\|()]" string)
@@ -167,9 +176,10 @@ successful submatch in the order in INDICES."
     (when (re-search-forward regexp nil t)
       (if (null indices)
           (match-string-no-properties 0)
-        (dolist (idx indices)
-          (if (match-beginning idx)
-              (return (match-string-no-properties idx))))))))
+	(dolist-done (idx indices match)
+	  (if (match-beginning idx)
+	      (setq match (match-string-no-properties idx))))))))
+
 
 (defun egg-pick-file-records (file-name start-re end-re)
   "Return a list of strings from the contents of the file FILE-NAME.
