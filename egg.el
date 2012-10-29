@@ -1106,7 +1106,9 @@ not called"
 	range
 	new-1st-line new-num-lines
 	old-1st-line old-num-lines
-	hunk-text new-text old-text)
+	hunk-text new-text old-text
+	old-ranges new-ranges
+	start-c current-prefix current-range)
     (setq range (nth 1 ranges))
     (setq old-1st-line (nth 0 range)
 	  old-num-lines (nth 1 range)
@@ -1118,7 +1120,7 @@ not called"
 		       (forward-line 1)
 		       (point))
 		     b-end))
-    (with-current-buffer "*hunk-decode*"
+    (with-temp-buffer
       (erase-buffer)
       (insert hunk-text)
       (goto-char (point-min))
@@ -1128,6 +1130,7 @@ not called"
 	(delete-char 1)
 	(forward-line 1))
       (setq old-text (buffer-string))
+
       (erase-buffer)
       (insert hunk-text)
       (goto-char (point-min))
@@ -1136,10 +1139,38 @@ not called"
       (while (not (eobp))
 	(delete-char 1)
 	(forward-line 1))
-      (setq new-text (buffer-string)))
+      (setq new-text (buffer-string))
+
+      (erase-buffer)
+      (insert hunk-text)
+      (goto-char (point-min))
+      (setq current-prefix (char-after))
+      (while (not (eobp))
+	(setq start-c (char-after))
+	(delete-char 1)
+	(unless (= start-c current-prefix)
+	  (cond ((eq current-prefix ?+)
+		 (setcdr current-range (1- (point)))
+		 (push current-range new-ranges))
+		((eq current-prefix ?-)
+		 (setcdr current-range (1- (point)))
+		 (push current-range old-ranges)))
+	  (setq current-range (list (1- (point))))
+	  (setq current-prefix start-c))
+	(forward-line 1))
+      (unless (eq current-prefix ? )
+	(cond ((eq current-prefix ?+)
+	       (setcdr current-range (1- (point)))
+	       (push current-range new-ranges))
+	      ((eq current-range ?-)
+	       (setcdr current-range (1- (point)))
+	       (push current-range old-ranges))))
+      (setq hunk-text (buffer-string)))
+
     (list file
 	  (list old-1st-line old-num-lines old-text)
-	  (list new-1st-line new-num-lines new-text))))
+	  (list new-1st-line new-num-lines new-text)
+	  (list old-ranges new-ranges hunk-text))))
 
 
 
@@ -2643,14 +2674,15 @@ POS."
       (egg-revert-visited-files (plist-get res :files)))
     (plist-get res :success)))
 
-(defun egg-show-applied-hunk-in-buffer (buf before after question
-					    yes no)
+(defun egg-show-applied-hunk-in-buffer (buf before after
+					    hunk-text b-ranges a-ranges
+					    question yes no)
   (let ((inhibit-read-only t)
 	(before-1st-line (nth 0 before))
 	(before-num-lines (nth 1 before))
 	(before-text (nth 2 before))
 	(after-text (nth 2 after))
-	beg end bg)
+	beg end bg answer)
     (with-current-buffer buf
       (goto-char (point-min))
       (forward-line (1- before-1st-line))
@@ -2658,37 +2690,46 @@ POS."
       (setq end (save-excursion (forward-line before-num-lines) (point)))
       (delete-region beg end)
       (goto-char beg)
-      (insert after-text)
+      (insert hunk-text)
       (setq end (point))
-      (setq bg (make-overlay beg end nil nil t))
-      (overlay-put bg 'face 'egg-conflict-resolution))
+      
+      (dolist (range b-ranges)
+	(setq bg (make-overlay (+ (car range) beg) (+ (cdr range) beg) nil nil t))
+	(overlay-put bg 'face 'egg-del-bg)
+	(overlay-put bg 'evaporate t))
+
+      (dolist (range a-ranges)
+	(setq bg (make-overlay (+ (car range) beg) (+ (cdr range) beg) nil nil t))
+	(overlay-put bg 'face 'egg-add-bg)
+	(overlay-put bg 'evaporate t)))
+
     (with-selected-window (display-buffer buf t)
       (goto-char beg)
       (recenter)
-      (if (y-or-n-p question)
+      (setq answer (y-or-n-p question))
+      (bury-buffer buf))
+
+    (with-current-buffer buf
+      (goto-char beg)
+      (delete-region beg end)
+      (if answer
 	  (cond ((eq yes :cleanup)
-		 (delete-overlay bg)
-		 (bury-buffer buf)
-		 (kill-buffer buf)
-		 t)
+		 (set-buffer-modified-p nil))
+		((eq yes :kill)
+		 (kill-buffer buf))
 		((eq yes :save)
-		 (delete-overlay bg)
-		 (basic-save-buffer)
-		 t)
-		(t t))
+		 (insert after-text)
+		 (basic-save-buffer))
+		(t nil))
 	(cond ((eq no :cleanup)
-	       (delete-overlay bg)
-	       (bury-buffer buf)
-	       (kill-buffer buf)
-	       nil)
+	       (set-buffer-modified-p nil))
+	      ((eq no :kill)
+	       (kill-buffer buf))
 	      ((eq no :restore)
-	       (delete-overlay bg)
-	       (delete-region beg end)
-	       (goto-char beg)
 	       (insert before-text)
-	       (set-buffer-modified-p nil)
-	       nil)
-	      (t nil))))))
+	       (set-buffer-modified-p nil))
+	      (t nil)))
+      answer)))
 
 (defun egg-hunk-section-show-n-ask-staging (pos)
   (let* ((hunk (egg-hunk-info-at pos))
@@ -2696,10 +2737,14 @@ POS."
 	 (file (car info))
 	 (old (nth 1 info))
 	 (new (nth 2 info))
+	 (hunk-ranges-n-text (nth 3 info))
 	 (buf (egg-file-get-other-version file ":0" nil t)))
     (if (egg-show-applied-hunk-in-buffer buf old new
+					 (nth 2 hunk-ranges-n-text)
+					 (nth 0 hunk-ranges-n-text)
+					 (nth 1 hunk-ranges-n-text)
 					 (format "update Index's %s as shown? " file)
-					 :cleanup :cleanup)
+					 :kill :kill)
 	t
       (message "Cancel applying %s's hunk %s" file (nth 1 hunk))
       nil)))
@@ -2723,10 +2768,14 @@ POS."
 	 (file (car info))
 	 (new (nth 2 info))
 	 (old (nth 1 info))
+	 (hunk-ranges-n-text (nth 3 info))
 	 (buf (find-file-noselect file)) bg res)
     (if (egg-show-applied-hunk-in-buffer buf new old
-					   (format "restore %s's text as shown? " file)
-					   :save :restore)
+					 (nth 2 hunk-ranges-n-text)
+					 (nth 1 hunk-ranges-n-text)
+					 (nth 0 hunk-ranges-n-text)
+					 (format "restore %s's text as shown? " file)
+					 :save :restore)
 	(egg-refresh-buffer (current-buffer))
       (message "Cancel undo %s's hunk %s!" file (nth 1 hunk)))))
 
@@ -3787,8 +3836,8 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 	(graph-map (unless (equal egg-log-graph-chars "*|-/\\")
 		     (let (lst)
 		       (dotimes (i (length egg-log-graph-chars))
-			 (add-to-list 'lst (cons (aref "*|-/\\" i)
-						 (aref egg-log-graph-chars i))))
+			 (push (cons (aref "*|-/\\" i) (aref egg-log-graph-chars i))
+			       lst))
 		       lst)))
         (dec-ref-alist
          (egg-full-ref-decorated-alist
@@ -4214,7 +4263,7 @@ With C-u prefix, unmark all."
 	    ;; add the commit to the done list
 	    ;; prepending is ok because it will be reversed at the end
 	    ;;
-	    (add-to-list 'done commit)
+	    (push commit done)
 	    (let ((sha1 (egg-marked-commit-sha1 commit))
 		  (second-sha1 (egg-marked-commit-follower commit))
 		  (youngers tbd)
@@ -4244,101 +4293,6 @@ With C-u prefix, unmark all."
       (unless (memq commit done)
 	(funcall add-func commit)))
     (nreverse done)))
-
-(defun egg-log-buffer-get-rebase-marked-alist-old ()
-  (let ((marked-alist 
-	 ;;
-	 ;; Reverse the list from egg-log-buffer-get-marked-alist()
-	 ;; this way, we process the youngest first, then prepend
-	 ;; one-by-one to the ordered list.
-	 ;; An older one will then preceded a younger one if
-	 ;; there was no constraints between them.
-	 ;;
-	 (nreverse 
-	  (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
-					   (egg-log-buffer-squash-mark)
-					   (egg-log-buffer-edit-mark)
-					   (egg-log-buffer-fixup-mark))))
-	add-func ordered-list follow-alist leader commit info second)
-    (setq add-func
-	  ;;
-	  ;; Local function to add a commit into ordered-list considering
-	  ;; all the relationships.
-	  ;;
-	  ;; squashed and fixedup commits must be right after the leader/followee
-	  ;; second-in-command commit must be placed after the leader but also
-	  ;; after the leader's squashed/fixed-up commits.
-	  ;; 
-	  (lambda (commit-info)
-	    (let ((commit-sha1 (car commit-info))
-		  (second-commit (nth 3 commit-info))
-		  second-info temp-list)
-	      ;; commits are prepending into ordered list so order is reversed.
-	      ;;
-	      ;; second-in-command are not squashed into the commit
-	      ;; must be added first to be behind the squashed commits.
-	      ;;
-	      ;; the full info of second is not avail here, so search the full
-	      ;; follow-alist for second's full information.
-	      ;;
-	      (when second-commit
-		(dolist (followee-follower follow-alist)
-		  (let ((followee (car followee-follower))
-			(follower (cdr followee-follower)))
-		    (when (and (equal followee commit-sha1) 
-			       (equal (car follower) second-commit))
-		      ;; found second's data
-		      ;; clear it from follow-alist
-		      ;; add it to ordered-list
-		      (setcar followee-follower nil)
-		      (setcdr followee-follower nil)
-		      (funcall add-func follower)))))
-	      
-	      ;;
-	      ;; Once second-in-command was added to ordered list,
-	      ;; add the squashed/fixedup commits that follow the current commit.
-	      ;; 
-	      (dolist (followee-follower follow-alist)
-		;;
-		;; for each commit in the follow-alist
-		;; if the followee is the current commit
-		;;    then add the follower into ordered-list
-		;;
-		(let ((followee (car followee-follower))
-		      (follower (cdr followee-follower)))
-		  (when (equal followee commit-sha1)
-		    (setcar followee-follower nil)
-		    (setcdr followee-follower nil)
-		    (funcall add-func follower)))))
-
-	    ;; now the ordered list contains the second-in-command and
-	    ;; the squashed/fixed-up commits
-	    ;; add the current commit to the ordered-list
-	    (add-to-list 'ordered-list commit-info)))
-
-    ;;
-    ;; For each commit, from youngest to oldest
-    ;;   if commit does not followed a leader
-    ;;      add commit to ordered-list
-    ;;   elif commit's leader is not in ordered-list
-    ;;      error: cannot follow younger commit
-    ;;   else
-    ;;      add (leader . commit) into the follow-alist'
-    ;;
-    ;;  follow-alist is the mapping followee<->follower
-    (dolist (item marked-alist)
-      (setq leader (nth 4 item))	;; append-to
-      (setq second (nth 5 item))	;; followed-by
-      (setq commit (nth 0 item))
-      (setq info (list commit (nth 1 item) (nth 2 item) second)) ;;commit/mark/subject/second
-      (cond ((null leader)
-	     (funcall add-func info))
-	    ((assoc leader ordered-list)
-	     (error "Cannot squash commit %s to following commit %s!"
-		    (egg-pretty-short-rev commit) (egg-pretty-short-rev leader)))
-	    (t (add-to-list 'follow-alist (cons leader info) t))))
-    ordered-list))
-
 
 (defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
   (let ((process-environment (copy-sequence process-environment))
@@ -6695,6 +6649,7 @@ current file contains unstaged changes."
 (defun egg-file-get-other-version (file &optional rev prompt same-mode name)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
          (git-dir (egg-git-dir))
+	 (dir (egg-work-tree-dir))
          (lbranch (egg-current-branch))
          (rbranch (and git-dir (or (egg-tracking-target lbranch)
                                    rev ":0")))
@@ -6704,7 +6659,7 @@ current file contains unstaged changes."
          (git-name (concat rev ":" canon-name))
          (buf (get-buffer-create (concat "*" (if name (concat name ":" canon-name) git-name) "*"))))
     (with-current-buffer buf
-      (setq default-directory (egg-work-tree-dir))
+      (setq default-directory dir)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (unless (= (call-process egg-git-command nil buf nil "show"

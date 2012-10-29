@@ -66,9 +66,8 @@
       (setq desc (egg-text line-1 'egg-text-1))
       (dolist (line other-lines)
 	(when (string-match "\\`With \\(?:C-u \\)+prefix, ?\\(.+\\)\\'" line)
-	  (add-to-list 'ctrl-u-lines 
-		       (egg-text (match-string-no-properties 1 line)
-				 'egg-text-1))))
+	  (push (egg-text (match-string-no-properties 1 line) 'egg-text-1) 
+		ctrl-u-lines)))
       
       (while regex-name-alist
 	(setq re-name (car regex-name-alist))
@@ -127,7 +126,7 @@
 	     
 	     ;; just add support for C-c C-c
 	     (setq desc (egg-key-get-cmd-doc cmd regex-name-alist sub-no))
-	     (add-to-list 'alist (nconc (list key cmd) desc)))
+	     (push (nconc (list key cmd) desc) alist))
 	    ((and (stringp mapping) (null heading))
 	     (setq heading (egg-key-get-menu-heading mapping name func)))))
     (cons heading (nreverse alist))))
