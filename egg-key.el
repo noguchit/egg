@@ -263,10 +263,12 @@ See also `with-temp-file' and `with-output-to-string'."
 		   (let ((inhibit-read-only t))
 		     (erase-buffer)
 		     (insert heading "\n\n")
+		     (insert (egg-text "type menu key as shown or select a menu item\n"
+				       'egg-text-help))
 		     (insert (egg-text egg-key-select-key 'egg-help-key)
-			     (egg-text ": select" 'egg-text-help) "\t"
+			     (egg-text ": select menu item" 'egg-text-help) "\t"
 			     (egg-text egg-key-quit-key 'egg-help-key)
-			     (egg-text ": quit" 'egg-text-help) "\n\n")
+			     (egg-text ": quit menu" 'egg-text-help) "\n\n")
 		     (insert (egg-text "Commands:" 'egg-text-2) "\n\n")
 		     (put-text-property (point-min) (point) 'intangible t)
 		     (setq beg (point))

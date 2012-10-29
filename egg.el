@@ -1071,7 +1071,7 @@ not called"
 	    (delete-region conf-beg conf-end)
 	    (insert (if (eq side 'theirs) theirs ours))
 	    (setq bg (make-overlay conf-beg conf-end nil nil t))
-	    (overlay-put bg 'face 'egg-conflict-resolution)
+	    (overlay-put bg 'face 'egg-add-bg)
 	    (setq resolution 
 		  (if (y-or-n-p (format "keep %s's delta? " 
 					(if (eq side 'theirs) their-head our-head)))
