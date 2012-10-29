@@ -2735,18 +2735,38 @@ POS."
   (let* ((hunk (egg-hunk-info-at pos))
 	 (info (egg-hunk-compute-replacement-text hunk))
 	 (file (car info))
-	 (old (nth 1 info))
-	 (new (nth 2 info))
+	 (index (nth 1 info))
+	 (worktree (nth 2 info))
 	 (hunk-ranges-n-text (nth 3 info))
+	 (hunk-text (nth 2 hunk-ranges-n-text))
+	 (index-ranges (nth 0 hunk-ranges-n-text))
+	 (worktree-ranges (nth 1 hunk-ranges-n-text))
 	 (buf (egg-file-get-other-version file ":0" nil t)))
-    (if (egg-show-applied-hunk-in-buffer buf old new
-					 (nth 2 hunk-ranges-n-text)
-					 (nth 0 hunk-ranges-n-text)
-					 (nth 1 hunk-ranges-n-text)
+    (if (egg-show-applied-hunk-in-buffer buf index worktree
+					 hunk-text index-ranges worktree-ranges
 					 (format "update Index's %s as shown? " file)
 					 :kill :kill)
 	t
-      (message "Cancel applying %s's hunk %s" file (nth 1 hunk))
+      (message "Cancel staging %s's hunk %s" file (nth 1 hunk))
+      nil)))
+
+(defun egg-hunk-section-show-n-ask-unstaging (pos)
+  (let* ((hunk (egg-hunk-info-at pos))
+	 (info (egg-hunk-compute-replacement-text hunk))
+	 (file (car info))
+	 (head (nth 1 info))
+	 (index (nth 2 info))
+	 (hunk-ranges-n-text (nth 3 info))
+	 (hunk-text (nth 2 hunk-ranges-n-text))
+	 (head-ranges (nth 0 hunk-ranges-n-text))
+	 (index-ranges (nth 1 hunk-ranges-n-text))
+	 (buf (egg-file-get-other-version file ":0" nil t)))
+    (if (egg-show-applied-hunk-in-buffer buf index head
+					 hunk-text index-ranges head-ranges
+					 (format "restore Index's %s as shown? " file)
+					 :kill :kill)
+	t
+      (message "Cancel unstaging %s's hunk %s" file (nth 1 hunk))
       nil)))
 
 (defun egg-hunk-section-cmd-stage (pos)
@@ -2759,7 +2779,9 @@ POS."
 (defun egg-hunk-section-cmd-unstage (pos)
   "Remove the hunk enclosing POS from the index."
   (interactive "d")
-  (egg-hunk-section-apply-cmd pos "--cached" "--reverse"))
+  (when (or (not egg-confirm-staging) 
+	    (egg-hunk-section-show-n-ask-unstaging pos))
+    (egg-hunk-section-apply-cmd pos "--cached" "--reverse")))
 
 
 (defun egg-hunk-section-show-n-undo (pos)
