@@ -411,10 +411,17 @@ Many Egg faces inherit from this one by default."
   :type 'boolean)
 
 (defcustom egg-confirm-undo 'show
-  "How to ask for confirmation before (un)applying hunk"
+  "How to ask for confirmation before discarding unstaged chanages."
   :group 'egg
   :type '(radio :tag "Confirmation before (un)applying Hunk"
 		(const :tag "Ask" prompt)
+		(const :tag "Show and Ask" show)
+		(const :tag "Just do It!" nil)))
+
+(defcustom egg-confirm-staging 'show
+  "How to ask for confirmation before (un)staging hunk"
+  :group 'egg
+  :type '(radio :tag "Confirmation before (un)applying Hunk"
 		(const :tag "Show and Ask" show)
 		(const :tag "Just do It!" nil)))
 
