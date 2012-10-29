@@ -59,11 +59,11 @@
 ;; (custom-set-variables
 ;;   '(egg-mode-key-prefix "C-c v"))
 
+(eval-when-compile (require 'cl))
 (require 'egg-custom)
 (require 'egg-base)
 (require 'egg-const)
 (require 'egg-git)
-(require 'cl)
 (require 'electric)
 (require 'ediff)
 (require 'ffap)
@@ -1906,8 +1906,8 @@ the section.
                     (setq last-file file))
                   (let* ((range (egg-get-hunk-range pos))
                          (elem (list sect range
-                                     (copy-list range)
-                                     (copy-list range)))
+                                     (copy-sequence range)
+                                     (copy-sequence range)))
                          (hunk-info (get-text-property pos :hunk)))
                     (setcdr list (cons elem (cdr list)))
                     (setf (fourth hunk-info) elem))))))

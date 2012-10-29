@@ -60,9 +60,24 @@
 (require 'ediff)
 (eval-when-compile (require 'cl))
 
+(autoload 'edmacro-subseq "edmacro" "Return the subsequence of SEQ from START to END.")
+
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
+
+;; avoid cl
+(defsubst subseq (seq start &optional end) (edmacro-subseq seq start end))
+
+(defun find-if (predicate seq)
+  (let ((lst (mapcar 'identity seq))
+	item found)
+    (while (and lst (not found))
+      (setq item (car lst)
+	    lst (cdr lst))
+      (when (funcall predicate item)
+	(setq found item)))
+    found))
 
 (defsubst egg-unquote-posix-regexp (string)
   (while (string-match "\\\\[\\|()]" string)
