@@ -56,33 +56,37 @@
 
 (defun egg-key-get-cmd-doc (cmd regex-name-alist &optional sub-no)
   (let ((case-fold-search nil)
+	(doc (documentation cmd))
 	lines line-1 desc re name re-name
 	other-lines ctrl-u-lines)
-    (save-match-data
-      (setq lines (split-string (documentation cmd) "\n"))
-      (setq line-1 (car lines))
-      (setq other-lines (cdr lines))
+    
+    (if (stringp doc)
+	(save-match-data
+	  (setq lines (split-string doc "\n"))
+	  (setq line-1 (car lines))
+	  (setq other-lines (cdr lines))
 
-      (setq desc (egg-text line-1 'egg-text-1))
-      (dolist (line other-lines)
-	(when (string-match "\\`With \\(?:C-u \\)+prefix, ?\\(.+\\)\\'" line)
-	  (push (egg-text (match-string-no-properties 1 line) 'egg-text-1) 
-		ctrl-u-lines)))
+	  (setq desc (egg-text line-1 'egg-text-1))
+	  (dolist (line other-lines)
+	    (when (string-match "\\`With \\(?:C-u \\)+prefix, ?\\(.+\\)\\'" line)
+	      (push (egg-text (match-string-no-properties 1 line) 'egg-text-1) 
+		    ctrl-u-lines)))
       
-      (while regex-name-alist
-	(setq re-name (car regex-name-alist))
-	(setq regex-name-alist (cdr regex-name-alist))
-	(setq re (car re-name))
-	(setq name (cdr re-name))
-	(when (stringp re) 
-	  (when (and (stringp name) (string-match re desc))
-	    (setq desc (replace-match name t t desc sub-no)))
-	  (setq ctrl-u-lines
-		(mapcar (lambda (line)
-			  (if (string-match re line)
-			      (replace-match line t t line sub-no)
-			    line))
-			ctrl-u-lines)))))
+	  (while regex-name-alist
+	    (setq re-name (car regex-name-alist))
+	    (setq regex-name-alist (cdr regex-name-alist))
+	    (setq re (car re-name))
+	    (setq name (cdr re-name))
+	    (when (stringp re) 
+	      (when (and (stringp name) (string-match re desc))
+		(setq desc (replace-match name t t desc sub-no)))
+	      (setq ctrl-u-lines
+		    (mapcar (lambda (line)
+			      (if (string-match re line)
+				  (replace-match line t t line sub-no)
+				line))
+			    ctrl-u-lines)))))
+      (setq desc "Undocumented"))
     (cons desc ctrl-u-lines)))
 
 (defconst egg-key-map-to-heading-alist
@@ -467,5 +471,10 @@ See also `with-temp-file' and `with-output-to-string'."
 	    (t (error "wtf! selection is: %s" selection))))))
 
 (define-key egg-hide-show-map (egg-key-prompt-key) 'egg-key-prompt)
+
+
+;; (defun egg-insert-texi (name map)
+;;   (let ((alist (egg-key-make-alist name map
+;; 				   (list (cons "")))))))
 
 (provide 'egg-key)

@@ -2354,12 +2354,12 @@ See `egg-buffer-hide-help-on-start'."
 If INIT was not nil, then perform 1st-time initializations as well."
   (with-current-buffer buf
     (let ((inhibit-read-only t)
-	  (state (egg-repo-state))
-          (win (get-buffer-window buf)))
+         (state (egg-repo-state))
+          (win (get-buffer-window buf))
+         pos)
 
       (set (make-local-variable 'egg-status-buffer-changed-files-status)
-	   (egg--get-status-code))
-
+          (egg--get-status-code))
       ;; Emacs tries to be too smart, if we erase and re-fill the buffer
       ;; that is currently being displayed in the other window,
       ;; it remembers it, and no matter where we move the point, it will
@@ -2373,22 +2373,24 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (dolist (sect egg-status-buffer-sections)
           (cond ((eq sect 'repo) (egg-sb-insert-repo-section))
                 ((eq sect 'unstaged) 
-		 (egg-sb-insert-unstaged-section (if (egg-is-merging state)
-						     "Unmerged Changes:"
-						   "Unstaged Changes:")))
+                (egg-sb-insert-unstaged-section (if (egg-is-merging state)
+                                                    "Unmerged Changes:"
+                                                  "Unstaged Changes:"))
+                (setq pos (point)))
                 ((eq sect 'staged) (egg-sb-insert-staged-section 
-				    (if (egg-is-merging state)
-					"Merged Changes:"
+                                   (if (egg-is-merging state)
+                                       "Merged Changes:"
 				      "Staged Changes:")))
                 ((eq sect 'untracked) (egg-sb-insert-untracked-section))
 		((eq sect 'stash) (egg-sb-insert-stash-section))))
         (egg-calculate-hunk-ranges)
 	(if init
 	    (progn
-	      (egg-buffer-maybe-hide-all)
-	      (egg-buffer-maybe-hide-help "help" 'repo))
-	  (egg-restore-section-visibility))
-	(goto-char (egg-previous-non-hidden (point)))
+             (egg-buffer-maybe-hide-all)
+             (egg-buffer-maybe-hide-help "help" 'repo))
+         (egg-restore-section-visibility))
+       (goto-char pos)
+       (goto-char (egg-previous-non-hidden (point)))
        ))))
 
 (defun egg-internal-background (proc msg)

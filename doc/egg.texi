@@ -109,6 +109,42 @@ Then @key{DEL} the Git option.
 open a file in a git repo from within emacs. Et voila!
 @end itemize
 
+Egg has many components but the 3 most important ones are:
+@itemize
+@item The Status Buffer
+This is where one deals with the Index and Work-Tree:
+@itemize
+@item Staging/Unstaging Files/Hunks
+@item Resolving Merge Conflicts (from Merge/Rebase/Apply/Cherry-Pick/Revert/Stash)
+@item Launch Ediff to view Delta or Conflicts.
+@item Committing/Amending
+@item Saving/Applying Stashed Work-in-Progresses
+@end itemize
+@item The Log Buffer
+This is where one manipulates the repo's DAG:
+@itemize
+@item Starting Merge/Rebase/Cherry-Pick/Revert/Reset Operation.
+If the operations started from the Log Buffer created a conflict, Egg will open
+the Status Buffer so you can resolve it.
+@item Creating Branch/Tag
+@item Marking Commits for the next Interactive-Rebase
+@item Fetching Refs from Remote (Egg refuses to support Pull)
+@item Pushing Refs to Remote
+@item Viewing commits, use Ediff with changes introduced by a commit.
+@end itemize
+@item The Minor Mode
+This mode let you issue git commands (on the buffer) while editing. Some are:
+@itemize
+@item Staging/Unstaging/Cancel the current file's modifications.
+@item Diffing the current file against the Index or another revision
+@item Search (pickaxing) history for a string/regexp/line.
+@item View other revisions of the current file
+@item Blame revisions for lines in the file.
+@item Launch ediff to compare file vs Index or other revisions.
+@end itemize
+@end itemize
+
+
 @node File, Status, Overview, Top
 @unnumbered The Egg Minor Mode
 
