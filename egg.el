@@ -4058,12 +4058,16 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 (defalias 'egg-log-pop-to-file 'egg-buffer-pop-to-file)
 
 (defun egg-log-diff-cmd-visit-file (file sha1 &optional use-wdir-file)
+  "Open revision SHA1's FILE.
+With C-u prefix, use the work-tree's version instead."
   (interactive (list (car (get-text-property (point) :diff))
                      (get-text-property (point) :commit)
 		     current-prefix-arg))
   (egg-log-pop-to-file file sha1 nil use-wdir-file))
 
 (defun egg-log-diff-cmd-visit-file-other-window (file sha1 &optional use-wdir-file)
+  "Open revision SHA1's FILE in other window.
+With C-u prefix, use the work-tree's version instead."
   (interactive (list (car (get-text-property (point) :diff))
                      (get-text-property (point) :commit)
 		     current-prefix-arg))
@@ -4414,20 +4418,16 @@ With C-u prefix, unmark all."
 
 
 (defun egg-search-for-regexps (re-value-alist)
-  (let (line item re value)
-    (save-match-data
-      (while re-value-alist
-	(setq item (car re-value-alist)
-	      re-value-alist (cdr re-value-alist)
-	      re (car item))
+  (save-match-data
+    (let (re line value)
+      (dolist-done (item re-value-alist value)
+	(setq re (car item))
+	(goto-char (point-min))
 	(when (re-search-forward re nil t)
 	  (setq line (buffer-substring-no-properties (line-beginning-position)
 						     (line-end-position)))
-	  (setq value (cdr item))
-	  (setq re-value-alist nil))))
-    (if (stringp line)
-	(cons value line)
-      nil)))
+	  (setq value (cdr item))))
+      value)))
 
 
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
@@ -5069,6 +5069,7 @@ prompt for a remote repo."
           (egg-log-buffer-goto-pos p-pos))))))
 
 (defun egg-log-diff-toggle-file-selection (pos)
+  "(un)select the file at POS for the next partial cherry-pic/revert operation."
   (interactive "d")
   (let* ((diff (get-text-property pos :diff))
 	 (diff-beg (and diff (nth 1 diff)))

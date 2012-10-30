@@ -325,30 +325,30 @@ See also `with-temp-file' and `with-output-to-string'."
 (defun egg-key-get-section-name (sect-type pos)
  (let ((section (if (symbolp sect-type)
 		    (get-text-property pos sect-type)
-		  (car (delq nil (mapcar (lambda (type) (get-text-property pos type))
-					 sect-type))))))
-  (cond ((symbolp section)
-	 (or (cdr (assq section '((unstaged . "WorkTree")
-				  (staged . "Index")
-				  (untracked . "Untracked Files")
-				  (repo . "Repository")
-				  (stash . "Stashed WIPs")
-				  (help . "Help")
-				  (:help . "Help"))))
-	     (symbol-name section)))
-	((and (stringp section) (= (length section) 40))
-	 (substring section 0 8))
-	((eq sect-type :diff)
-	 (concat (egg-key-get-section-name '(:section :commit :stash) pos)
-		 ":"
-		 (car section)))
-	((eq sect-type :hunk)
-	 (concat (egg-key-get-section-name :diff pos)
-		 ":"
-		 (car section)))
-	((stringp section)
-	 section)
-	(t (error "Unexpected section: %s" section)))))
+		  (dolist-done (type sect-type value)
+		    (setq value (get-text-property pos type))))))
+   (cond ((symbolp section)
+	  (or (cdr (assq section '((unstaged . "WorkTree")
+				   (staged . "Index")
+				   (untracked . "Untracked Files")
+				   (repo . "Repository")
+				   (stash . "Stashed WIPs")
+				   (help . "Help")
+				   (:help . "Help"))))
+	      (symbol-name section)))
+	 ((and (stringp section) (= (length section) 40))
+	  (substring section 0 8))
+	 ((eq sect-type :diff)
+	  (concat (egg-key-get-section-name '(:section :commit :stash) pos)
+		  ":"
+		  (car section)))
+	 ((eq sect-type :hunk)
+	  (concat (egg-key-get-section-name :diff pos)
+		  ":"
+		  (car section)))
+	 ((stringp section)
+	  section)
+	 (t (error "Unexpected section: %s" section)))))
 
 (defun egg-key-get-section (pos)
   (egg-key-get-section-name (or (get-text-property pos :sect-type)
@@ -407,15 +407,6 @@ See also `with-temp-file' and `with-output-to-string'."
 				     `(lambda (fmt name map-name)
 					(egg-key-make-rbranch-heading
 					 fmt name map-name ,short))))
-		(commit 
-		 (egg-key-make-alist
-		  short map (list (cons egg-subst-commit-in-doc-regex 
-					(propertize short 'face 'bold)))
-		  nil #'egg-key-make-commit-heading))
-		(stash
-		 (egg-key-make-alist
-		  stash map (list (cons "\\(?:the \\)?\\(stash at POS\\|current section\\)"
-					(propertize stash 'face 'bold)))))
 		((and (eq sect-type :hunk) section)
 		 (setq parts (egg-key-untie-section-fqn section))
 		 (egg-key-make-alist 
@@ -430,8 +421,18 @@ See also `with-temp-file' and `with-output-to-string'."
 		 (egg-key-make-alist 
 		  parts map 
 		  (list (cons egg-subst-file-in-doc-regex
-			      (propertize (nth 1 parts) 'face 'egg-term)))
+			      (propertize (nth 1 parts) 'face 'egg-term))
+			(cons "SHA1" (propertize (nth 0 parts) 'face 'bold)))
 		  nil #'egg-key-make-diff-heading))
+		(commit 
+		 (egg-key-make-alist
+		  short map (list (cons egg-subst-commit-in-doc-regex 
+					(propertize short 'face 'bold)))
+		  nil #'egg-key-make-commit-heading))
+		(stash
+		 (egg-key-make-alist
+		  stash map (list (cons "\\(?:the \\)?\\(stash at POS\\|current section\\)"
+					(propertize stash 'face 'bold)))))
 		((and (eq sect-type :help) section)
 		 (egg-key-make-alist 
 		  section map

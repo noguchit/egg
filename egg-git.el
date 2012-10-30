@@ -1329,13 +1329,8 @@ structure instead of the matching line."
 until one matched. Return the line in a form suitable for `egg--do-show-output'.
 If REPLACEMENT was provided, use it in the returned structure instead of
 the matching line."
-  (let ((r-list regex-list)
-	re found)
-    (while (and (not found) r-list)
-      (setq re (car r-list)
-	    r-list (cdr r-list))
-      (setq found (apply 'egg--git-pp-grab-line-matching re replacement extras)))
-    found))
+  (dolist-done (re regex-list found)
+    (setq found (apply 'egg--git-pp-grab-line-matching re replacement extras))))
 
 (defun egg--git-pp-fatal-output (&optional pre-regexes post-regexes)
   (or
