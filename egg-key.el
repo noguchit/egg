@@ -486,7 +486,7 @@ See also `with-temp-file' and `with-output-to-string'."
 				  "the current file")
 			    (cons "\\(?:at\\|enclosing\\) POS" "under the cursor")))))
 	 key cmd desc ctl-u)
-    (insert "@table @kbd\n")
+    (insert "@table @kbd\n" "@anchor{" map-name "}\n")
     (dolist (info (nreverse alist))
       (setq key (nth 0 info))
       (setq cmd (nth 1 info))

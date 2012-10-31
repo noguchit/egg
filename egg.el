@@ -5054,6 +5054,7 @@ prompt for a remote repo."
             (goto-char (match-beginning 1)))))))
 
 (defun egg-log-buffer-next-ref (pos)
+  "Move cursor to the next ref."
   (interactive "d")
   (let ((current-ref (egg-references-at-point pos))
         (n-pos (next-single-property-change pos :references))
@@ -5066,6 +5067,7 @@ prompt for a remote repo."
             (egg-log-buffer-goto-pos n-pos))))))
 
 (defun egg-log-buffer-prev-ref (pos)
+  "Move cursor to the previous ref."
   (interactive "d")
   (let ((current-ref (egg-references-at-point pos))
         (p-pos (previous-single-property-change pos :references))
