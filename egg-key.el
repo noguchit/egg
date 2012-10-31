@@ -83,11 +83,11 @@
 	      (setq ctrl-u-lines
 		    (mapcar (lambda (line)
 			      (if (string-match re line)
-				  (replace-match line t t line sub-no)
+				  (replace-match name t t line sub-no)
 				line))
 			    ctrl-u-lines)))))
       (setq desc "Undocumented"))
-    (cons desc ctrl-u-lines)))
+    (cons desc (nreverse ctrl-u-lines))))
 
 (defconst egg-key-map-to-heading-alist
   '(("Egg:Section"          . "Operations on Section %s")
@@ -473,8 +473,51 @@ See also `with-temp-file' and `with-output-to-string'."
 (define-key egg-hide-show-map (egg-key-prompt-key) 'egg-key-prompt)
 
 
-;; (defun egg-insert-texi (name map)
-;;   (let ((alist (egg-key-make-alist name map
-;; 				   (list (cons "")))))))
+(defconst egg-subst-file-in-doc-re
+  (rx (optional "the ") (or "current file" "FILE" "FILE-NAME")))
 
-(provide 'egg-key)
+(defun egg-insert-map-desc ()
+  (interactive)
+  (let* ((map-name (completing-read "map: " obarray 'boundp t nil nil))
+	 (map (symbol-value (intern map-name)))
+	 (alist (cdr (egg-key-make-alist 
+		      "Don't care" map 
+		      (list (cons egg-subst-file-in-doc-re 
+				  "the current file")
+			    (cons "\\(?:at\\|enclosing\\) POS" "under the cursor")))))
+	 key cmd desc ctl-u)
+    (insert "@table @kbd\n")
+    (dolist (info (nreverse alist))
+      (setq key (nth 0 info))
+      (setq cmd (nth 1 info))
+      (setq desc (nthcdr 2 info))
+      (insert "@item " (string key) "\n")
+      (insert (car desc) "\n")
+      (insert "@ref{" (symbol-name cmd) "}\n" )
+      (setq ctl-u "C-u")
+      (dolist (line (cdr desc))
+	(aset line 0 (upcase (aref line 0)))
+	(insert "@item " ctl-u " " (string key) "\n" line "\n")
+	(setq ctl-u (concat ctl-u " C-u"))))
+    (insert "@end table")))
+
+(defun egg-insert-cmd-desc ()
+  (interactive)
+  (let* ((cmd-name (completing-read "cmd: " obarray 'fboundp t nil nil))
+	 (cmd (symbol-function (intern cmd-name)))
+	 (desc (egg-key-get-cmd-doc cmd nil))
+	 (key ??)
+	 ctl-u)
+    (insert "@item " (string key) "\n")
+    (insert (car desc) "\n")
+    (insert "@ref{" cmd-name "}\n" )
+    (setq ctl-u "C-u")
+    (dolist (line (cdr desc))
+      (aset line 0 (upcase (aref line 0)))
+      (insert "@item " ctl-u " " (string key) "\n" line "\n")
+      (setq ctl-u (concat ctl-u " C-u")))))
+
+
+;; (egg-key-get-cmd-doc 'egg-file-checkout-other-version (list (cons egg-subst-file-in-doc-re "the current file")))
+
+

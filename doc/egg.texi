@@ -46,9 +46,9 @@ maintain compatibility however are welcome.
 * Diff::                        
 * Stash::                       
 * Blame::                       
+* Resolving Conflicts::         
 * Customisations::              
 * Commands::                    
-
 @end menu
 
 @node Rant, Acknowledgements, Top, Top
@@ -109,155 +109,224 @@ Then @key{DEL} the Git option.
 open a file in a git repo from within emacs. Et voila!
 @end itemize
 
+
+@unnumberedsec Using Egg
 Egg has many components but the 3 most important ones are:
 @itemize
 @item The Status Buffer
 This is where one deals with the Index and Work-Tree:
 @itemize
-@item Staging/Unstaging Files/Hunks
-@item Resolving Merge Conflicts (from Merge/Rebase/Apply/Cherry-Pick/Revert/Stash)
-@item Launch Ediff to view Delta or Conflicts.
-@item Committing/Amending
-@item Saving/Applying Stashed Work-in-Progresses
+@item staging/unstaging files/hunks
+@item resolving merge conflicts (from merge/rebase/apply/cherry-pick/revert/stash)
+@item launch ediff to view delta or conflicts.
+@item committing/amending
+@item saving/applying stashed work-in-progresses
 @end itemize
+@xref{Status}.
 @item The Log Buffer
 This is where one manipulates the repo's DAG:
 @itemize
-@item Starting Merge/Rebase/Cherry-Pick/Revert/Reset Operation.
+@item starting merge/rebase/cherry-pick/revert/reset operation.
 If the operations started from the Log Buffer created a conflict, Egg will open
 the Status Buffer so you can resolve it.
-@item Creating Branch/Tag
-@item Marking Commits for the next Interactive-Rebase
-@item Fetching Refs from Remote (Egg refuses to support Pull)
-@item Pushing Refs to Remote
-@item Viewing commits, use Ediff with changes introduced by a commit.
+@item creating branch/tag.
+@item marking commits for the @emph{next} @sc{interactive-rebase}.
+@item fetching refs from remote (egg refuses to support pull).
+@item pushing refs to remote.
+@item viewing commits, use ediff with changes introduced by a commit.
 @end itemize
+@xref{Log}.
 @item The Minor Mode
 This mode let you issue git commands (on the buffer) while editing. Some are:
 @itemize
-@item Staging/Unstaging/Cancel the current file's modifications.
-@item Diffing the current file against the Index or another revision
-@item Search (pickaxing) history for a string/regexp/line.
-@item View other revisions of the current file
-@item Blame revisions for lines in the file.
-@item Launch ediff to compare file vs Index or other revisions.
+@item staging/unstaging/cancel the current file's modifications.
+@item diffing the current file against the Index or another revision
+@item search (pickaxing) history for a string/regexp/line.
+@item view other revisions of the current file
+@item blame revisions for lines in the file, @xref{Blame}.
+@item launch ediff to compare file vs index or other revisions.
 @end itemize
+@xref{File}.
 @end itemize
+
+@unnumberedsec Context-sensitive Key-bindings  Menu
+@anchor{Context Menu}
+Egg heavily uses context-sensitive bindings. The command bound to a key
+depend where the cursor was. Example: on a commit line in the Log
+Buffer, @kbd{o} will checkout a branch if the cursor was on top of a
+branch name. On the other hand, it will detatch HEAD and checkout the
+commit if the cursor was on a branch name.
+
+@kbd{C-mouse-2} is bound it to the context menu when using menu. There's
+also a text-based electric context menu, bound to @kbd{kp-enter} by
+default.  In the text-based menu, each line show the key and the
+description of a command.  To run a command you can type the command's
+key or move the cursor to the line and select the line with
+@kbd{kp-enter}. For example, on a commit line in the Log Buffer, the 3
+sequences below will perfom the same action: create a new branch
+pointing at the commit.
+@itemize
+@item
+@kbd{B}.
+@item
+@kbd{kp-enter} to show the menu, then @kbd{B}.
+@item
+@kbd{kp-enter} to show the menu, then move the line marked
+with @kbd{B} then type @kbd{kp-enter}.
+@end itemize
+
+Each variant of the command that would be invoked with @kbd{C-u} would
+be displayed on a separate line under the main line of the command. For
+example, @kbd{C-u /} will be displayed on a line right after
+@kbd{/}. The 3 sequences below ill also perform the same thing: create a
+new branch even if the name is already in used.
+@itemize
+@item
+@kbd{C-u B}.
+@item
+@kbd{kp-enter} to show the menu then @kbd{C-u B}.
+@item
+@kbd{kp-enter} to show the menu, move to the line marked with @kbd{C-u B}
+then select the line with @kbd{kp-enter}.
+@end itemize
+
+@unnumberedsec Sections and Subsections
+@anchor{Sections}
+In Egg special buffers, information are usually grouped in hierarchical
+sections. A section can contains one or more subsections which in turn can
+contains one or more sub-sub-sections, etc. Sections can hidden/collapsed,
+turning the whole buffer into a hierachical folding structure. The commands
+mapped when the cursor is on top of a section are:
+
+@table @kbd
+@anchor{egg-section-map}
+@item h
+Toggle the hidden state of the current section.
+@ref{egg-section-cmd-toggle-hide-show}
+@item H
+Toggle the hidden state of the subsections of the current section.
+@ref{egg-section-cmd-toggle-hide-show-children}
+@item n
+Move to the next section.
+@ref{egg-buffer-cmd-navigate-next}
+@item C-u n
+Move to the next section of the same type.
+@item p
+Move to the previous section.
+@ref{egg-buffer-cmd-navigate-prev}
+@item C-u p
+Move to the previous section of the same type.
+@end table
+
+Specific types of sections (diff, hunk, commit, etc.) bind extra
+commands in addition to the commands listed above.
 
 
 @node File, Status, Overview, Top
 @unnumbered The Egg Minor Mode
 
-@unnumberedsec The Basics
+@unnumberedsec Using Egg when Editing Files
 When the @code{egg} library is loaded, @code{egg-minor-mode} will be
-activated when visiting a file in a git repository. Whether or not, the
-current file is tracked by git, @kbd{C-x v i}
-(@ref{egg-file-stage-current-file}) will stage the file, i.e. add its contents
-into the index. If you want to compare the current contents of the file
-and its staged contents in the index, type @kbd{C-x v =}
-(@ref{egg-file-diff}). That key sequences open a @sc{Egg Diff} buffer to
-show the deltas, @xref{Diff}. With a prefix,
-i.e. @kbd{C-u C-x v =}, the command will prompt for a revision (instead
-of using the index) to compare with the file's current contents. If you
-prefer using ediff, then type @kbd{C-x v e}
-(@ref{egg-file-ediff}). Again, with the @kbd{C-u} prefix, this command
-will also let the user specify the revision instead of using the
-index. After comparing the file's contents with the index, you might
-decide to throw all current modifications. @kbd{C-x v u}
-(@ref{egg-file-cancel-modifications}), will revert the file's contents
-back to its contents in the index. Some times, you just want to look a
-an older, revision of a file, and there's an egg command for that:
-@kbd{C-x v ~} (@ref{egg-file-version-other-window}). This command, by
-default, show the contents of the current file from the index. With a
-prefix, @kbd{C-u C-x v ~}, the command will prompt for a git revision
-then show the file's contents from that revision. If you want, instead,
-replace the file's current contents with its contents from a revision,
-you can use @kbd{C-x v o} (@ref{egg-file-checkout-other-version}).
+activated when visiting a file in a git repository. The mode-line will
+initially show @t{Egg}. However, after the first time the repo's status
+was read by Egg, it will show @t{Git:branch} where @t{branch} is the
+current branch-name. The following commands are mapped in the minor mode.
 
-@unnumberedsec Other parts of Egg
-The rest of the minor-mode's key bindings are primarily for launching
-egg special buffers to perform various git related tasks.  @kbd{C-x v
-s} (@ref{egg-status}) launches the @sc{Status Buffer}, @sc{Egg}'s most
-important buffer, to examine the current state of HEAD,
-@xref{Status}. @kbd{C-x v l} (@ref{egg-log}), launches the @sc{Log
-Buffer}, to view the commit DAG to also perform DAG-related operations
-such as branching, pushing, merging, etc. @xref{Log}. If you are an
-advanced git user, and has changes stashed away in the current repo,
-@kbd{C-x v S} (@ref{egg-stash}) will show the current stack of stashed
-WIPs, @xref{Stash}. Another advanced but oh so useful command is
-@ref{egg-search-file-changes}, bound to @kbd{C-x v /}. This command
-walks the commit DAG and find those which introduced or removed the
-@emph{search term}, @xref{Pickaxe}.
-
-@unnumberedsec Pointing Finger
-@kbd{C-x v a} (@ref{egg-file-toggle-blame-mode}), will bring the
-current buffer in-or-out of annotation-mode, or more accurately,
-@emph{blame mode}. In blame-mode, editing is disabled (the buffer is
-in read-only mode). Block of lines are prefix with a header describing
-the @emph{last} commit that modified those lines, @xref{Blame}, for
-more details.
-
-@unnumberedsec Committing Changes
-Once you're happy with your changes to the work tree and you've already
-staged all those modifications, the next step is to commit the changes.
-Before actually committing into git, use @ref{egg-commit-log-edit}
-(bound to @kbd{C-x v c}) to compose a commit message. This command has
-different behaviours depending on prefix, i.e. the number of @kbd{C-u}s
-before @kbd{C-x v c}, @xref{Commit}.
-
-
-@unnumberedsec Minor Mode's Key Bindings
 @table @kbd
 @item C-x v a
+Toggle blame mode for the current-file, @xref{Blame}.
 @ref{egg-file-toggle-blame-mode}
-@item C-x v b
-@ref{egg-start-new-branch}
+@item C-u C-x v a
+Do not ask for confirmaton before saving the buffer.
 @item C-x v c
+Open the commit buffer for composing a message.
 @ref{egg-commit-log-edit}
+@item C-u C-x v c
+The message will be use to amend the last commit.
+@item C-u C-x v C-u c
+Just amend the last commit with the old message.
 @item C-x v e
+Compare, using ediff, the current file's contents in work-dir with vs a rev.
 @ref{egg-file-ediff}
-@item C-x v g
-@ref{egg-grep}
-@item C-x v i
-@ref{egg-file-stage-current-file}
-@item C-x v l
-@ref{egg-log}
+@item C-x v f
+Open a file tracked by git.
+@ref{egg-find-tracked-file}
 @item C-x v h
+Show the commits in the current branch's DAG that modified the current file.
 @ref{egg-file-log}
+@item C-x v i
+Add the current's file contents into the index.
+@ref{egg-file-stage-current-file}
 @item C-x v o
+Checkout HEAD's version of the current file.
 @ref{egg-file-checkout-other-version}
-@item C-x v s
-@ref{egg-status}
-@item C-x v S
-@ref{egg-stash}
+@item C-u C-x v o
+Ask for confirmation if the current file contains unstaged changes.
 @item C-x v u
+Checkout INDEX's version of the current file.
 @ref{egg-file-cancel-modifications}
+@item C-u C-x v u
+Then ask for confirmation if the current file contains unstaged changes.
 @item C-x v v
+Guess and perform the next logical action.
 @ref{egg-next-action}
+@item C-u C-x v v
+Ask for confirmation before executing the next-action.
 @item C-x v /
+Search the current file's history for changes introducing or removing a string
 @ref{egg-search-file-changes}
+@item C-u C-x v /
+Search for a regexp instead of a string.
+@item C-u C-x v C-u /
+Prompt the user for advanced search mode.
 @item C-x v =
+Diff the current file in another window.
 @ref{egg-file-diff}
 @item C-x v ~
+Show other version of the current file in another window.
 @ref{egg-file-version-other-window}
 @end table
 
+
+The following commands launch Egg's special buffers to perform various
+git related tasks.
+@table @kbd
+@item C-x v b
+Start a new branch from HEAD.
+@ref{egg-start-new-branch}
+@item C-x v ?
+Search the current branch's history for changes introducing/removing a term.
+@ref{egg-search-changes}
+@item C-x v l
+Show the commit DAG of a ref, @xref{Log}.
+@ref{egg-log}
+@item C-x v L
+Show commit DAG of a ref and its reflogs, @xref{Log}.
+@ref{egg-reflog}
+@item C-x v s
+Show the status of the current repo, @xref{Status}.
+@ref{egg-status}
+@end table
+
+
 @node Status, Commit, File, Top
-@unnumbered Status Buffer, playing with your HEAD
-This special buffer is one of @sc{Egg}'s two most important special
-buffer (the other is the @sc{Log Buffer}). It's launched by the
-@ref{egg-status}. This buffer is designed to work with the index and
-HEAD. As its name indicates, it show the current status of the
-repository. It's also the place where user goes, to resolve conflicts
-during merge or rebase.
+@unnumbered Status Buffer, manipulating the Index and the Worktree.
+This special buffer is one of @sc{Egg}'s two important special buffers
+(the other is the @sc{Log Buffer}). It's launched by the
+@ref{egg-status}. This buffer is designed to manipulate the @sc{Index}
+and the @sc{WorkTree}. As its name indicates, it show the current status
+of the repository. It's also the place where user goes, to resolve
+conflicts during merge or rebase. Since its purpose is to manipulate the
+@sc{Index} and the @sc{WorkTree}, the Status Buffer also shows the list
+of @emph{stashed} WIPs.
 
 Out of the box, the status buffer displays a @emph{lot} of
 informations. However, you can customize what and how it displays
-informations. For @emph{what}, @xref{egg-status-buffer-sections}, for
-@emph{how}, @xref{egg-buffer-hide-sub-blocks-on-start}, and
+informations. For @emph{what} to show, @xref{egg-status-buffer-sections}. For
+@emph{how} to show, @xref{egg-buffer-hide-sub-blocks-on-start}, and
 @xref{egg-buffer-hide-sub-blocks-on-start}.
 
-By default, the status buffer display 4 sections. On the top is the
+By default, the status buffer display 5 sections. On the top is the
 @sc{Repo} section where it shows the current branch (or current commit
 if HEAD was detached), the sha1, the repository and optionally the
 @sc{Help} section (the Help section can be initially hidden
@@ -266,244 +335,317 @@ if HEAD was detached), the sha1, the repository and optionally the
 @sc{Unstaged} section. This section shows a sequence of diffs,
 describing difference between the index and the work-tree. Next comes
 the @sc{Staged} section, this section also contains a sequence of diffs
-but they describe the difference between HEAD and the index. Last is the
-@sc{Untracked} section where the untracked files in the repository are
-listed.
+but they describe the difference between HEAD and the index. Another one
+is the @sc{Untracked} section where the untracked files in the
+repository are listed. Finally, the last section is @sc{Stash}, where
+stashed WIPs are displayed. To navigate among the sections as well as
+their subsection, @xref{Sections}.
 
-@unnumberedsec Sections in the Status Buffer
-@anchor{status-sections} There are several command to help with
-navigation within the @sc{Status Buffer}. @kbd{n}
-(@ref{egg-buffer-cmd-navigate-next}) and @kbd{p}
-(@ref{egg-buffer-cmd-navigate-prev}) will jump from one section (or
-subsection) to the next/previous (sub)section. If the cursor was on a
-diff header, then @kbd{n} would move the cursor to the first hunk of
-the diff. To move to the next/previous section of the @emph{same}
-type, use the @kbd{C-u} prefix. Thus, if your cursor was on a diff
-header, @kbd{C-u n} will move it to the next diff header.
-
-Sections and subsections can be hidden. @kbd{h}
-(@ref{egg-section-cmd-toggle-hide-show}) will toggle a section's
-hide/show state and @kbd{H}
-(@ref{egg-section-cmd-toggle-hide-show-children}) will hide/show all
-@emph{sub}-sections of a (sub)section. You can hide all sections in
-the buffer with @kbd{C-c C-h} (@ref{egg-buffer-hide-all}) or show them
-all with @kbd{C-u C-c C-h}.
-
-In sections that display diffs sequence, @key{RET} will relocate the
-relative position of the cursor back in the original file. If the
-cursor was on the diff header of the file @file{foo.h}, then @key{RET}
-(@ref{egg-diff-section-cmd-visit-file-other-window}) will open that
-file. If the cursor was on line 5 of a hunk displaying lines 112 to
-119 of @file{foo.h}, then @key{RET}
-(@ref{egg-hunk-section-cmd-visit-file-other-window}) will open
-@file{foo.h} and jump to line 117.  For fans of @sc{Ediff}, @kbd{=}
-(@ref{egg-diff-section-cmd-ediff}) will launch ediff comparing the 2
-operands in the diff under the cursor.
-
-@unnumberedsec Unstaged Changes
-@anchor{unstaged-diff-section}
-The Unstaged section shows the difference between the index and the
-work-tree.  The diffs shown can be a the regular diff or combined diff
-in the case you have unmerged changes. Normally, the @kbd{=} key
-(@ref{egg-unstaged-section-cmd-ediff}) will launch @code{ediff2} but
-if it was an combined diff, then @code{ediff3} would be used
-instead. @xref{egg-unmerged-section-cmd-ediff3}. The order in
-@code{ediff3} is: @sc{Theirs}, @sc{Ours} and @sc{WorkTree} for
-conflicts during merge. For conflicts during rebase: @sc{Ours},
-@sc{Theirs} and @sc{WorkTree}.  The @kbd{s}
-(@ref{egg-diff-section-cmd-stage}) key is used to move contents into
-the index. If the cursor was on a diff header, then @kbd{s} would
-stage the entire file. If the cursor was on a hunk, the @kbd{s}
-(@ref{egg-hunk-section-cmd-stage}) would only stage that hunk. To
-stage all local modifications, use @kbd{S}
-(@ref{egg-stage-all-files}). If instead of staging, you want to throw
-away the local modifications, the use the @kbd{u} key. Again, if the
-cursor was on a hunk, then only that hunk would be thrown away
-(@pxref{egg-hunk-section-cmd-undo}). On the other hand, if the cursor
-was on a diff header, then all local modifications to that file would
-be thrown away (@pxref{egg-diff-section-cmd-undo}). To throw away all
-unstaged and @emph{staged} modifications of a file, put the cursor of
-the diff header and type @key{DEL}
-(@ref{egg-diff-section-cmd-revert-to-head}). This command will revert
-the file back to its contents in HEAD.
-
-@unnumberedsec Staged Changes
-@anchor{staged-diff-section}
-The Staged section shows the difference between the index and HEAD.
-The key bindings in this section are very similar to the Unstaged
-section. All the navigation commands are the same. @kbd{=}
-(@ref{egg-staged-section-cmd-ediff3}) will launch @code{ediff3} to
-compare HEAD, the index and the work tree. @kbd{s} will unstage the
-hunk under the cursor (@ref{egg-hunk-section-cmd-unstage}) or the
-whole file of the diff header under the cursor
-(@ref{egg-diff-section-cmd-unstage}).
-
-@unnumberedsec The Untracked Section
-This simple section lists the untracked and @emph{unignored} files in
-the repository. The key-bindings are very simple. @kbd{s}
-(@ref{egg-status-buffer-stage-untracked-file}) will stage the file under
-the cursor. @key{RET} (@ref{egg-find-file-at-point}) will open the file
-and @key{DEL} (@ref{egg-ignore-pattern-from-string-at-point}) will add
-an ignore pattern based on the file-name under the cursor.
-
-@unnumberedsec General Commands
-In the Status Buffer or most of Egg's special buffers, @kbd{q}
-(@ref{egg-quit-buffer}) will quit and bury the buffer. @kbd{g}
-(@ref{egg-buffer-cmd-refresh}) will refresh redisplay. @kbd{c}
-(@ref{egg-commit-log-edit}) will launch the Commit Buffer to let you
-composing the message before committing. @kbd{o}
-(@ref{egg-status-buffer-checkout-ref}) will prompt for a revision to
-checkout. However, it's probably easier and clearer for new user to
-perform revision checkout in the Log Buffer @xref{Log}. The same can be
-said for @kbd{d} (@ref{egg-diff-ref}), it's easier in the Log Buffer.
-The Log Buffer itself can be launched from the Status Buffer with a
-single key @kbd{l} (@ref{egg-log}). The @ref{egg-reflog} command is just
-a different way of launching the Log Buffer is bound into the key
-@kbd{L}.  Finally, @kbd{w} (@ref{egg-status-buffer-stash-wip}) will
-stash the current work-in-progress and @kbd{W} (@ref{egg-stash}) will
-shows the stack of stashed-away WIPs, @xref{Stash}.
-
-@anchor{rebase-keys}
-During @sc{Rebase}, @key{RET}
-(@ref{egg-buffer-selective-rebase-continue}) will continue the rebase,
-@kbd{u} (@ref{egg-buffer-selective-rebase-skip}) will skip the current
-(stopped) commit while @kbd{x} (@ref{egg-buffer-rebase-abort}) will
-abort the rebase altogether.
-
-@unnumberedsec Status-Buffer's Key Bindings
-
-
-@heading Key Bindings for Status Buffer
+The basic @emph{non}-context-sensitive bindings in the @sc{Status Buffer}
+(and the @sc{Log Buffer}) are:
 @table @kbd
-@item L
-@ref{egg-reflog}
-@item S
-@ref{egg-stage-all-files}
-@item U
-@ref{egg-unstage-all-files}
-@item W
-@ref{egg-stash}
-@item X
-@ref{egg-status-buffer-undo-wdir}
-@item c
-@ref{egg-commit-log-edit}
-@item d
-@ref{egg-diff-ref}
-@item g
-@ref{egg-buffer-cmd-refresh}
-@item l
-@ref{egg-log}
-@item n
-@ref{egg-buffer-cmd-navigate-next}
-@item p
-@ref{egg-buffer-cmd-navigate-prev}
-@item o
-@ref{egg-status-buffer-checkout-ref}
+@anchor{egg-buffer-mode-map}
 @item q
+Leave (and burry) the special buffer
 @ref{egg-quit-buffer}
-@item w
-@ref{egg-status-buffer-stash-wip}
-@item C-c C-h
-@ref{egg-buffer-hide-all}
-@item RET
-@ref{egg-buffer-selective-rebase-continue}
-@item u
-@ref{egg-buffer-selective-rebase-skip}
-@item x
-@ref{egg-buffer-rebase-abort}
+@item G
+Re-initialize the current special buffer.
+@ref{egg-buffer-cmd-refresh}
+@item g
+Refresh the current egg special buffer.
+@ref{egg-buffer-cmd-refresh}
+@item n
+Move to the next section.
+@ref{egg-buffer-cmd-navigate-next}
+@item C-u n
+Move to the next section of the same type.
+@item p
+Move to the previous section.
+@ref{egg-buffer-cmd-navigate-prev}
+@item C-u p
+Move to the previous section of the same type.
 @end table
 
-@heading Local Bindings for Unstaged Diff or Unmerged Diff
+The @sc{Status Buffer} also bind the following @emph{non} context-sensitive commands:
 @table @kbd
-@item RET
-@ref{egg-diff-section-cmd-visit-file-other-window}
-@item =
-@ref{egg-unmerged-section-cmd-ediff3},
-@ref{egg-unstaged-section-cmd-ediff}
-@item H
-@ref{egg-section-cmd-toggle-hide-show-children}
-@item h
-@ref{egg-section-cmd-toggle-hide-show}
-@item s
-@ref{egg-diff-section-cmd-stage}
+@anchor{egg-status-buffer-mode-map}
+@item c
+Open the commit buffer for composing a message.
+@ref{egg-commit-log-edit}
+@item C-u c
+The message will be use to amend the last commit.
+@item C-u C-u c
+Just amend the last commit with the old message.
+@item d
+Prompt a revision to compare against worktree.
+@ref{egg-diff-ref}
+@item l
+Show the commit DAG of a ref.
+@ref{egg-log}
+@item o
+Prompt a revision to checkout.
+@ref{egg-status-buffer-checkout-ref}
+@item w
+Stash current work-in-progress in the @sc{WorkTree} and the @sc{Index}.
+@ref{egg-status-buffer-stash-wip}
+@item L
+Show commit DAG of the current branch (or a ref) and its reflogs.
+@ref{egg-reflog}
+@item S
+Stage all tracked files in the repository.
+@ref{egg-stage-all-files}
+@item U
+Unstage all files in the index.
+@ref{egg-unstage-all-files}
+@item C-c C-h
+Hide all sections in current special egg buffer.
+@ref{egg-buffer-hide-all}
+@item C-u C-c C-h
+Show all sections in current special egg buffer.
+@item X
+When in the status buffer, throw away local modifications in the work-tree.
+@item C-u X
+When in the status buffer, throw all (staged and unstaged) modifications.
+@ref{egg-status-buffer-undo-wdir}
+@end table
+
+When the repo is in mid-rebase (due to conflicts or editings), there are
+extra commands bound in the Status Buffer:
+@table @kbd
+@item x
+Abort the current rebase session.
+@ref{egg-buffer-rebase-abort}
 @item u
+Skip the current commit and continue the current rebase session.
+@ref{egg-buffer-selective-rebase-skip}
+@item RET
+Continue the current rebase session.
+@ref{egg-buffer-selective-rebase-continue}
+@end table
+
+Due to the context-sensitve nature of Egg, position the cursor on the
+@emph{repo} section of the Status Buffer before issueing the above
+commands. It's to avoid the context-sensitve bindings of the sections
+from taking over. For example, if the cursor was in the repo sectionk
+@kbd{RET} would be non-context-sensitively bound to
+@ref{egg-buffer-selective-rebase-continue}. However, if the cursor was
+on top of a hunk section, @kbd{RET} would be context-sensitively bound
+to @ref{egg-hunk-section-cmd-visit-file-other-window}.
+
+To see the context binding of the current cursor's location, type
+@kbd{kp-enter}, @xref{Context Menu}.
+
+
+@unnumberedsec Unstaged or Unmerged Changes
+@anchor{unstaged-diff-section}
+
+Normally, the Unstaged Section shows the difference between the Index
+and the WorkTree. In this case, the diff, if present, would be
+a regular diff sequence. If the repo is in mid-merge (due to conflict),
+the diff, if present, would be a combined-diff sequence. Sometimes, there
+would be empty combined-diff deltas. Those are the files where conflicts
+were resolved but the files were not yet added to the Index.
+
+@heading Diff
+Context bindings for all types of the diff header:
+all Section commands (@ref{egg-section-map}), plus
+@table @kbd
+@anchor{egg-diff-section-map}
+@item RET
+Visit file the current file in other window.
+@ref{egg-diff-section-cmd-visit-file-other-window}
+@item f
+Visit file the current file.
+@ref{egg-diff-section-cmd-visit-file}
+@item =
+Ediff src and dest versions of the current file based on the diff at POS.
+@ref{egg-diff-section-cmd-ediff}
+@end table
+
+@heading Unstaged Diff
+Context bindings for an @emph{unstaged} diff header:
+all Diff Section commands (@ref{egg-diff-section-map}), plus
+@table @kbd
+@anchor{egg-unstaged-diff-section-map}
+@item u
+Checkout the contents of the current file from the Index.
 @ref{egg-diff-section-cmd-undo}
+@item =
+Compare the current file and its staged contents using ediff.
+@ref{egg-unstaged-section-cmd-ediff}
+@item s
+Update the Index with the file.
+@ref{egg-diff-section-cmd-stage}
 @item DEL
+Revert the file and its slot in the index to its contents in HEAD.
 @ref{egg-diff-section-cmd-revert-to-head}
 @end table
 
-@heading Local Bindings for Unstaged Hunk
+@heading Unmerged Diff
+Context bindings for an @emph{unmerged} diff header:
+all Unstaged Diff Section commands (@ref{egg-unstaged-diff-section-map}), plus
 @table @kbd
+@item =
+Run ediff3 to resolve merge conflicts in the current file.
+@ref{egg-unmerged-section-cmd-ediff3}
+@end table
+
+@heading Hunk
+Context bindings for all types of the hunk:
+all Section commands (@ref{egg-section-map}), plus
+@table @kbd
+@anchor{egg-hunk-section-map}
 @item RET
+Visit the current file in other-window and goto the current line of the hunk.
 @ref{egg-hunk-section-cmd-visit-file-other-window}
-@item h
-@ref{egg-section-cmd-toggle-hide-show}
-@item s
-@ref{egg-hunk-section-cmd-stage}
-@item u
-@ref{egg-hunk-section-cmd-undo}
+@item =
+Ediff src and dest versions of the current file based on the diff under the cursor.
+@ref{egg-diff-section-cmd-ediff}
+@item f
+Visit the current file and goto the current line of the hunk.
+@ref{egg-hunk-section-cmd-visit-file}
 @end table
 
-
-@heading Local Binding for Untracked Files Section
+@heading Unstaged Hunk
+Context bindings for an unstaged hunk:
+all Hunk commands (@ref{egg-hunk-section-map}), plus
 @table @kbd
-@item RET
-@ref{egg-find-file-at-point}
-@item i
-@ref{egg-status-buffer-stage-untracked-file}
+@anchor{egg-unstaged-hunk-section-map}
+@item u
+Remove the file's modification described by the hunk under the cursor.
+@ref{egg-hunk-section-cmd-undo}
+@item =
+Compare the current file and its staged copy using ediff.
+@ref{egg-unstaged-section-cmd-ediff}
 @item s
-@ref{egg-status-buffer-stage-untracked-file}
-@item DEL
-@ref{egg-ignore-pattern-from-string-at-point}
+Add the hunk under the cursor to the index.
+@ref{egg-hunk-section-cmd-stage}
 @end table
+
+@heading Unmerged Hunk
+Context bindings for an unmerged hunk:
+all Unstaged Hunk commands (@ref{egg-unstaged-hunk-section-map}), plus
+@table @kbd
+@anchor{egg-unmerged-hunk-section-map}
+@item =
+Run ediff3 to resolve merge conflicts in the current file.
+@ref{egg-unmerged-section-cmd-ediff3}
+@end table
+
+@heading Unmerged Conflict
+This is conflict section inside an unmerged hunk. It's marked by git with the
+strings: @t{<<<<<<<}, @t{=======} and @t{>>>>>>>}. The context bindings for this
+section included all commands Unstaged Hunk commands (@ref{egg-unstaged-hunk-section-map}),
+plus
+@table @kbd
+@anchor{egg-unmerged-conflict-map}
+@item m
+interactively resolve the conflict under the cursor.
+@ref{egg-unmerged-conflict-take-side}
+@item M
+choose one side (@emph{ours} or @emph{theirs}) of the conflict to resolved the
+whole file. (@t{git checkout --ours} or@t{git checkout --theirs}.
+@ref{egg-unmerged-conflict-checkout-side}
+@end table
+
+
+
+@unnumberedsec Staged or Merged Changes
+@anchor{staged-diff-section}
+
+The Staged Section shows the difference between HEAD and the Index.
+It also show unmerged entries: WorkTree's files that have conflicts or
+those with resolved conflicts but not added into the Index. The delta
+in the Staged Section are always of the regular diff.
+
+@heading Staged Diff
+Context bindings for an @emph{staged} diff header:
+all Diff Section commands (@ref{egg-diff-section-map}), plus
+@table @kbd
+@item =
+Compare the WorkTree's file, its contents in the Index and in HEAD, using 3-way ediff.
+@ref{egg-staged-section-cmd-ediff3}
+@item s
+For the file under the cursor, revert its contents in the Index to HEAD's.
+@ref{egg-diff-section-cmd-unstage}
+@item DEL
+Revert the file and its slot in the index to its contents in HEAD.
+@ref{egg-diff-section-cmd-revert-to-head}
+@end table
+
+@unnumberedsec The Untracked Section
+This simple section lists the untracked and @emph{unignored} files in
+the repository. Its purpose is to catch files that one forgot to add
+into the Index. Context bindings for the untracked section:
+all Section commands (@ref{egg-section-map}), plus
+
+@table @kbd
+@item DEL
+Add an ignore pattern based on the string at point.
+@ref{egg-ignore-pattern-from-string-at-point}
+@item s
+add untracked file(s) to the repository
+@ref{egg-status-buffer-stage-untracked-file}
+@end table
+
+@unnumberedsec The Stash Section
+@anchor{stash}
+This section displays the stashed WIPs. The context bindings for the stash
+section: all Section command (@ref{egg-section-map}), plus:
+@table @kbd
+@item SPC
+Load the show the details of the stashed WIP under the cursor.
+@ref{egg-sb-buffer-show-stash}
+@item RET
+Apply the stashed WIP under the cursor to WorkTree and Index.
+@ref{egg-sb-buffer-apply-stash}
+@item a
+Apply the stashed WIP under the cursor to WorkTree and Index.
+@ref{egg-sb-buffer-apply-stash}
+@item DEL
+Drop the stashed WIP under the cursor.
+@ref{egg-sb-buffer-drop-stash}
+@item o
+Pop and apply the stash under the cursor to WorkTree and Index..
+@ref{egg-sb-buffer-pop-stash}
+@end table
+
+TBD: binding for the stash's contents.
 
 @node Commit, Log, Status, Top
 @unnumbered Commit Buffer
-Once the user is happy with the work tree and staged all the new
-modifications in the index, it's committing time. But before committing,
-git would need a @emph{commit message}. The command
-@ref{egg-commit-log-edit} will launch the Commit Buffer to let the user
-composing the commit message.  Once the done composing, @kbd{C-c C-c}
-(@ref{egg-log-msg-done}) will actually perform the git commit action
-with the newly composed message from the buffer's editing area.
+This special buffer is for composing a commit log message. It has a
+heading section decribing information about the next commit:
+@itemize
+@item the branch to commit into
+@item the repository
+@item the commiter 
+@item the gpg key if the commit is to be signed.
+@end itemize
+Following the heading section is the text area. The user should compose the
+log message in here. This section use text-mode's keymap with the following
+extra bindings:
+@table @kbd
+@item C-c C-k
+Cancel composing the message.
+@ref{egg-log-msg-cancel}
+@item C-c C-s
+Toggle the gpg-signed status of the message.
+@ref{egg-log-msg-buffer-toggle-signed}
+@item C-c C-c
+Done editing, proceed with commiting.
+@ref{egg-log-msg-done}
+@end table
 
-If @code{egg-commit-log-edit} was launched without any prefix, once
-composing was done, @kbd{C-c C-c} will just commit the index with the
-message. If @code{egg-commit-log-edit} was launch with @kbd{C-u} prefix,
-the message of the previous commit will be loaded into the editing area
-and @kbd{C-c C-c} will amend the last commit with the index and the
-re-composed message. If @code{egg-commit-log-edit} was launch with
-@kbd{C-u C-u} prefix, it will simply amend the last commit with the
-index, the message of the last commit will be re-used.
-
-Similar to the Status Buffer, the Commit Buffer is composed of 4
-sections: the Heading and the Editing Area; the Staged Section; the
-Unstaged Section; the Untracked Section. The Heading reminds the
-committer of branch (s)he is committing into, the repository (s)he working
-in and the identifications that will be recorded into the commit. The
-contents of the text area will be used as the commit message. The
-following 3 sections are there to remind the user @emph{what} will be
-committed into the branch what will @emph{not} be. However, the diffs in
-the Unstaged (@ref{unstaged-diff-section}) and Staged
-(@ref{staged-diff-section}) sections have the local key bindings similar
-to what was described in the Status Buffer Chapter, @xref{Status}. Thus,
-you can stage and unstage modifications directly in the Commit Buffer,
-prior to committing. If you change your mind and want to stop composing,
-then use @kbd{C-c C-k} (@ref{egg-log-msg-cancel}) to cancel everything.
-Because of the buffer is used for entering text, @kbd{g} cannot be use
-to refresh the buffer, @ref{egg-buffer-cmd-refresh} is instead bound to
-@kbd{C-l}.
-
-The commit messages composed in the commit buffer are saved in a ring.
-@kbd{M-n} (@ref{egg-log-msg-newer-text}) and @kbd{M-p}
-(@ref{egg-log-msg-older-text}) will cycle through the ring and bring old
-messages into the editing area. @kbd{M-TAB} is conveniently bound to
-@code{ispell-complete-buffer} to help with editing text. 
+After the the text-area is the 3 sections: staged, unstaged and
+untracked.  Here, they are called respectively: @sc{Changes to Commit},
+@sc{Deferred Changes} and @sc{Untracked Files}. The context bindings are
+identical to same sections in the Status Buffer, @xref{Status}.
 
 @node Log, Pickaxe, Commit, Top
-@unnumbered Log Buffer, messing with History
+@unnumbered Log Buffer
 @ref{egg-log}, @ref{egg-file-log} and @ref{egg-reflog} are three of the
-different way of launching the @sc{Log Buffer}. The Log Buffer show a
+different way of launching the @sc{Log Buffer}. This buffer shows a
 list of commits, usually forming a DAG. In the regular cycle:
 edit-add-commit, commits are added to the current branch in a linear
 fashion. However, with rebase, amending and reset, the branch's head can
@@ -513,11 +655,7 @@ at might no longer reachable from the latest commit. That's why git's
 ref. Those previous incarnations are commits that might not be reachable
 by walking history from the latest commit. Realizing that importance,
 @sc{Egg}'s @sc{Log Buffer} was designed to show both the combined DAG
-and branch (or a ref) and its reflogs. The Log Buffer support the same
-key bindings for quit (@kbd{q}) and refresh (@kbd{g}) as most Egg's
-special buffers. However, it also support re-running command using
-@kbd{G}. I.e. in the Log Buffer, @kbd{g} will rerun the @code{egg-log}
-command.
+and branch (or a ref) and its reflogs.
 
 When launch without any prefix, @code{egg-log} will show the combined
 DAG of the current branch (or HEAD) and its reflogs. With @kbd{C-u}
@@ -532,7 +670,7 @@ commit. The refs that point at the commit are listed on the commit's
 line. The details of a commit, i.e. the diffs, can be loaded with
 @key{SPC} (@ref{egg-log-buffer-insert-commit}). As with the Status
 Buffer, the hide/show and the navigation commands work the same way
-here @xref{status-sections}. The @sc{Status Buffer} was designed
+here @xref{Status}. The @sc{Status Buffer} was designed
 primarily to deal with the index, the @sc{Log Buffer}, on the other
 hand, was intended for actions that operate on the DAG. Most commands
 in the Log Buffer are context sensitive. Their behaviour depends on
@@ -542,6 +680,34 @@ Thus, most commands in the buffer act upon the commit described on the
 line under the cursor.  However, if the cursor was on a ref name (a
 branch, a tag, a remote or a reflog), many commands will operate upon
 the ref instead of the commit.
+
+There also minor variants of the @sc{Log Buffer}, examples:
+@itemize
+@item
+the File's history where the buffer only displays the DAG's commits 
+modifying the file.
+@item
+the @sc{Query Buffer}, this buffer display the results of a
+@emph{pickaxe} search. The commits are only those introducing or
+removing a term where @emph{term} can be a string, a regexp or a line.
+@end itemize
+All @emph{log-style} buffers have the following bindings:
+All buffer bindings describe in @ref{egg-buffer-mode-map}, plus
+@table @kbd
+@item n
+Move cursor to the next ref.
+@ref{egg-log-buffer-next-ref}
+@item p
+Move cursor to the previous ref.
+@ref{egg-log-buffer-prev-ref}
+@item s
+Show the status of the current repo.
+@ref{egg-status}
+@end table
+
+
+
+
 
 @unnumberedsec Moving HEAD
 In the Log Buffer, it's very easy to move the current branch (or the
@@ -641,7 +807,7 @@ with merge strategy. If there were conflicts during rebase, the user
 should go to the Status Buffer to inspect and resolve the conflicts,
 @xref{Status}. To go the Status Buffer from the Log Buffer, just type
 @kbd{s}. The Status Buffer has commands to skip commit and continue
-the halted rebase, @xref{rebase-keys}.
+the halted rebase.
 
 @heading Interactive Rebase
 This is the most complex (and fragile) operation in Egg. Before starting
@@ -802,11 +968,31 @@ under the cursor back into the full history DAG in the Log Buffer.
 @unnumbered Stash Buffer
 @anchor{egg-stash}
 
-@node Blame, Customisations, Stash, Top
+@node Blame, Resolving Conflicts, Stash, Top
 @unnumbered Blame Mode
 @anchor{egg-file-toggle-blame-mode}
+@unnumberedsec Pointing Finger
+@kbd{C-x v a} (@ref{egg-file-toggle-blame-mode}), will bring the
+current buffer in-or-out of annotation-mode, or more accurately,
+@emph{blame mode}. In blame-mode, editing is disabled (the buffer is
+in read-only mode). Block of lines are prefix with a header describing
+the @emph{last} commit that modified those lines, @xref{Blame}, for
+more details.
 
-@node Customisations, Commands, Blame, Top
+@unnumberedsec Committing Changes
+Once you're happy with your changes to the work tree and you've already
+staged all those modifications, the next step is to commit the changes.
+Before actually committing into git, use @ref{egg-commit-log-edit}
+(bound to @kbd{C-x v c}) to compose a commit message. This command has
+different behaviours depending on prefix, i.e. the number of @kbd{C-u}s
+before @kbd{C-x v c}, @xref{Commit}.
+
+@node Resolving Conflicts, Customisations, Blame, Top
+@unnumbered Resolving Conflicts
+
+
+
+@node Customisations, Commands, Resolving Conflicts, Top
 @unnumbered Customisations
 
 @defopt egg-buffer-hide-sub-blocks-on-start
@@ -916,6 +1102,16 @@ staged state in the index. However, in a diff special egg buffer, it
 can change the file's contents to the one of the source revision.
 @end deffn
 
+@deffn Command egg-unmerged-conflict-checkout-side
+@anchor{egg-unmerged-conflict-checkout-side}
+Checkout one side of the conflict under the cursor.
+@end deffn
+
+@deffn Command egg-unmerged-conflict-take-side
+@anchor{egg-unmerged-conflict-take-side}
+Interactive resolve conflict under the cursor.
+@end deffn
+
 @deffn Command egg-hunk-section-cmd-undo
 @anchor{egg-hunk-section-cmd-undo}
 Remove the file's modification described by the hunk under the cursor.
@@ -1011,6 +1207,16 @@ Remove the hunk under the cursor from the index.
 @anchor{egg-diff-section-cmd-revert-to-head}
 Revert the file in the diff section under the cursor and its slot in
 the index to its state in HEAD.
+@end deffn
+
+@deffn Command egg-diff-section-cmd-visit-file
+@anchor{egg-diff-section-cmd-visit-file}
+Visit FILE.
+@end deffn
+
+@deffn Command egg-hunk-section-cmd-visit-file
+@anchor{egg-hunk-section-cmd-visit-file}
+Visit FILE and goto the current line of the hunk.
 @end deffn
 
 @deffn Command egg-section-cmd-toggle-hide-show-children
@@ -1300,6 +1506,37 @@ prompt for a remote repo.
 @deffn Command egg-search-file-changes-all
 @anchor{egg-search-file-changes-all}
 Search file's full history for changes introducing/removing a term.
+@end deffn
+egg-find-tracked-file
+
+@deffn Command egg-find-tracked-file
+@anchor{egg-find-tracked-file}
+Open a file tracked by git.
+@end deffn
+
+@deffn Command egg-sb-buffer-show-stash
+@anchor{egg-sb-buffer-show-stash}
+Load the details of the stash at POS.
+@end deffn
+
+@deffn Command egg-sb-buffer-apply-stash
+@anchor{egg-sb-buffer-apply-stash}
+Apply the stash at POS.
+@end deffn
+
+@deffn Command egg-sb-buffer-drop-stash
+@anchor{egg-sb-buffer-drop-stash}
+Drop the stash at POS.
+@end deffn
+
+@deffn Command egg-sb-buffer-pop-stash
+@anchor{egg-sb-buffer-pop-stash}
+Pop and apply the stash at POS.
+@end deffn
+
+@deffn Command egg-log-msg-buffer-toggle-signed
+@anchor{egg-log-msg-buffer-toggle-signed}
+Toggle the to-be-gpg-signed state of the message being composed.
 @end deffn
 
 @bye

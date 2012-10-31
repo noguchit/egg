@@ -195,6 +195,7 @@
 			   (not no-match-ok) default)))
 
 (defun egg-find-tracked-file (file-name)
+  "Open a file tracked by git."
   (interactive (list (egg-read-tracked-filename "Find tracked file: ")))
   (switch-to-buffer (find-file-noselect file-name)))
 
@@ -1004,6 +1005,7 @@ not called"
     (forward-line (1- line))))
 
 (defun egg-unmerged-conflict-checkout-side (pos)
+  "Checkout one side of the conflict at POS."
   (interactive "d")
   (let* ((side (get-text-property pos :conflict-side))
 	 (head (get-text-property pos :conflict-head))
@@ -1015,6 +1017,7 @@ not called"
 	  (egg-status-buffer-handle-result (egg--git-add-cmd (current-buffer) file)))))))
 
 (defun egg-unmerged-conflict-take-side (pos)
+  "Interactive resolve conflict at POS."
   (interactive "d")
   (let* ((hunk-info (egg-hunk-info-at pos))
 	 (file (and hunk-info (car hunk-info)))
@@ -1311,7 +1314,8 @@ With C-u prefix, move to the next section of the same type."
      (or (get-text-property (point) :sect-type) :navigation))))
 
 (defun egg-buffer-cmd-navigate-prev (&optional at-level)
-  "Move to the previous section."
+  "Move to the previous section.
+With C-u prefix, move to the previous section of the same type."
   (interactive "P")
   (egg-buffer-cmd-prev-block 
    (if (not at-level) :navigation
@@ -2881,6 +2885,7 @@ the source revision."
      (plist-get (egg--git-co-files-cmd t file "HEAD") :files))))
 
 (defun egg-file-stage-current-file ()
+  "Add the current's file contents into the index."
   (interactive)
   (let* ((short-file (file-name-nondirectory (buffer-file-name)))
 	 (egg--do-no-output-message (format "staged %s's modifications" short-file)))
@@ -3120,6 +3125,7 @@ as message. PREFIX and IGNORED are ignored."
 			    text-beg text-end gpg-uid "--amend"))
 
 (defun egg-log-msg-buffer-toggle-signed ()
+  "Toggle the to-be-gpg-signed state of the message being composed."
   (interactive)
   (let* ((gpg-uid (egg-log-msg-gpg-uid))
 	 (new-uid (if gpg-uid 
@@ -3241,7 +3247,10 @@ See `egg-commit-buffer-sections'"
 (defun egg-commit-log-edit (title-function
                             action-closure
                             insert-init-text-function &optional amend-no-msg)
-  "Open the commit buffer for composing a message (if AMEND-NO-MSG is nil).
+  "Open the commit buffer for composing a message.
+With C-u prefix, the message will be use to amend the last commit.
+With C-u C-u prefix, just amend the last commit with the old message.
+For non interactive use:
 TITLE-FUNCTION is either a string describing the text to compose or
 a function return a string for the same purpose.
 ACTION-CLOSURE is the input to build `egg-log-msg-closure'. It should
@@ -6208,15 +6217,19 @@ rebase. Otherwise mark the commit as PICK."
 
 
 (defun egg-search-file-changes (prefix &optional default-term file-name)
-  "Search file's history in the current branch for changes introducing or removing a term.
-TERM is the default search term."
+  "Search current file's history for changes introducing or removing a string
+term, default to DEFAUL-TERM. The search is restricted to the current branch's history.
+With C-u prefix, search for a regexp instead of a string.
+With C-u C-u prefix, prompt the user for advanced search mode."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
   (egg-do-search-file-changes prefix default-term file-name "search %s's history in %s"))
 
 (defun egg-search-file-changes-all (prefix &optional default-term file-name)
-  "Search file's full history for changes introducing or removing a term.
-TERM is the default search term."
+  "Search current file's history for changes introducing or removing a string
+term, default to DEFAUL-TERM. The search is done on the full history.
+With C-u prefix, search for a regexp instead of a string.
+With C-u C-u prefix, prompt the user for advanced search mode."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
   (egg-do-search-file-changes prefix default-term file-name "search %s's full history"
@@ -6371,6 +6384,7 @@ of at least one."
     closure))
 
 (defun egg-grep-commit (prefix term)
+  "Grep files tracked by git."
   (interactive (list (prefix-numeric-value current-prefix-arg)
 		     (egg-string-at-point)))
   (let (info)
@@ -6581,6 +6595,8 @@ if INCLUDE-UNTRACKED is non-nil."
 ;;; minor-mode
 ;;;========================================================
 (defun egg-file-toggle-blame-mode (save)
+  "Toggle blame mode for the current-file.
+With C-u prefix, do not ask for confirmaton before saving the buffer."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
@@ -6617,8 +6633,8 @@ if INCLUDE-UNTRACKED is non-nil."
 
 (defun egg-file-checkout-other-version (&optional no-confirm)
   "Checkout HEAD's version of the current file.
-if CONFIRM-P was not null, then ask for confirmation if the
-current file contains unstaged changes."
+With C-u prefix, ask for confirmation if the current file contains unstaged changes.
+That's the NO-CONFIRM parameter in non-interactive use."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
@@ -6637,8 +6653,8 @@ current file contains unstaged changes."
 
 (defun egg-file-cancel-modifications (&optional no-confirm)
   "Checkout INDEX's version of the current file.
-if CONFIRM-P was not null, then ask for confirmation if the
-current file contains unstaged changes."
+With C-u prefix, then ask for confirmation if the current file contains unstaged changes.
+That's the CONFIRM-P paramter in non-interactive use."
   (interactive "P")
   (unless (buffer-file-name)
     (error "Current buffer has no associated file!"))
@@ -6657,6 +6673,7 @@ current file contains unstaged changes."
      (egg--git-co-files-cmd (egg-get-status-buffer) git-file))))
 
 (defun egg-start-new-branch (&optional force)
+  "Start a new branch from HEAD."
   (interactive "P")
   (let* ((upstream (egg-current-branch))
 	 (rev (or (egg-get-symbolic-HEAD) (egg-HEAD)))
@@ -6713,7 +6730,7 @@ current file contains unstaged changes."
 (add-hook 'ediff-quit-hook 'egg--kill-ediffing-temp-buffers)
 
 (defun egg-file-ediff (&optional ask-for-dst)
-  "Compare, using ediff, the file's contents in work-dir with vs a rev.
+  "Compare, using ediff, the current file's contents in work-dir with vs a rev.
 If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs."
   (interactive "P")
   (unless (buffer-file-name)
@@ -7050,6 +7067,8 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
     action))
 
 (defun egg-next-action (&optional ask)
+  "Guess and perform the next logical action.
+With C-u prefix, ask for confirmation before executing the next-action."
   (interactive "P")
   (save-some-buffers nil 'egg-is-in-git)
   (let* ((state (egg-repo-state :unstaged :staged :error-if-not-git))
@@ -7086,7 +7105,6 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
 (let ((map egg-file-cmd-map))
   (define-key map (kbd "a") 'egg-file-toggle-blame-mode)
   (define-key map (kbd "b") 'egg-start-new-branch)
-  (define-key map (kbd "d") 'egg-status)
   (define-key map (kbd "c") 'egg-commit-log-edit)
   (define-key map (kbd "e") 'egg-file-ediff)
   (define-key map (kbd "f") 'egg-find-tracked-file)
@@ -7097,7 +7115,6 @@ If ASK-FOR-DST is non-nil, then compare the file's contents in 2 different revs.
   (define-key map (kbd "h") 'egg-file-log)
   (define-key map (kbd "o") 'egg-file-checkout-other-version)
   (define-key map (kbd "s") 'egg-status)
-  (define-key map (kbd "S") 'egg-stash)
   (define-key map (kbd "u") 'egg-file-cancel-modifications)
   (define-key map (kbd "v") 'egg-next-action)
   (define-key map (kbd "w") 'egg-commit-log-edit)
