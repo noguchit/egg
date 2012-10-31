@@ -4430,15 +4430,14 @@ With C-u prefix, unmark all."
 
 (defun egg-search-for-regexps (re-value-alist)
   (save-match-data
-    (let (re line value)
+    (let (re line)
       (dolist-done (item re-value-alist value)
 	(setq re (car item))
 	(goto-char (point-min))
 	(when (re-search-forward re nil t)
 	  (setq line (buffer-substring-no-properties (line-beginning-position)
 						     (line-end-position)))
-	  (setq value (cdr item))))
-      value)))
+	  (setq value (cons (cdr item) line)))))))
 
 
 (defun egg-handle-rebase-interactive-exit (&optional orig-sha1)
