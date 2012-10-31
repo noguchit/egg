@@ -1311,7 +1311,8 @@ Return it in a form usable for `egg--do-show-output'."
   "If REGEX matched a line in the current buffer, return it in a form suitable
 for `egg--do-show-output'. If REPLACEMENT was provided, use it in the returned
 structure instead of the matching line."
-  (let ((matched-line 
+  (let* ((case-fold-search nil)
+	 (matched-line 
 	 (when (stringp regex)
 	   (save-match-data
 	     (goto-char (point-min))
@@ -1752,6 +1753,10 @@ CMD should be pop, apply or branch.
 		     (egg--git-pp-grab-line-no -1 :next-action 'status :success t))
 	       (or (egg--git-pp-grab-line-matching "^CONFLICT" nil 
 						   :next-action 'status :success t)
+		   (egg--git-pp-grab-line-matching "Conflicts in index. Try without --index"
+						   :next-action 'status :success nil)
+		   (egg--git-pp-grab-line-matching "^error: patch failed:"
+						   :next-action 'status :success nil)
 		   (egg--git-pp-grab-line-matching 
 		    "following files would be overwritten"
 		    "stashed wip conflicts with local modifications, please commit first"

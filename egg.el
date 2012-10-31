@@ -6477,14 +6477,20 @@ This is just an alternative way to launch `egg-log'"
 	(error "stash %s cancelled!" cmd)))
     (egg-status-buffer-handle-result (egg--git-stash-unstash-cmd t cmd args))))
 
-(defun egg-sb-buffer-apply-stash (pos &optional no-confirm)
+(defun egg-sb-buffer-apply-stash (pos &optional prefix)
   "Apply the stash at POS."
-  (interactive "d\nP")
-  (let ((stash (get-text-property pos :stash)))
-    (when (and stash (stringp stash)
-               (or no-confirm
-                   (y-or-n-p (format "apply WIP %s to repo? " stash))))
-      (egg-sb-buffer-do-unstash "apply" "--index" stash))))
+  (interactive "d\np")
+  (let* ((stash (get-text-property pos :stash))
+	 (args (list "--index" stash))
+	 (do-it t))
+    (when (stringp stash)
+      (cond ((and (> prefix 15)
+		  (not (y-or-n-p (format "apply WIP %s with index? " stash))))
+	     (setq args (list stash)))
+	    ((< prefix 4)
+	     (setq do-it (y-or-n-p (format "apply WIP %s to repo? " stash)))))
+      (when do-it
+	(apply #'egg-sb-buffer-do-unstash "apply" args)))))
 
 (defun egg-sb-buffer-pop-stash (&optional no-confirm)
   "Pop and apply the stash at POS."
