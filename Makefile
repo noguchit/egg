@@ -3,10 +3,11 @@ SRCS  := egg-custom.el egg-base.el egg-const.el egg-git.el egg.el egg-grep.el eg
 ELCS  := $(patsubst %.el,%.elc,$(SRCS))
 DEPS  := $(patsubst %.el,.%.d,$(SRCS))
 
-.PHONY: all
+.PHONY: all doc doc.clean clean
 
 %.elc : %.el
-	$(EMACS) -L . -batch -f batch-byte-compile $<
+	@echo Compiling $<
+	@$(EMACS) -L . -batch -f batch-byte-compile $<
 
 .%.d : %.el
 	@echo Generating dependencies for $<
@@ -17,7 +18,13 @@ DEPS  := $(patsubst %.el,.%.d,$(SRCS))
 
 all : $(DEPS) $(ELCS)
 
-clean :
+doc :
+	$(MAKE) -C doc
+
+doc.clean :
+	$(MAKE) -C doc clean
+
+clean : doc.clean
 	-rm $(ELCS) $(DEPS)
 
 -include $(DEPS)
