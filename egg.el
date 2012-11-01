@@ -981,10 +981,11 @@ not called"
   (let* ((diff-info (get-text-property pos :diff))
          (head-beg (nth 1 diff-info))
          (hunk-info (get-text-property pos :hunk))
-         (hunk-beg (+ (nth 1 hunk-info) head-beg))
-         (hunk-end (+ (nth 2 hunk-info) head-beg))
-         (hunk-ranges (nth 3 hunk-info)))
-    (list (car diff-info) (car hunk-info) hunk-beg hunk-end hunk-ranges)))
+         (hunk-beg (and hunk-info (+ (nth 1 hunk-info) head-beg)))
+         (hunk-end (and hunk-info (+ (nth 2 hunk-info) head-beg)))
+         (hunk-ranges (and hunk-info (nth 3 hunk-info))))
+    (and hunk-info
+	 (list (car diff-info) (car hunk-info) hunk-beg hunk-end hunk-ranges))))
 
 (defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end
                                              hunk-ranges &rest ignored)
@@ -2775,19 +2776,60 @@ POS."
       (message "Cancel unstaging %s's hunk %s" file (nth 1 hunk))
       nil)))
 
+(defun egg-sb-relocate-hunk (hunk-info)
+  (let* ((file (nth 0 hunk-info))
+	 (ranges (nth 4 hunk-info))
+	 (before-type (nth 0 ranges))
+	 (type (cond ((eq before-type 'staged) 'unstaged)
+		     ((eq before-type 'unstaged) 'staged)
+		     (t before-type)))
+	 (range (nth 3 ranges))
+	 (pos (point-min))
+	 hunk found)
+    (while (and (not found)
+		(setq pos (next-single-property-change (1+ pos) :hunk)))
+      (when (and (setq hunk (egg-hunk-info-at pos))
+		 (equal (car hunk) file)
+		 (equal (car (nth 4 hunk)) type)
+		 (equal (nth 3 (nth 4 hunk)) range))
+	(setq found pos)))
+    (unless (or found (eq type before-type))
+      (setq type before-type)
+      (setq pos (point-min))
+      (while (and (not found)
+		  (setq pos (next-single-property-change (1+ pos) :hunk)))
+	(when (and (setq hunk (egg-hunk-info-at pos))
+		   (equal (car hunk) file)
+		   (equal (car (nth 4 hunk)) type)
+		   (equal (nth 3 (nth 4 hunk)) range))
+	  (setq found pos))))
+    (when found
+      (goto-char found))))
+
+
+(defmacro with-current-hunk (pos &rest body)
+  "remember the hunk at POS, eval BODY then relocate the moved hunk."
+  (declare (indent 1) (debug t))
+  (let ((hunk-info (make-symbol "hunk-info")))
+    `(let ((,hunk-info (egg-hunk-info-at ,pos)))
+       ,@body
+       (egg-sb-relocate-hunk ,hunk-info))))
+
 (defun egg-hunk-section-cmd-stage (pos)
   "Add the hunk enclosing POS to the index."
   (interactive "d")
   (when (or (not egg-confirm-staging) 
 	    (egg-hunk-section-show-n-ask-staging pos))
-    (egg-hunk-section-apply-cmd pos "--cached")))
+    (with-current-hunk pos
+      (egg-hunk-section-apply-cmd pos "--cached"))))
 
 (defun egg-hunk-section-cmd-unstage (pos)
   "Remove the hunk enclosing POS from the index."
   (interactive "d")
   (when (or (not egg-confirm-staging) 
 	    (egg-hunk-section-show-n-ask-unstaging pos))
-    (egg-hunk-section-apply-cmd pos "--cached" "--reverse")))
+    (with-current-hunk pos
+      (egg-hunk-section-apply-cmd pos "--cached" "--reverse"))))
 
 
 (defun egg-hunk-section-show-n-undo (pos)
@@ -2806,6 +2848,28 @@ POS."
 					 :save :restore)
 	(egg-refresh-buffer (current-buffer))
       (message "Cancel undo %s's hunk %s!" file (nth 1 hunk)))))
+
+
+(defun egg-sb-relocate-diff-file (diff-info)
+  (let ((file (car diff-info))
+	(marker (nth 1 diff-info))
+	(pos (point-min))
+	diff found)
+    (while (and (not found)
+		(setq pos (next-single-property-change (1+ pos) :diff)))
+      (when (and (setq diff (get-text-property pos :diff))
+		 (equal (car diff) file))
+	(setq found (nth 1 diff))))
+    (when found
+      (goto-char found))))
+
+(defmacro with-current-diff (pos &rest body)
+  "remember the diff at POS, eval BODY then relocate the moved diff."
+  (declare (indent 1) (debug t))
+  (let ((diff-info (make-symbol "diff-info")))
+    `(let ((,diff-info (get-text-property ,pos :diff)))
+       ,@body
+       (egg-sb-relocate-diff-file ,diff-info))))
 
 (defun egg-hunk-section-cmd-undo (pos)
   "Remove the file's modification described by the hunk enclosing POS."
@@ -2830,7 +2894,8 @@ If the file was delete in the workdir then remove it from the index."
 	   ;; add file to index, nothing change in wdir
 	   ;; diff and status buffers must be updated
 	   ;; just update them all
-	   (egg--git-add-cmd t "-v" file))
+	   (with-current-diff pos
+	     (egg--git-add-cmd t "-v" file)))
 	  (t ;; file is deleted, update the index
 	   (egg--git-rm-cmd t file)))))
 
@@ -2846,8 +2911,10 @@ conflicted state. Otherwise, its stage will be reset to HEAD."
     (setq newfile (memq 'newfile diff-info)
 	  file (car diff-info))
     (cond (newfile (egg--git-rm-cmd t "--cached" file))
-	  (is-merging (egg--git-co-files-cmd t file "-m"))
-	  (t (egg--git-reset-files-cmd t nil file)))))
+	  (is-merging (with-current-diff pos
+			  (egg--git-co-files-cmd t file "-m")))
+	  (t (with-current-diff pos
+	       (egg--git-reset-files-cmd t nil file))))))
 
 (defun egg-diff-section-cmd-undo (pos)
   "For the file at POS, remove its differences vs the source revision.
