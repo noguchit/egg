@@ -1396,6 +1396,7 @@ as: (format FMT current-dir-name git-dir-full-path)."
     (define-key map (kbd "c") 'egg-commit-log-edit)
     (define-key map (kbd "d") 'egg-diff-ref)
     (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "b") 'egg-start-new-branch)
     (define-key map (kbd "o") 'egg-status-buffer-checkout-ref)
     (define-key map (kbd "w") 'egg-status-buffer-stash-wip)
     (define-key map (kbd "G") 'egg-status)
