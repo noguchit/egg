@@ -24,9 +24,56 @@
 
 (require 'egg)
 
+(defun egg--inline-diff-del-block-to-patch (pos &optional old-rev)
+  (let ((old-rev (or old-rev ":0"))
+	(git-name (egg-buf-git-name))
+	(dir (egg-work-tree-dir))
+	(old-line (get-text-property pos :old-line))
+	(num (get-text-property pos :num))
+	(pre-lines 0)
+	(post-lines 0)
+	pre post beg end text)
+
+    (with-temp-buffer
+      (egg-git-ok t "--no-pager" "show" (concat old-rev ":" git-name))
+      (goto-char (egg-line-2-pos old-line))
+      (while (and (not (bobp)) (< pre-lines 3))
+	(forward-line -1)
+	(setq pre-lines (1+ pre-lines)))
+      (setq beg (point))
+      (goto-char (egg-line-2-pos old-line num))
+      (while (and (not (eobp)) (< post-lines 3))
+	(forward-line 1)
+	(setq post-lines (1+ post-lines)))
+      (setq end (point))
+      (setq text (buffer-substring-no-properties beg end)))
+
+    (with-current-buffer "*foo*"
+      (erase-buffer)
+      (insert (format "diff a/%s b/%s\n" git-name git-name)
+	      (format "--- a/%s\n+++ b/%s\n" git-name git-name)
+	      (format "@@ -%d,%d +%d,%d @@\n"
+		      (- old-line pre-lines)
+		      (+ pre-lines num post-lines)
+		      (- old-line pre-lines)
+		      (+ pre-lines post-lines)))
+      (setq beg (point))
+      (insert text)
+      (setq end (point))
+      (goto-char beg)
+      (dotimes (i pre-lines)
+	(insert " ")
+	(forward-line 1))
+      (dotimes (i num)
+	(insert "-")
+	(forward-line 1))
+      (dotimes (i post-lines)
+	(insert " ")
+	(forward-line 1)))))
+
 (defvar egg-inline-diff-info nil)
 
-(defun egg-compute-file-diff (file-name)
+(defun egg-compute-file-inline-diff (file-name)
   (let (hunk beg ranges all text-beg block-lines prev-line-no
 	     block-start line-no old-start old-line-no
 	     current-prefix start-c no-diff) 
@@ -95,10 +142,10 @@
     (put-text-property (1- end) end 'invisible nil)))
 
 
-(defun egg-do-file-inline-diff ()
+(defun egg-do-buffer-inline-diff ()
   (let ((read-only-state buffer-read-only)
 	(inhibit-read-only t)
-	(ranges (egg-compute-file-diff (buffer-file-name)))
+	(ranges (egg-compute-file-inline-diff (buffer-file-name)))
 	beg end
 	type line num text old-line
 	old-text-list ov-list ov)
@@ -122,6 +169,7 @@
 	       (add-text-properties beg end
 				    (list :navigation line
 					  'invisible line
+					  :new-line line
 					  'keymap egg-section-map))
 	       (egg--inline-diff-mk-boundaries-visible beg end))
 	      ((eq type :add)
@@ -178,5 +226,5 @@
   (interactive)
   (if egg-inline-diff-info
       (egg-undo-buffer-inline-diff)
-    (egg-do-file-inline-diff)))
+    (egg-do-buffer-inline-diff)))
 
