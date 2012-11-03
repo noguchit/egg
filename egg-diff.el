@@ -88,6 +88,12 @@
     (forward-line (1- (+ line num)))
     (point)))
 
+(defun egg--inline-diff-mk-boundaries-visible (beg end)
+  (when (and (> beg (point-min)) (eq (char-before beg) ?\n))
+    (put-text-property (1- beg) beg 'invisible nil))
+  (when (eq (char-before end) ?\n)
+    (put-text-property (1- end) end 'invisible nil)))
+
 
 (defun egg-do-file-inline-diff ()
   (let ((read-only-state buffer-read-only)
@@ -100,8 +106,10 @@
 	(message "no differences in %s" (buffer-file-name))
       (widen)
       (setq buffer-invisibility-spec nil)
-      (put-text-property (point-min) (point-max) :navigation 0)
-      (put-text-property (point-min) (point-max) 'invisible 0)
+      (add-text-properties (point-min) (point-max)
+			   (list :navigation 0
+				 'invisible 0
+				 'keymap egg-section-map))
       (dolist (range ranges)
 	(setq type (nth 0 range))
 	(setq line (nth 1 range))
@@ -111,16 +119,17 @@
 	(setq beg (egg-line-2-pos line))
 	(setq end (egg-line-2-pos line num))
 	(cond ((eq type :same) 
-	       (when (and (> beg (point-min)) (eq (char-before beg) ?\n))
-		 (setq beg (1- beg)))
-	       (when (and (< end (point-max)) (eq (char-after end) ?\n))
-		 (setq end (1+ end)))
-	       (put-text-property beg end :navigation line)
-	       (put-text-property beg end 'invisible line))
+	       (add-text-properties beg end
+				    (list :navigation line
+					  'invisible line
+					  'keymap egg-section-map))
+	       (egg--inline-diff-mk-boundaries-visible beg end))
 	      ((eq type :add)
-	       (put-text-property beg end :navigation line)
-	       (put-text-property beg end 'invisible line)
-	       (put-text-property beg end :num num)
+	       (add-text-properties beg end
+				    (list :navigation line
+					  'invisible line
+					  :num num))
+	       (egg--inline-diff-mk-boundaries-visible beg end)
 	       (setq ov (make-overlay beg end nil t nil))
 	       (overlay-put ov 'face 'egg-add-bg)
 	       (overlay-put ov 'evaporate t)
@@ -128,11 +137,14 @@
 	      ((eq type :del)
 	       (goto-char beg)
 	       (insert text)
-	       (put-text-property beg (point) :navigation (- line))
-	       (put-text-property beg (point) 'invisible (- line))
-	       (put-text-property beg (point) :old-line old-line)
-	       (put-text-property beg (point) :num num)
-	       (setq ov (make-overlay beg (point) nil t nil))
+	       (setq end (point))
+	       (add-text-properties beg end 
+				    (list :navigation (- line)
+					  'invisible (- line)
+					  :old-line old-line
+					  :num num))
+	       (egg--inline-diff-mk-boundaries-visible beg end)
+	       (setq ov (make-overlay beg end nil t nil))
 	       (overlay-put ov 'face 'egg-del-bg)
 	       (overlay-put ov 'evaporate t)
 	       (push ov ov-list)
