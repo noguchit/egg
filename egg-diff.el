@@ -24,34 +24,39 @@
 
 (require 'egg)
 
-(defun egg--inline-diff-mk-patch (file rev line del-num add-num add-text)
-  (let ((git-name (egg-file-git-name file))
-	(dir (egg-work-tree-dir))
-	(pre-lines 0)
+(defcustom egg-inline-diff-hide-non-context-text nil
+  "When entering inline-diff mode, hide all non-context lines by default."
+  :group 'egg
+  :type 'boolean)
+
+(defun egg--inline-diff-mk-patch (file line del-num add-num del-text add-text)
+  (let ((pre-lines 0)
 	(post-lines 0)
 	(del-num (or del-num 0))
 	(add-num (or add-num 0))
 	pre post beg end text)
 
-    (with-temp-buffer
-      (setq default-directory dir)
-      (egg-git-ok t "--no-pager" "show" (concat rev ":" git-name))
-      (goto-char (egg-line-2-pos line))
-      (while (and (not (bobp)) (< pre-lines 3))
-	(forward-line -1)
-	(setq pre-lines (1+ pre-lines)))
-      (setq beg (point))
-      (goto-char (egg-line-2-pos line del-num))
-      (when add-text (insert add-text))
-      (while (and (not (eobp)) (< post-lines 3))
-	(forward-line 1)
-	(setq post-lines (1+ post-lines)))
-      (setq end (point))
-      (setq text (buffer-substring-no-properties beg end)))
+    (goto-char (egg-line-2-pos line))
+    (while (and (not (bobp)) (< pre-lines 3))
+      (forward-line -1)
+      (setq pre-lines (1+ pre-lines)))
+    (setq beg (point))
+    (goto-char (egg-line-2-pos line))
+    (if del-text
+	(insert del-text)
+      (forward-line del-num))
+    (if add-text
+	(insert add-text)
+      (forward-line add-num))
+    (while (and (not (eobp)) (< post-lines 3))
+      (forward-line 1)
+      (setq post-lines (1+ post-lines)))
+    (setq end (point))
+    (setq text (buffer-substring-no-properties beg end))
 
     (with-temp-buffer
-      (insert (format "diff a/%s b/%s\n" git-name git-name)
-	      (format "--- a/%s\n+++ b/%s\n" git-name git-name)
+      (insert (format "diff a/%s b/%s\n" file file)
+	      (format "--- a/%s\n+++ b/%s\n" file file)
 	      (format "@@ -%d,%d +%d,%d @@\n"
 		      (- line pre-lines)
 		      (+ pre-lines del-num post-lines)
@@ -77,28 +82,58 @@
 
 (defun egg--inline-diff-block2patch (rev del-pos add-pos)
   (let* ((file (buffer-file-name))
-	(del-nav (and del-pos (get-text-property del-pos :navigation)))
-	(add-nav (and add-pos (get-text-property add-pos :navigation)))
-	(del-line (and del-pos (get-text-property del-pos :old-line)))
-	(add-line (and add-pos (get-text-property add-pos :orig-line)))
-	(del-num (and del-pos (get-text-property del-pos :num)))
-	(add-num (and add-pos (get-text-property add-pos :num)))
-	add-text add-text-info patch)
+	 (git-name (egg-file-git-name file))
+	 (dir (egg-work-tree-dir))
+	 (new-del-line (and del-pos (- (get-text-property del-pos :navigation))))
+	 (new-add-line (and add-pos (get-text-property add-pos :navigation)))
+	 (old-del-line (and del-pos (get-text-property del-pos :old-line)))
+	 (old-add-line (and add-pos (get-text-property add-pos :orig-line)))
+	 (del-num (and del-pos (get-text-property del-pos :num)))
+	 (add-num (and add-pos (get-text-property add-pos :num)))
+	 text text-info patch)
 
-    (unless (or del-line add-line)
-      (error "No info found to build patch: positions %d/%d" del-pos add-pos))
+    (if rev ;; with revision, mean applying to cache or nothing
+	(progn
+	  (unless (or old-del-line old-add-line)
+	    (error "No info found to build patch: positions %d/%d" del-pos add-pos))
+	  
+	  (unless (or (null old-del-line) (null old-add-line)
+		      (= (+ old-del-line del-num) old-add-line))
+	    (error "Cannot merge separate diff blocks: -%d and +%d" 
+		   old-del-line old-add-line))
+	  (when add-pos
+	    (setq text-info 
+		  (assq new-add-line (plist-get egg-inline-diff-info :text-positions)))))
+      (progn
+	;; no revision, mean applying to worktree's file
+	(unless (or new-del-line new-add-line)
+	  (error "No info found to build patch: positions %d/%d" del-pos add-pos))
+	  
+	(unless (or (null new-del-line) (null new-add-line)
+		    (= new-del-line new-add-line))
+	  (error "Cannot merge separate diff blocks: -%d and +%d" 
+		 new-del-line new-add-line))
+	(when del-pos
+	  (setq text-info 
+		(assq (- new-del-line) (plist-get egg-inline-diff-info :text-positions))))))
 
-    (unless (or (null del-line) (null add-line)
-		(= (+ del-line del-num) add-line))
-      (error "Cannot merge separate diff blocks: -%d and +%d" del-line add-line))
+    (when text-info
+      (setq text (buffer-substring-no-properties (nth 1 text-info)
+						 (nth 2 text-info))))
+
+    (with-current-buffer "*bar*"
+      (erase-buffer)
+      (setq default-directory dir)
+      (if rev 
+	  (egg-git-ok t "--no-pager" "show" (concat rev ":" git-name))
+	(insert-file-contents-literally git-name))
+      (setq patch
+	    (if rev
+		(egg--inline-diff-mk-patch git-name (or old-del-line old-add-line)
+					   del-num add-num nil text)
+	      (egg--inline-diff-mk-patch git-name (or new-del-line new-add-line)
+					 del-num add-num text nil))))
     
-    (when add-pos
-      (setq add-text-info (assq add-nav (plist-get egg-inline-diff-info :text-positions)))
-      (setq add-text (buffer-substring-no-properties (nth 1 add-text-info)
-						     (nth 2 add-text-info))))
-    (setq patch
-	  (egg--inline-diff-mk-patch file rev (or del-line add-line)
-				     del-num add-num add-text))
     (with-current-buffer "*foo*"
       (erase-buffer)
       (insert patch))
@@ -254,7 +289,8 @@
 	     (setq beg (copy-marker beg t))
 	     (setq end (copy-marker end t))
 	     (push (list (- line) beg end) text-list))))
-    (setq buffer-invisibility-spec (list '(0 . t)))
+    (when egg-inline-diff-hide-non-context-text
+      (setq buffer-invisibility-spec (list '(0 . t))))
     (set (make-local-variable 'egg-inline-diff-info)
 	 (list :read-only read-only-state
 	       :overlays ov-list 
@@ -321,10 +357,9 @@
     (error "Nothing here to stage!"))
   (let ((invisibility-spec buffer-invisibility-spec)
 	anchor patch res line)
-    (setq anchor (egg--inline-diff-figure-out-pos pos 
-						  "apply the preceding del block as well? "
-						  "apply the following add block as well? "
-						  ))
+    (setq anchor (egg--inline-diff-figure-out-pos 
+		  pos "stage the preceding del block as well? "
+		  "stage the following add block as well? "))
     (unless anchor
       (error "Failed to grok position %d" pos))
     (setq patch (egg--inline-diff-block2patch ":0" (car anchor) (cdr anchor)))
@@ -339,6 +374,31 @@
       (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
       (setq buffer-invisibility-spec invisibility-spec)
       (goto-char pos)
+      (set-marker pos nil))))
+
+(defun egg-inline-diff-undo (pos)
+  (interactive "d")
+  (unless (get-text-property pos :num)
+    (error "Nothing here to undo!"))
+  (let ((invisibility-spec buffer-invisibility-spec)
+	anchor patch res line)
+    (setq anchor (egg--inline-diff-figure-out-pos 
+		  pos "undo the preceding del block as well? "
+		  "undo the following add block as well? "))
+    (unless anchor
+      (error "Failed to grok position %d" pos))
+    (setq patch (egg--inline-diff-block2patch nil (car anchor) (cdr anchor)))
+    (setq line (get-text-property pos :navigation))
+    (if (< line 0) (setq line (- line)))
+    (egg-undo-buffer-inline-diff)
+    (setq res (egg--git-apply-cmd t patch (list "--reverse")))
+    (revert-buffer t t t)
+    (when (plist-get res :success)
+      (setq pos (copy-marker (egg-line-2-pos line))))
+    (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
+    (setq buffer-invisibility-spec invisibility-spec)
+    (goto-char pos)
+    (when (markerp pos)
       (set-marker pos nil))))
 
 (provide 'egg-diff)
