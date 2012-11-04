@@ -197,87 +197,85 @@
     (put-text-property (1- end) end 'invisible nil)))
 
 
-(defun egg-do-buffer-inline-diff ()
+(defun egg-do-buffer-inline-diff (ranges)
   (let ((read-only-state buffer-read-only)
 	(inhibit-read-only t)
-	(ranges (egg-inline-diff-compute-info (buffer-file-name)))
 	beg end
 	type line num text old-line
-	old-text-list new-text-list ov-list ov)
-    (if (null ranges)
-	(message "no differences in %s" (buffer-file-name))
-      (widen)
-      (setq buffer-invisibility-spec nil)
-      (add-text-properties (point-min) (point-max)
-			   (list :navigation 0
-				 'invisible 0
-				 'keymap egg-section-map))
-      (dolist (range ranges)
-	(setq type (nth 0 range))
-	(setq line (nth 1 range))
-	(setq num (nth 2 range))
-	(setq old-line (nth 3 range))
-	(setq text (nth 4 range))
-	(setq beg (egg-line-2-pos line))
-	(setq end (egg-line-2-pos line num))
-	(cond ((eq type :same) 
-	       (add-text-properties beg end
-				    (list :navigation line
-					  'invisible line
-					  'keymap egg-section-map))
-	       (egg--inline-diff-mk-boundaries-visible beg end))
-	      ((eq type :add)
-	       (add-text-properties beg end
-				    (list :navigation line
-					  'invisible line
-					  :orig-line old-line
-					  :num num))
-	       (egg--inline-diff-mk-boundaries-visible beg end)
-	       (setq ov (make-overlay beg end nil t nil))
-	       (overlay-put ov 'face 'egg-add-bg)
-	       (overlay-put ov 'evaporate t)
-	       (push ov ov-list)
-	       (setq beg (copy-marker beg t))
-	       (setq end (copy-marker end t))
-	       (push (list line beg end) new-text-list))
-	      ((eq type :del)
-	       (goto-char beg)
-	       (insert text)
-	       (setq end (point))
-	       (add-text-properties beg end 
-				    (list :navigation (- line)
-					  'invisible (- line)
-					  :old-line old-line
-					  :num num))
-	       (egg--inline-diff-mk-boundaries-visible beg end)
-	       (setq ov (make-overlay beg end nil t nil))
-	       (overlay-put ov 'face 'egg-del-bg)
-	       (overlay-put ov 'evaporate t)
-	       (push ov ov-list)
-	       (setq beg (copy-marker beg t))
-	       (setq end (copy-marker end t))
-	       (push (list (- line) beg end) old-text-list))))
-      (setq buffer-invisibility-spec (list '(0 . t)))
-      (set (make-local-variable 'egg-inline-diff-info)
-	   (list :read-only read-only-state
-		 :overlays ov-list 
-		 :old-text old-text-list
-		 :new-text new-text-list))
-      (set-buffer-modified-p nil)
-      (setq buffer-read-only t))))
+	text-list text-list ov-list ov)
+    (widen)
+    (setq buffer-invisibility-spec nil)
+    (add-text-properties (point-min) (point-max)
+			 (list :navigation 0
+			       'invisible 0
+			       'keymap egg-section-map))
+    (dolist (range ranges)
+      (setq type (nth 0 range))
+      (setq line (nth 1 range))
+      (setq num (nth 2 range))
+      (setq old-line (nth 3 range))
+      (setq text (nth 4 range))
+      (setq beg (egg-line-2-pos line))
+      (setq end (egg-line-2-pos line num))
+      (cond ((eq type :same) 
+	     (add-text-properties beg end
+				  (list :navigation line
+					'invisible nil
+					'keymap egg-section-map))
+	     (egg--inline-diff-mk-boundaries-visible beg end))
+	    ((eq type :add)
+	     (add-text-properties beg end
+				  (list :navigation line
+					'invisible nil
+					:orig-line old-line
+					:num num))
+	     (egg--inline-diff-mk-boundaries-visible beg end)
+	     (setq ov (make-overlay beg end nil t nil))
+	     (overlay-put ov 'face 'egg-add-bg)
+	     (overlay-put ov 'evaporate t)
+	     (push ov ov-list)
+	     (setq beg (copy-marker beg t))
+	     (setq end (copy-marker end t))
+	     (push (list line beg end) text-list))
+	    ((eq type :del)
+	     (goto-char beg)
+	     (insert text)
+	     (setq end (point))
+	     (add-text-properties beg end 
+				  (list :navigation (- line)
+					'invisible nil
+					:old-line old-line
+					:num num))
+	     (egg--inline-diff-mk-boundaries-visible beg end)
+	     (setq ov (make-overlay beg end nil t nil))
+	     (overlay-put ov 'face 'egg-del-bg)
+	     (overlay-put ov 'evaporate t)
+	     (push ov ov-list)
+	     (setq beg (copy-marker beg t))
+	     (setq end (copy-marker end t))
+	     (push (list (- line) beg end) text-list))))
+    (setq buffer-invisibility-spec (list '(0 . t)))
+    (set (make-local-variable 'egg-inline-diff-info)
+	 (list :read-only read-only-state
+	       :overlays ov-list 
+	       :text-positions text-list))
+    (set-buffer-modified-p nil)
+    (setq buffer-read-only t)))
 
 (defun egg-undo-buffer-inline-diff ()
   (let ((overlays (plist-get egg-inline-diff-info :overlays))
-	(old-texts (plist-get egg-inline-diff-info :old-text))
+	(text-positions (plist-get egg-inline-diff-info :text-positions))
 	(inhibit-read-only t))
     (widen)
     (dolist (ov overlays) (delete-overlay ov))
     (remove-text-properties (point-min) (point-max)
-			    '(:navigation nil invisible nil :num nil :old-line nil))
-    (dolist (old old-texts)
-      (delete-region (nth 1 old) (nth 2 old))
-      (set-marker (nth 1 old) nil)
-      (set-marker (nth 2 old) nil))
+			    '(:navigation nil invisible nil :num nil
+					  :old-line nil :orig-line nil))
+    (dolist (pos text-positions)
+      (when (< (nth 0 pos) 0)
+	(delete-region (nth 1 pos) (nth 2 pos)))
+      (set-marker (nth 1 pos) nil)
+      (set-marker (nth 2 pos) nil))
     (setq buffer-read-only (plist-get egg-inline-diff-info :read-only))
     (set-buffer-modified-p nil)
     (setq egg-inline-diff-info nil)))
@@ -286,5 +284,8 @@
   (interactive)
   (if egg-inline-diff-info
       (egg-undo-buffer-inline-diff)
-    (egg-do-buffer-inline-diff)))
+    (let ((ranges (egg-inline-diff-compute-info (buffer-file-name))))
+      (if ranges
+	  (egg-do-buffer-inline-diff ranges)
+	(message "no differences in %s" (buffer-file-name))))))
 
