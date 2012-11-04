@@ -93,7 +93,7 @@
       (error "Cannot merge separate diff blocks: -%d and +%d" del-line add-line))
     
     (when add-pos
-      (setq add-text-info (assq add-nav (plist-get egg-inline-diff-info :new-text)))
+      (setq add-text-info (assq add-nav (plist-get egg-inline-diff-info :text-positions)))
       (setq add-text (buffer-substring-no-properties (nth 1 add-text-info)
 						     (nth 2 add-text-info))))
     (setq patch
@@ -289,3 +289,30 @@
 	  (egg-do-buffer-inline-diff ranges)
 	(message "no differences in %s" (buffer-file-name))))))
 
+(defun egg-inline-diff-stage (pos)
+  (interactive "d")
+  (unless (get-text-property pos :num)
+    (error "Nothing here to stage!"))
+  (let (del-pos add-pos)
+    (cond ((< (get-text-property pos :navigation) 0)
+	   (setq del-pos pos)
+	   (setq pos (next-single-property-change pos :navigation))
+	   (when (and (get-text-property pos :orig-line)
+		      (y-or-n-p "apply the following add block as well? "))
+	     (setq add-pos pos)))
+	  ((> (get-text-property pos :navigation) 0)
+	   (setq add-pos pos)
+	   (setq pos (or (and (not (eobp))
+			      (get-text-property (1- pos) :old-line)
+			      pos)
+		      (previous-single-property-change pos :navigation)))
+	   (when (and pos 
+		      (not (bobp)) 
+		      (get-text-property (1- pos) :old-line)
+		      (y-or-n-p "apply the preceding del block as well? "))
+	     (setq del-pos (1- pos)))))
+    (unless (or del-pos add-pos)
+      (error "Failed to determine hunk type"))
+    (egg--inline-diff-block2patch ":0" del-pos add-pos)))
+
+(provide 'egg-diff)
