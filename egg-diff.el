@@ -219,7 +219,7 @@
       (setq end (egg-line-2-pos line num))
       (cond ((eq type :same) 
 	     (add-text-properties beg end
-				  (list :navigation line
+				  (list :navigation 0
 					'invisible nil
 					'keymap egg-section-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end))
