@@ -270,7 +270,10 @@
     (dolist (ov overlays) (delete-overlay ov))
     (remove-text-properties (point-min) (point-max)
 			    '(:navigation nil invisible nil :num nil
-					  :old-line nil :orig-line nil))
+					  :old-line nil :orig-line nil
+					  'keymap nil))
+    ;; emacs's bug, keymap must be removed separately
+    (remove-text-properties (point-min) (point-max) '(keymap nil))
     (dolist (pos text-positions)
       (when (< (nth 0 pos) 0)
 	(delete-region (nth 1 pos) (nth 2 pos)))
@@ -289,16 +292,13 @@
 	  (egg-do-buffer-inline-diff ranges)
 	(message "no differences in %s" (buffer-file-name))))))
 
-(defun egg-inline-diff-stage (pos)
-  (interactive "d")
-  (unless (get-text-property pos :num)
-    (error "Nothing here to stage!"))
-  (let (del-pos add-pos)
+(defun egg--inline-diff-figure-out-pos (pos del-prompt add-prompt)
+  (let (add-pos del-pos)
     (cond ((< (get-text-property pos :navigation) 0)
 	   (setq del-pos pos)
 	   (setq pos (next-single-property-change pos :navigation))
 	   (when (and (get-text-property pos :orig-line)
-		      (y-or-n-p "apply the following add block as well? "))
+		      (y-or-n-p add-prompt))
 	     (setq add-pos pos)))
 	  ((> (get-text-property pos :navigation) 0)
 	   (setq add-pos pos)
@@ -309,10 +309,36 @@
 	   (when (and pos 
 		      (not (bobp)) 
 		      (get-text-property (1- pos) :old-line)
-		      (y-or-n-p "apply the preceding del block as well? "))
+		      (y-or-n-p del-prompt))
 	     (setq del-pos (1- pos)))))
-    (unless (or del-pos add-pos)
-      (error "Failed to determine hunk type"))
-    (egg--inline-diff-block2patch ":0" del-pos add-pos)))
+    (if (or del-pos add-pos)
+	(cons del-pos add-pos)
+      nil)))
+
+(defun egg-inline-diff-stage (pos)
+  (interactive "d")
+  (unless (get-text-property pos :num)
+    (error "Nothing here to stage!"))
+  (let ((invisibility-spec buffer-invisibility-spec)
+	anchor patch res line)
+    (setq anchor (egg--inline-diff-figure-out-pos pos 
+						  "apply the preceding del block as well? "
+						  "apply the following add block as well? "
+						  ))
+    (unless anchor
+      (error "Failed to grok position %d" pos))
+    (setq patch (egg--inline-diff-block2patch ":0" (car anchor) (cdr anchor)))
+    (setq res (egg--git-apply-cmd t patch (list "--cached")))
+    (when (plist-get res :success)
+      (setq line (get-text-property pos :navigation))
+      (when (< line 0)
+	(setq line (- line)))
+      (egg-undo-buffer-inline-diff)
+      (revert-buffer t t t)
+      (setq pos (copy-marker (egg-line-2-pos line)))
+      (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
+      (setq buffer-invisibility-spec invisibility-spec)
+      (goto-char pos)
+      (set-marker pos nil))))
 
 (provide 'egg-diff)
