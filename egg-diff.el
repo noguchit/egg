@@ -29,6 +29,45 @@
   :group 'egg
   :type 'boolean)
 
+(defconst egg-inline-diff-map
+  (let ((map (make-sparse-keymap "Egg:InlineDiff")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "h") 'egg-inline-diff-toggle-hide-show)
+    (define-key map (kbd "g") 'egg-inline-diff-refresh-file-buffer)
+    (define-key map (kbd "q") 'egg-file-quit-inline-diff-mode)
+    (define-key map (kbd "C-x v d") 'egg-buffer-toggle-inline-diff)
+    map)
+  "Keymap for inline diff mode.
+\\{egg-inline-diff-map}")
+
+(defconst egg-file-inline-diff-blobk-map
+  (let ((map (make-sparse-keymap "Egg:FileInlineDiffBlock")))
+    (set-keymap-parent map egg-inline-diff-map)
+    (define-key map (kbd "s") 'egg-inline-diff-stage)
+    (define-key map (kbd "u") 'egg-inline-diff-undo)
+    map)
+  "Keymap for a block of delta of a WorkTree's file in inline diff mode.
+\\{egg-inline-diff-block-map}")
+
+(defconst egg-index-inline-diff-blobk-map
+  (let ((map (make-sparse-keymap "Egg:IndexInlineDiffBlock")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "h") 'egg-inline-diff-toggle-hide-show)
+    (define-key map (kbd "g") 'egg-inline-diff-refresh-index-buffer)
+    (define-key map (kbd "q") 'egg-index-quit-inline-diff-mode)
+    (define-key map (kbd "u") 'egg-inline-diff-unstage)
+    map)
+  "Keymap for a block of delta of a WorkTree's file in inline diff mode.
+\\{egg-inline-diff-block-map}")
+
+(defvar egg-inline-diff-info nil)
+
+(defun egg-inline-diff-toggle-hide-show ()
+  (interactive)
+  (if (member '(0 . t) buffer-invisibility-spec)
+      (setq buffer-invisibility-spec (remove '(0 . t) buffer-invisibility-spec))
+    (push '(0 . t) buffer-invisibility-spec)))
+
 (defun egg--inline-diff-mk-patch (file line del-num add-num del-text add-text)
   (let ((pre-lines 0)
 	(post-lines 0)
@@ -121,8 +160,9 @@
       (setq text (buffer-substring-no-properties (nth 1 text-info)
 						 (nth 2 text-info))))
 
-    (with-current-buffer "*bar*"
-      (erase-buffer)
+    ;; (with-current-buffer "*bar*"
+    ;;   (erase-buffer)
+    (with-temp-buffer
       (setq default-directory dir)
       (if rev 
 	  (egg-git-ok t "--no-pager" "show" (concat rev ":" git-name))
@@ -133,14 +173,14 @@
 					   del-num add-num nil text)
 	      (egg--inline-diff-mk-patch git-name (or new-del-line new-add-line)
 					 del-num add-num text nil))))
-    
-    (with-current-buffer "*foo*"
-      (erase-buffer)
-      (insert patch))
+
+    (egg-cmd-log "PATCH BEGIN: " git-name 
+		 (format " rev:%s %s/%s\n" rev del-pos add-pos)
+		 patch)
+    (egg-cmd-log "PATCH END\n")
+
     patch))
 
-
-(defvar egg-inline-diff-info nil)
 
 (defun egg-inline-diff-compute-info (file-name)
   (let (hunk beg ranges all text-beg block-lines prev-line-no
@@ -243,7 +283,7 @@
     (add-text-properties (point-min) (point-max)
 			 (list :navigation 0
 			       'invisible 0
-			       'keymap egg-section-map))
+			       'keymap egg-inline-diff-map))
     (dolist (range ranges)
       (setq type (nth 0 range))
       (setq line (nth 1 range))
@@ -256,14 +296,15 @@
 	     (add-text-properties beg end
 				  (list :navigation 0
 					'invisible nil
-					'keymap egg-section-map))
+					'keymap egg-inline-diff-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end))
 	    ((eq type :add)
 	     (add-text-properties beg end
 				  (list :navigation line
 					'invisible nil
 					:orig-line old-line
-					:num num))
+					:num num
+					'keymap egg-file-inline-diff-blobk-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end)
 	     (setq ov (make-overlay beg end nil t nil))
 	     (overlay-put ov 'face 'egg-add-bg)
@@ -280,7 +321,8 @@
 				  (list :navigation (- line)
 					'invisible nil
 					:old-line old-line
-					:num num))
+					:num num
+					'keymap egg-file-inline-diff-blobk-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end)
 	     (setq ov (make-overlay beg end nil t nil))
 	     (overlay-put ov 'face 'egg-del-bg)
@@ -319,6 +361,10 @@
     (set-buffer-modified-p nil)
     (setq egg-inline-diff-info nil)))
 
+(defun egg-file-quit-inline-diff-mode ()
+  (interactive)
+  (egg-undo-buffer-inline-diff))
+
 (defun egg-buffer-toggle-inline-diff ()
   (interactive)
   (if egg-inline-diff-info
@@ -350,6 +396,17 @@
     (if (or del-pos add-pos)
 	(cons del-pos add-pos)
       nil)))
+
+(defun egg-inline-diff-refresh-file-buffer ()
+  (interactive)
+  (let ((line (line-number-at-pos))
+	(invisiblity-spec buffer-invisibility-spec))
+    (egg-undo-buffer-inline-diff)
+    (revert-buffer t t t)
+    (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (setq buffer-invisibility-spec invisiblity-spec)))
 
 (defun egg-inline-diff-stage (pos)
   (interactive "d")
@@ -400,5 +457,8 @@
     (goto-char pos)
     (when (markerp pos)
       (set-marker pos nil))))
+
+
+(define-key egg-file-cmd-map (kbd "d") 'egg-buffer-toggle-inline-diff)
 
 (provide 'egg-diff)
