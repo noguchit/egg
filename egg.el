@@ -72,6 +72,44 @@
 
 (defconst egg-version "1.0.2")
 
+(defconst egg-basic-map
+  (let ((map (make-sparse-keymap "Egg:Basic")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "C-c C-s") 'egg-status)
+    (define-key map (kbd "s") 'egg-status)
+    (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
+    (define-key map (kbd "/") 'egg-search-changes)
+    (define-key map (kbd "c") 'egg-commit-log-edit)
+    map)
+  "Keymap for a basic egg buffer.
+\\{egg-basic-map}")
+
+(defconst egg-file-index-map
+  (let ((map (make-sparse-keymap "Egg:FileIndex")))
+    (set-keymap-parent map egg-basic-map)
+    map)
+  "Keymap for an egg buffer show the index version of a file.
+\\{egg-file-index-map}")
+
+(defvar egg-global-mode-name nil)
+(defvar egg-global-mode nil)
+(defun egg-set-global-mode (&optional string)
+  (interactive)
+  (when (egg-is-in-git)
+    (when (boundp 'vc-mode)
+      (set 'vc-mode nil))
+    (set (make-local-variable 'egg-global-mode) t)
+    (set (make-local-variable 'egg-global-mode-name)
+	 (if string (concat " " string)))
+    
+    ;; (setq egg-global-mode-name
+    ;;       (intern (concat "egg-" (egg-git-dir) "-HEAD")))
+    (or (assq 'egg-global-mode minor-mode-alist)
+	(push '(egg-global-mode egg-global-mode-name) minor-mode-alist))))
+
+
+
 
 ;;(cl-macroexpand '(egg-text blah 'egg-text-3))
 
@@ -6794,6 +6832,7 @@ That's the CONFIRM-P paramter in non-interactive use."
 	(setq egg-git-revision rev)
 	(put-text-property (point-min) (point-max) 'keymap
 			   egg-file-index-map)
+	(egg-set-global-mode "Egg")
         (set-buffer-modified-p nil)
         (setq buffer-read-only t)))
     buf))
@@ -7309,39 +7348,6 @@ egg in current buffer.\\<egg-minor-mode-map>
 (add-hook 'find-file-hook 'egg-git-dir)
 ;;;###autoload
 (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
-
-(defconst egg-basic-map
-  (let ((map (make-sparse-keymap "Egg:Basic")))
-    (define-key map (kbd "C-c C-s") 'egg-status)
-    (define-key map (kbd "s") 'egg-status)
-    (define-key map (kbd "l") 'egg-log)
-    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
-    (define-key map (kbd "/") 'egg-search-changes)
-    (define-key map (kbd "c") 'egg-commit-log-edit)
-    map)
-  "Keymap for a basic egg buffer.
-\\{egg-basic-map}")
-
-(defconst egg-file-index-map
-  (let ((map (make-sparse-keymap "Egg:FileIndex")))
-    (set-keymap-parent map egg-basic-map)
-    map)
-  "Keymap for an egg buffer show the index version of a file.
-\\{egg-file-index-map}")
-
-(defvar egg-global-mode-name nil)
-(defvar egg-global-mode nil)
-(defun egg-set-global-mode ()
-  (interactive)
-  (when (egg-is-in-git)
-    (when (boundp 'vc-mode)
-      (set 'vc-mode nil))
-    (set (make-local-variable 'egg-global-mode) t)
-    (make-local-variable 'egg-global-mode-name)
-    (setq egg-global-mode-name
-          (intern (concat "egg-" (egg-git-dir) "-HEAD")))
-    (or (assq 'egg-global-mode minor-mode-alist)
-	(push '(egg-global-mode egg-global-mode-name) minor-mode-alist))))
 
 ;;;========================================================
 ;;; tool-tip
