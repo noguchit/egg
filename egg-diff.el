@@ -29,8 +29,8 @@
   :group 'egg
   :type 'boolean)
 
-(defconst egg-inline-diff-map
-  (let ((map (make-sparse-keymap "Egg:InlineDiff")))
+(defconst egg-file-inline-diff-map
+  (let ((map (make-sparse-keymap "Egg:FileInlineDiff")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "h") 'egg-inline-diff-toggle-hide-show)
     (define-key map (kbd "g") 'egg-inline-diff-refresh-file-buffer)
@@ -38,24 +38,34 @@
     (define-key map (kbd "C-x v d") 'egg-buffer-toggle-inline-diff)
     map)
   "Keymap for inline diff mode.
-\\{egg-inline-diff-map}")
+\\{egg-file-inline-diff-map}")
 
-(defconst egg-file-inline-diff-blobk-map
+(defconst egg-file-inline-diff-block-map
   (let ((map (make-sparse-keymap "Egg:FileInlineDiffBlock")))
-    (set-keymap-parent map egg-inline-diff-map)
+    (set-keymap-parent map egg-file-inline-diff-map)
     (define-key map (kbd "s") 'egg-inline-diff-stage)
     (define-key map (kbd "u") 'egg-inline-diff-undo)
     map)
   "Keymap for a block of delta of a WorkTree's file in inline diff mode.
 \\{egg-inline-diff-block-map}")
 
-(defconst egg-index-inline-diff-blobk-map
-  (let ((map (make-sparse-keymap "Egg:IndexInlineDiffBlock")))
+(defconst egg-index-inline-diff-map
+  (let ((map (make-sparse-keymap "Egg:InexInlineDiff")))
     (set-keymap-parent map egg-section-map)
     (define-key map (kbd "h") 'egg-inline-diff-toggle-hide-show)
     (define-key map (kbd "g") 'egg-inline-diff-refresh-index-buffer)
     (define-key map (kbd "q") 'egg-index-quit-inline-diff-mode)
-    (define-key map (kbd "u") 'egg-inline-diff-unstage)
+    (define-key map (kbd "d") 'egg-index-toggle-inline-diff)
+    (define-key map (kbd "C-x v d") 'egg-index-toggle-inline-diff)
+    map)
+  "Keymap for inline diff mode of an index buffer.
+\\{egg-index-inline-diff-map}")
+
+(defconst egg-index-inline-diff-block-map
+  (let ((map (make-sparse-keymap "Egg:IndexInlineDiffBlock")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "s") 'egg-inline-diff-unstage)
+    (define-key map (kbd "S") 'egg-inline-diff-index-reset)
     map)
   "Keymap for a block of delta of a WorkTree's file in inline diff mode.
 \\{egg-inline-diff-block-map}")
@@ -181,11 +191,77 @@
 
     patch))
 
-
-(defun egg-inline-diff-compute-info (file-name)
+(defun egg-inline-diff-compute-info ()
   (let (hunk beg ranges all text-beg block-lines prev-line-no
 	     block-start line-no old-start old-line-no
-	     current-prefix start-c no-diff) 
+	     current-prefix start-c) 
+    (goto-char (point-max))
+    (save-match-data
+      (while (re-search-backward "^@@@? .+ @@@?" nil t)
+	(setq beg (match-beginning 0))
+	(setq hunk (mapcar #'string-to-number
+			   (split-string (match-string-no-properties 0) "[-+,@ ]+" t)))
+	(setq line-no (1- (nth 2 hunk)))
+	(setq old-line-no (1- (nth 0 hunk)))
+	(setq old-start nil)
+	(while (not (eobp))
+	  (forward-line 1)
+	  (setq start-c (char-after (point)))
+	  (unless (eobp) (delete-char 1))
+
+	  ;; keep the prev-line-no because
+	  ;; line-no is conditionally incremented
+	  (setq prev-line-no line-no)
+	  (when (memq start-c '(?- ? )) (setq old-line-no (1+ old-line-no)))
+	  (when (memq start-c '(?+ ? )) (setq line-no (1+ line-no)))
+
+	  (if (eq current-prefix start-c)
+	      (setq block-lines (1+ block-lines))
+
+	    ;; switching
+		
+	    ;; building info
+	    (cond ((eq current-prefix ? ) nil)
+		  ((eq current-prefix ?+)
+		   (push (list :add block-start block-lines old-start) ranges))
+		  ((eq current-prefix ?-)
+		   (push (list :del block-start block-lines old-start
+			       (buffer-substring-no-properties text-beg (point)))
+			 ranges)))
+
+	    (cond ((eq start-c ? )
+		   ;; restart position in the original file
+		   (setq old-start nil))
+		  ((eq start-c ?-)
+		   ;; keep removed text because it's not in the file
+		   (setq text-beg (point))
+		   ;; del-only or combined hunk, this is the starting point
+		   ;; of the changes in the original file
+		   (setq old-start old-line-no))
+		  ((eq start-c ?+)
+		   ;; the strting point in the original file is either:
+		   ;;  - the beginning of the add-only lines
+		   ;;  - or the end of the del-lines
+		   ;; +1 because old-line-no doesn't advance this time
+		   (setq old-start (1+ old-line-no))))
+
+	    ;; start new block
+	    (setq block-lines 1)
+	    (setq current-prefix start-c)
+	    ;; in the case of del block, line-no would have stayed the same
+	    ;; but we must move the block start ahead
+	    (setq block-start (1+ prev-line-no))))
+	;; do full block
+	(push (list :same (nth 2 hunk) (nth 3 hunk)) ranges)
+	;; done current ranges
+	(setq all (nconc all ranges))
+	(setq ranges nil)
+	(goto-char beg)
+	(delete-region beg (point-max))))
+    all))
+
+(defun egg-inline-diff-compute-file-info (file-name)
+  (let (no-diff) 
     (with-temp-buffer
       (setq no-diff
 	    (egg-git-ok t "--no-pager" "diff" "--exit-code" 
@@ -193,70 +269,18 @@
 			;;"--unified=5"
 			"--" file-name))
       (unless no-diff
-	(goto-char (point-max))
-	(save-match-data
-	  (while (re-search-backward "^@@@? .+ @@@?" nil t)
-	    (setq beg (match-beginning 0))
-	    (setq hunk (mapcar #'string-to-number
-			       (split-string (match-string-no-properties 0) "[-+,@ ]+" t)))
-	    (setq line-no (1- (nth 2 hunk)))
-	    (setq old-line-no (1- (nth 0 hunk)))
-	    (setq old-start nil)
-	    (while (not (eobp))
-	      (forward-line 1)
-	      (setq start-c (char-after (point)))
-	      (unless (eobp) (delete-char 1))
+	(egg-inline-diff-compute-info)))))
 
-	      ;; keep the prev-line-no because
-	      ;; line-no is conditionally incremented
-	      (setq prev-line-no line-no)
-	      (when (memq start-c '(?- ? )) (setq old-line-no (1+ old-line-no)))
-	      (when (memq start-c '(?+ ? )) (setq line-no (1+ line-no)))
-
-	      (if (eq current-prefix start-c)
-		  (setq block-lines (1+ block-lines))
-
-		;; switching
-		
-		;; building info
-		(cond ((eq current-prefix ? ) nil)
-		      ((eq current-prefix ?+)
-		       (push (list :add block-start block-lines old-start) ranges))
-		      ((eq current-prefix ?-)
-		       (push (list :del block-start block-lines old-start
-				   (buffer-substring-no-properties text-beg (point)))
-			     ranges)))
-
-		(cond ((eq start-c ? )
-		       ;; restart position in the original file
-		       (setq old-start nil))
-		      ((eq start-c ?-)
-		       ;; keep removed text because it's not in the file
-		       (setq text-beg (point))
-		       ;; del-only or combined hunk, this is the starting point
-		       ;; of the changes in the original file
-		       (setq old-start old-line-no))
-		      ((eq start-c ?+)
-		       ;; the strting point in the original file is either:
-		       ;;  - the beginning of the add-only lines
-		       ;;  - or the end of the del-lines
-		       ;; +1 because old-line-no doesn't advance this time
-		       (setq old-start (1+ old-line-no))))
-
-		;; start new block
-		(setq block-lines 1)
-		(setq current-prefix start-c)
-		;; in the case of del block, line-no would have stayed the same
-		;; but we must move the block start ahead
-		(setq block-start (1+ prev-line-no))))
-	    ;; do full block
-	    (push (list :same (nth 2 hunk) (nth 3 hunk)) ranges)
-	    ;; done current ranges
-	    (setq all (nconc all ranges))
-	    (setq ranges nil)
-	    (goto-char beg)
-	    (delete-region beg (point-max))))))
-    all))
+(defun egg-inline-diff-compute-index-info (file-name)
+  (let (no-diff) 
+    (with-temp-buffer
+      (setq no-diff
+	    (egg-git-ok t "--no-pager" "diff" "--exit-code" "--cached" "HEAD"
+			;;"--function-context"
+			;;"--unified=5"
+			"--" file-name))
+      (unless no-diff
+	(egg-inline-diff-compute-info)))))
 
 (defun egg-line-2-pos (line &optional num)
   (save-excursion
@@ -272,7 +296,7 @@
     (put-text-property (1- end) end 'invisible nil)))
 
 
-(defun egg-do-buffer-inline-diff (ranges)
+(defun egg-do-buffer-inline-diff (ranges common-diff-map diff-block-map)
   (let ((read-only-state buffer-read-only)
 	(inhibit-read-only t)
 	beg end
@@ -283,7 +307,7 @@
     (add-text-properties (point-min) (point-max)
 			 (list :navigation 0
 			       'invisible 0
-			       'keymap egg-inline-diff-map))
+			       'keymap common-diff-map))
     (dolist (range ranges)
       (setq type (nth 0 range))
       (setq line (nth 1 range))
@@ -296,7 +320,7 @@
 	     (add-text-properties beg end
 				  (list :navigation 0
 					'invisible nil
-					'keymap egg-inline-diff-map))
+					'keymap common-diff-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end))
 	    ((eq type :add)
 	     (add-text-properties beg end
@@ -304,7 +328,7 @@
 					'invisible nil
 					:orig-line old-line
 					:num num
-					'keymap egg-file-inline-diff-blobk-map))
+					'keymap diff-block-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end)
 	     (setq ov (make-overlay beg end nil t nil))
 	     (overlay-put ov 'face 'egg-add-bg)
@@ -322,7 +346,7 @@
 					'invisible nil
 					:old-line old-line
 					:num num
-					'keymap egg-file-inline-diff-blobk-map))
+					'keymap diff-block-map))
 	     (egg--inline-diff-mk-boundaries-visible beg end)
 	     (setq ov (make-overlay beg end nil t nil))
 	     (overlay-put ov 'face 'egg-del-bg)
@@ -337,6 +361,7 @@
 	 (list :read-only read-only-state
 	       :overlays ov-list 
 	       :text-positions text-list))
+    (setq egg-minor-mode-name " Egg:inDiff")
     (set-buffer-modified-p nil)
     (setq buffer-read-only t)))
 
@@ -358,6 +383,8 @@
       (set-marker (nth 1 pos) nil)
       (set-marker (nth 2 pos) nil))
     (setq buffer-read-only (plist-get egg-inline-diff-info :read-only))
+    (setq egg-minor-mode-name
+          (intern (concat "egg-" (egg-git-dir) "-HEAD")))
     (set-buffer-modified-p nil)
     (setq egg-inline-diff-info nil)))
 
@@ -369,9 +396,18 @@
   (interactive)
   (if egg-inline-diff-info
       (egg-undo-buffer-inline-diff)
-    (let ((ranges (egg-inline-diff-compute-info (buffer-file-name))))
+    (let ((ranges (egg-inline-diff-compute-file-info (buffer-file-name))))
       (if ranges
-	  (egg-do-buffer-inline-diff ranges)
+	  (egg-do-buffer-inline-diff ranges egg-file-inline-diff-map egg-file-inline-diff-block-map)
+	(message "no differences in %s" (buffer-file-name))))))
+
+(defun egg-index-toggle-inline-diff ()
+  (interactive)
+  (if egg-inline-diff-info
+      (egg-undo-buffer-inline-diff)
+    (let ((ranges (egg-inline-diff-compute-index-info egg-git-name)))
+      (if ranges
+	  (egg-do-buffer-inline-diff ranges egg-index-inline-diff-map egg-index-inline-diff-block-map)
 	(message "no differences in %s" (buffer-file-name))))))
 
 (defun egg--inline-diff-figure-out-pos (pos del-prompt add-prompt)
@@ -403,7 +439,20 @@
 	(invisiblity-spec buffer-invisibility-spec))
     (egg-undo-buffer-inline-diff)
     (revert-buffer t t t)
-    (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
+    (egg-do-buffer-inline-diff (egg-inline-diff-compute-file-info (buffer-file-name))
+			       egg-file-inline-diff-map egg-file-inline-diff-block-map)
+    (goto-char (point-min))
+    (forward-line (1- line))
+    (setq buffer-invisibility-spec invisiblity-spec)))
+
+(defun egg-inline-diff-refresh-index-buffer ()
+  (interactive)
+  (let ((line (line-number-at-pos))
+	(invisiblity-spec buffer-invisibility-spec))
+    (egg-undo-buffer-inline-diff)
+    (egg-file-get-other-version egg-git-name egg-git-revision nil t)
+    (egg-do-buffer-inline-diff (egg-inline-diff-compute-index-info egg-git-name)
+			        egg-index-inline-diff-map egg-index-inline-diff-block-map)
     (goto-char (point-min))
     (forward-line (1- line))
     (setq buffer-invisibility-spec invisiblity-spec)))
@@ -428,7 +477,8 @@
       (egg-undo-buffer-inline-diff)
       (revert-buffer t t t)
       (setq pos (copy-marker (egg-line-2-pos line)))
-      (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
+      (egg-do-buffer-inline-diff (egg-inline-diff-compute-file-info (buffer-file-name))
+				 egg-file-inline-diff-map egg-file-inline-diff-block-map)
       (setq buffer-invisibility-spec invisibility-spec)
       (goto-char pos)
       (set-marker pos nil))))
@@ -452,7 +502,8 @@
     (revert-buffer t t t)
     (when (plist-get res :success)
       (setq pos (copy-marker (egg-line-2-pos line))))
-    (egg-do-buffer-inline-diff (egg-inline-diff-compute-info (buffer-file-name)))
+    (egg-do-buffer-inline-diff (egg-inline-diff-compute-file-info (buffer-file-name))
+			       egg-file-inline-diff-map egg-file-inline-diff-block-map)
     (setq buffer-invisibility-spec invisibility-spec)
     (goto-char pos)
     (when (markerp pos)
@@ -460,5 +511,6 @@
 
 
 (define-key egg-file-cmd-map (kbd "d") 'egg-buffer-toggle-inline-diff)
+(define-key egg-file-index-map (kbd "d") 'egg-index-toggle-inline-diff)
 
 (provide 'egg-diff)

@@ -6763,6 +6763,11 @@ That's the CONFIRM-P paramter in non-interactive use."
     (egg-status-buffer-handle-result
      (egg--git-co-rev-cmd t rev force name track))))
 
+(defvar egg-git-name nil)
+(defvar egg-git-revision nil)
+(make-variable-buffer-local 'egg-git-name)
+(make-variable-buffer-local 'egg-git-revision)
+
 (defun egg-file-get-other-version (file &optional rev prompt same-mode name)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
          (git-dir (egg-git-dir))
@@ -6785,6 +6790,10 @@ That's the CONFIRM-P paramter in non-interactive use."
           (error "Failed to get %s's version: %s" file rev))
         (when (and (functionp mode) same-mode)
           (funcall mode))
+	(setq egg-git-name (egg-file-git-name file))
+	(setq egg-git-revision rev)
+	(put-text-property (point-min) (point-max) 'keymap
+			   egg-file-index-map)
         (set-buffer-modified-p nil)
         (setq buffer-read-only t)))
     buf))
@@ -7243,6 +7252,7 @@ With C-u prefix, ask for confirmation before executing the next-action."
   :type 'string
   :set 'egg-mode-key-prefix-set)
 
+
 (defvar egg-minor-mode-name " Git")
 
 ;;;###autoload
@@ -7299,6 +7309,39 @@ egg in current buffer.\\<egg-minor-mode-map>
 (add-hook 'find-file-hook 'egg-git-dir)
 ;;;###autoload
 (add-hook 'find-file-hook 'egg-minor-mode-find-file-hook)
+
+(defconst egg-basic-map
+  (let ((map (make-sparse-keymap "Egg:Basic")))
+    (define-key map (kbd "C-c C-s") 'egg-status)
+    (define-key map (kbd "s") 'egg-status)
+    (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "L") 'egg-log-buffer-reflog-ref)
+    (define-key map (kbd "/") 'egg-search-changes)
+    (define-key map (kbd "c") 'egg-commit-log-edit)
+    map)
+  "Keymap for a basic egg buffer.
+\\{egg-basic-map}")
+
+(defconst egg-file-index-map
+  (let ((map (make-sparse-keymap "Egg:FileIndex")))
+    (set-keymap-parent map egg-basic-map)
+    map)
+  "Keymap for an egg buffer show the index version of a file.
+\\{egg-file-index-map}")
+
+(defvar egg-global-mode-name nil)
+(defvar egg-global-mode nil)
+(defun egg-set-global-mode ()
+  (interactive)
+  (when (egg-is-in-git)
+    (when (boundp 'vc-mode)
+      (set 'vc-mode nil))
+    (set (make-local-variable 'egg-global-mode) t)
+    (make-local-variable 'egg-global-mode-name)
+    (setq egg-global-mode-name
+          (intern (concat "egg-" (egg-git-dir) "-HEAD")))
+    (or (assq 'egg-global-mode minor-mode-alist)
+	(push '(egg-global-mode egg-global-mode-name) minor-mode-alist))))
 
 ;;;========================================================
 ;;; tool-tip
