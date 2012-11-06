@@ -76,6 +76,8 @@
 (defconst egg-staged-diff-section-map
   (let ((map (make-sparse-keymap "Egg:StagedDiff")))
     (set-keymap-parent map egg-diff-section-map)
+    (define-key map (kbd "RET") 'egg-staged-diff-section-cmd-visit-file-other-window)
+    (define-key map (kbd "f") 'egg-staged-diff-section-cmd-visit-file)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-diff-section-cmd-unstage)
     (define-key map (kbd "DEL") 'egg-diff-section-cmd-revert-to-head)
@@ -148,6 +150,7 @@ the index. \\{egg-wdir-diff-section-map}")
 (defconst egg-staged-hunk-section-map
   (let ((map (make-sparse-keymap "Egg:StagedHunk")))
     (set-keymap-parent map egg-hunk-section-map)
+    (define-key map (kbd "RET") 'egg-staged-hunk-cmd-visit-file-other-window)
     (define-key map (kbd "=") 'egg-staged-section-cmd-ediff3)
     (define-key map (kbd "s") 'egg-hunk-section-cmd-unstage)
 

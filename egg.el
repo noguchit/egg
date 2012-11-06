@@ -949,6 +949,22 @@ See `egg-decorate-diff-sequence'."
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
+(defun egg-staged-diff-section-cmd-visit-file (file)
+  (interactive (list (car (get-text-property (point) :diff))))
+  (egg-buffer-pop-to-file file ":0"))
+
+(defun egg-staged-diff-section-cmd-visit-file-other-window (file)
+  (interactive (list (car (get-text-property (point) :diff))))
+  (egg-buffer-pop-to-file file ":0" t))
+
+(defun egg-staged-hunk-cmd-visit-file-other-window (file hunk-header hunk-beg &rest ignored)
+  (interactive (egg-hunk-info-at (point)))
+  (egg-log-pop-to-file file ":0" t nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
+
+(defun egg-staged-hunk-cmd-visit-file (file hunk-header hunk-beg &rest ignored)
+  (interactive (egg-hunk-info-at (point)))
+  (egg-log-pop-to-file file ":0" nil nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
+
 (defun egg-diff-section-cmd-visit-file-other-window (file)
   "Visit file FILE in other window."
   (interactive (list (car (get-text-property (point) :diff))))
@@ -3800,7 +3816,10 @@ Jump to line LINE if it's not nil."
 	       (progn
 		 (message "file:%s dir:%s" file default-directory)
 		 (find-file-noselect file))
-	     (egg-file-get-other-version file (egg-short-sha1 sha1) nil t)))
+	     (egg-file-get-other-version file (if (= (aref sha1 0) ?:)
+						  sha1 ;; index
+						(egg-short-sha1 sha1)) 
+					 nil t)))
   (when (numberp line)
     (goto-char (point-min))
     (forward-line (1- line))))
