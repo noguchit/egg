@@ -475,6 +475,32 @@
 	(cons del-pos add-pos)
       nil)))
 
+
+(defun egg--inline-diff-file-update-index-buffer ()
+  (let ((buffer (egg-file-get-index-buffer))
+	win)
+    (when (and (bufferp buffer) (buffer-live-p buffer))
+      (with-current-buffer buffer
+	(when egg-inline-diff-info
+	  (setq win (get-buffer-window buffer))
+	  (if win
+	      (with-selected-window win
+		(egg-inline-diff-refresh-index-buffer))
+	    (egg-inline-diff-refresh-index-buffer)))))))
+
+(defun egg--inline-diff-index-update-file-buffer ()
+  (let ((buffer (egg-index-get-file-visiting-buffer))
+	win)
+    (when (and (bufferp buffer) (buffer-live-p buffer))
+      (with-current-buffer buffer
+	(when egg-inline-diff-info
+	  (setq win (get-buffer-window buffer))
+	  (if win
+	      (with-selected-window win
+		(egg-inline-diff-refresh-file-buffer))
+	    (egg-inline-diff-refresh-file-buffer)))))))
+
+
 (defun egg-inline-diff-refresh-file-buffer ()
   (interactive)
   (let ((line (line-number-at-pos))
@@ -524,7 +550,8 @@
 				 egg-file-inline-diff-map egg-file-inline-diff-block-map)
       (setq buffer-invisibility-spec invisibility-spec)
       (goto-char pos)
-      (set-marker pos nil))))
+      (set-marker pos nil)
+      (egg--inline-diff-file-update-index-buffer))))
 
 (defun egg-inline-diff-unstage (pos)
   (interactive "d")
@@ -552,7 +579,8 @@
 			        egg-index-inline-diff-map egg-index-inline-diff-block-map)
       (setq buffer-invisibility-spec invisibility-spec)
       (goto-char pos)
-      (set-marker pos nil))))
+      (set-marker pos nil)
+      (egg--inline-diff-index-update-file-buffer))))
 
 (defun egg-inline-diff-undo (pos)
   (interactive "d")

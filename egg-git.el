@@ -196,6 +196,16 @@ if BUF was nil then use current-buffer"
   (delete-dups
    (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)))
 
+(defun egg-file-get-index-buffer ()
+  (let* ((git-name (egg-file-git-name (buffer-file-name)))
+	 (default-directory (egg-work-tree-dir)))
+    (get-buffer (concat "*:0:" git-name "*"))))
+
+(defun egg-index-get-file-visiting-buffer ()
+  (let* ((default-directory (egg-work-tree-dir))
+	 (file-name egg-git-name))
+    (find-buffer-visiting file-name)))
+
 (defsubst egg-unmerged-files ()
   "return a list of repo-relative names for each unmerged files."
   (save-match-data
