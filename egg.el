@@ -1548,6 +1548,49 @@ rebase session."
 						(egg-log-buffer-mode . log))))))
 
 (defvar egg-status-buffer-changed-files-status nil)
+(defvar egg-status-buffer-interactive-stash-info nil)
+
+(defun egg-sb-setup-interactive-stash ()
+  (make-local-variable 'egg-status-buffer-interactive-stash-info)
+  (let ((dir (egg-work-tree-dir))
+	(stash-index-file (make-temp-name (concat (egg-git-dir) "/index.stash.")))
+	info base-commit index-commit index-tree
+	branch head-desc
+	worktree-unchanged index-unchanged)
+    (with-current-buffer "*i-stash-debug*"
+      (erase-buffer)
+      (setq default-directory dir)
+      (setq index-unchanged (egg-git-ok t "diff-index" "--cached" "HEAD" 
+					"--ignore-submodules"))
+      (setq worktree-unchanged (egg-git-ok t "diff-files" "--ignore-submodules"))
+      (when (and worktree-unchanged index-unchanged)
+	(error "nothing to stash"))
+      (unless (egg-git-ok t "update-index" "--refresh")
+	(error "git update-index failed!"))
+      (setq base-commit (egg-git-to-string "rev-parse" "--verify" "HEAD"))
+      (setq head-desc (egg-git-to-string "rev-list" "--oneline" "-n1" "HEAD" "--"))
+      (setq branch (or (egg-current-branch) "(no branch)"))
+      (setq index-tree (egg-git-to-string "write-tree"))
+      (unless index-tree
+	(error "git write-tree failed to write original index to database."))
+      (setq index-commit (egg-git-to-string "commit-tree" "-p" base-commit 
+					    "-m" 
+					    (format "index on %s: %s" branch head-desc)
+					    index-tree))
+      (unless index-commit
+	(error "git commit-tree failed to create commit object for original index"))
+      (unless (egg-git-ok t "read-tree" (format "--index-output=%s" stash-index-file)
+			  "HEAD")
+	(error "git read-tree failed read HEAD into stash index file %s"
+	       stash-index-file))
+      (setq info (list :stash-index-file stash-index-file
+		       :base-commit base-commit
+		       :index-commit index-commit
+		       :branch branch
+		       :head-desc head-desc)))
+    (setq egg-status-buffer-interactive-stash-info info)
+    (egg-status nil t)
+    (set (make-local-variable 'egg--internal-index-file) stash-index-file)))
 
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
@@ -1571,6 +1614,10 @@ rebase session."
             "\n")
     ;; invisibility start at the newline
     (setq inv-beg (1- (point)))
+    (when egg-status-buffer-interactive-stash-info
+      ;; Interactive stash info
+      (insert (egg-text "Interactive stashing in progress\n" 'egg-text-2)
+	      (egg-text "s: Select/Unselect deltas for stashing\n" 'egg-text-1)))
     (when rebase-step
       ;; Rebase info and keybindings
       (insert (format "Rebase: commit %s of %s" rebase-step rebase-num))
@@ -1769,34 +1816,55 @@ adding the contents."
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
-  (let ((beg (point)) inv-beg diff-beg end path tmp status)
+  (let ((process-environment (copy-sequence process-environment))
+	(beg (point)) inv-beg diff-beg end path tmp status)
+    (when egg-status-buffer-interactive-stash-info
+      (setenv "GIT_INDEX_FILE" 
+	      (plist-get egg-status-buffer-interactive-stash-info :stash-index-file)))
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
             "\n")
     (setq diff-beg (point))
     (setq inv-beg (1- (point)))
-    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
-           "-M" "-p" "--src-prefix=INDEX:/" "--dst-prefix=WORKDIR:/"
-           (append egg-git-diff-options extra-diff-options))
+    (egg-git-ok-args t (append (if egg-status-buffer-interactive-stash-info
+				   (list "diff" "--no-color" "-M" "-p"
+					 "--src-prefix=WiP:/"
+					 "--dst-prefix=Trash:/" )
+				 (list "diff" "--no-color" "-M" "-p"
+				       "--src-prefix=INDEX:/"
+				       "--dst-prefix=WORKDIR:/" ))
+			       egg-git-diff-options
+			       extra-diff-options))
     (setq end (point))
     (egg-delimit-section :section 'unstaged beg (point)
                          inv-beg egg-section-map 'unstaged)
-    ;; this section might contains merge conflicts, thus cc-diff
-    (egg-decorate-diff-section :begin diff-beg
-                               :end (point)
-                               :src-prefix "INDEX:/"
-                               :dst-prefix "WORKDIR:/"
-                               :diff-map egg-unstaged-diff-section-map
-                               :hunk-map egg-unstaged-hunk-section-map
-                               :cc-diff-map egg-unmerged-diff-section-map
-                               :cc-hunk-map egg-unmerged-hunk-section-map
-                               :conflict-map egg-unmerged-conflict-map)
+    (if egg-status-buffer-interactive-stash-info
+	(egg-decorate-diff-section :begin diff-beg
+				   :end (point)
+				   :src-prefix "WiP:/"
+				   :dst-prefix "Trash:/"
+				   :diff-map egg-unstaged-diff-section-map
+				   :hunk-map egg-unstaged-hunk-section-map)
+      ;; this section might contains merge conflicts, thus cc-diff
+      (egg-decorate-diff-section :begin diff-beg
+				 :end (point)
+				 :src-prefix "INDEX:/"
+				 :dst-prefix "WORKDIR:/"
+				 :diff-map egg-unstaged-diff-section-map
+				 :hunk-map egg-unstaged-hunk-section-map
+				 :cc-diff-map egg-unmerged-diff-section-map
+				 :cc-hunk-map egg-unmerged-hunk-section-map
+				 :conflict-map egg-unmerged-conflict-map))
     (egg-sb-decorate-unmerged-entries-in-section diff-beg end :unmerged)
     (put-text-property (- end 2) end 'intangible t)))
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   "Insert the staged changes section into the status buffer."
-  (let ((beg (point)) inv-beg diff-beg end)
+  (let ((process-environment (copy-sequence process-environment))
+	(beg (point)) inv-beg diff-beg end)
+    (when egg-status-buffer-interactive-stash-info
+      (setenv "GIT_INDEX_FILE" 
+	      (plist-get egg-status-buffer-interactive-stash-info :stash-index-file)))
     (insert (egg-prepend title "\n\n"
                          'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
@@ -1804,19 +1872,32 @@ adding the contents."
     (put-text-property (- beg 2) beg 'intangible t)
     (setq diff-beg (point)
           inv-beg (1- diff-beg))
-    (apply 'call-process egg-git-command nil t nil "diff" "--no-color"
-           "--cached" "-M" "-p" "--src-prefix=HEAD:/" "--dst-prefix=INDEX:/"
-           (append egg-git-diff-options extra-diff-options))
+    (egg-git-ok-args t (append (if egg-status-buffer-interactive-stash-info
+				   (list "diff" "--no-color" "--cached" "-M" "-p"
+					 "--src-prefix=Base:/"
+					 "--dst-prefix=WiP:/")
+				 (list "diff" "--no-color" "--cached" "-M" "-p"
+				       "--src-prefix=HEAD:/"
+				       "--dst-prefix=INDEX:/"))
+			       egg-git-diff-options 
+			       extra-diff-options))
     (setq end (point))
     (egg-delimit-section :section 'staged beg (point)
                          inv-beg egg-section-map 'staged)
     ;; this section never contains merge conflicts, thus no cc-diff
-    (egg-decorate-diff-section :begin diff-beg
-                               :end (point)
-                               :src-prefix "HEAD:/"
-                               :dst-prefix "INDEX:/"
-                               :diff-map egg-staged-diff-section-map
-                               :hunk-map egg-staged-hunk-section-map)
+    (if egg-status-buffer-interactive-stash-info
+	(egg-decorate-diff-section :begin diff-beg
+				   :end (point)
+				   :src-prefix "Base:/"
+				   :dst-prefix "WiP:/"
+				   :diff-map egg-staged-diff-section-map
+				   :hunk-map egg-staged-hunk-section-map)
+      (egg-decorate-diff-section :begin diff-beg
+				 :end (point)
+				 :src-prefix "HEAD:/"
+				 :dst-prefix "INDEX:/"
+				 :diff-map egg-staged-diff-section-map
+				 :hunk-map egg-staged-hunk-section-map))
     (egg-sb-decorate-unmerged-entries-in-section diff-beg end :merged)
     (put-text-property (- end 2) end 'intangible t)))
 
@@ -2408,6 +2489,8 @@ See `egg-buffer-hide-help-on-start'."
                (egg-make-navigation top-nav help-nav))
              t))))
 
+
+
 (defun egg-status-buffer-redisplay (buf &optional init)
   "(Re)Display the contents of the status buffer in BUF.
 If INIT was not nil, then perform 1st-time initializations as well."
@@ -2432,14 +2515,16 @@ If INIT was not nil, then perform 1st-time initializations as well."
         (dolist (sect egg-status-buffer-sections)
           (cond ((eq sect 'repo) (egg-sb-insert-repo-section))
                 ((eq sect 'unstaged) 
-                (egg-sb-insert-unstaged-section (if (egg-is-merging state)
-                                                    "Unmerged Changes:"
-                                                  "Unstaged Changes:"))
-                (setq pos (point)))
-                ((eq sect 'staged) (egg-sb-insert-staged-section 
-                                   (if (egg-is-merging state)
-                                       "Merged Changes:"
-				      "Staged Changes:")))
+		 (setq pos (point))
+		 (egg-sb-insert-unstaged-section 
+		  (cond ((consp egg-status-buffer-interactive-stash-info) "To be Removed:")
+			((egg-is-merging state) "Unmerged Changes:")
+			(t "Unstaged Changes:"))))
+                ((eq sect 'staged) 
+		 (egg-sb-insert-staged-section 
+		  (cond ((consp egg-status-buffer-interactive-stash-info) "To be Stashed:")
+			((egg-is-merging state) "Merged Changes:")
+			(t "Staged Changes:"))))
                 ((eq sect 'untracked) (egg-sb-insert-untracked-section))
 		((eq sect 'stash) (egg-sb-insert-stash-section))))
         (egg-calculate-hunk-ranges)
@@ -3585,7 +3670,7 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
 	  
           (inhibit-read-only t)
 	  pickaxe-term highlight-regexp is-cc-diff
-          pos beg end inv-beg help-beg help-end help-inv-beg err-code)
+          pos beg end inv-beg help-beg help-end help-inv-beg cmd-ok)
 
       (setq highlight-regexp (and pickaxe (egg-pickaxe-highlight pickaxe)))
       (setq pickaxe-term (and pickaxe (egg-pickaxe-term pickaxe)))
@@ -3604,8 +3689,8 @@ egg-diff-buffer-info is built using `egg-build-diff-info'."
       (setq pos (point))
       (setq beg (point))
       (egg-cmd-log "RUN: git diff" (mapconcat #'identity args " ") "\n")
-      (setq err-code (apply 'call-process egg-git-command nil t nil "diff" args))
-      (egg-cmd-log (format "RET:%d\n" err-code))
+      (setq cmd-ok (egg-git-ok-args t (cons "diff" args)))
+      (egg-cmd-log (format "RET:%s\n" cmd-ok))
       (setq end (point))
       (unless (> end beg)
         (if pickaxe
@@ -6841,9 +6926,7 @@ That's the CONFIRM-P paramter in non-interactive use."
       (setq default-directory dir)
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (unless (= (call-process egg-git-command nil buf nil "show"
-                                 git-name)
-                   0)
+        (unless (egg-git-ok t "show" git-name)
           (error "Failed to get %s's version: %s" file rev))
         (when (and (functionp mode) same-mode)
           (funcall mode))
