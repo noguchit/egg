@@ -944,6 +944,21 @@ See `egg-decorate-diff-sequence'."
     (egg-decorate-diff-sequence
      (nconc (list :src-prefix a :dst-prefix b) args))))
 
+(defsubst egg-hunk-info-at (pos)
+  "Rebuild the hunk info at POS.
+Hunk info are relative offsets. This function compute the
+physical offsets. The hunk-line may be NIL if this is not status
+or commit buffer and `egg-calculate-hunk-ranges' was
+not called"
+  (let* ((diff-info (get-text-property pos :diff))
+         (head-beg (nth 1 diff-info))
+         (hunk-info (get-text-property pos :hunk))
+         (hunk-beg (and hunk-info (+ (nth 1 hunk-info) head-beg)))
+         (hunk-end (and hunk-info (+ (nth 2 hunk-info) head-beg)))
+         (hunk-ranges (and hunk-info (nth 3 hunk-info))))
+    (and hunk-info
+	 (list (car diff-info) (car hunk-info) hunk-beg hunk-end hunk-ranges))))
+
 (defun egg-diff-section-cmd-visit-file (file)
   "Visit file FILE."
   (interactive (list (car (get-text-property (point) :diff))))
@@ -1025,21 +1040,6 @@ HUNK-BEG is the starting position of the current hunk."
           (while (re-search-forward "^\\(?:\\+\\| \\).*" limit t)
             (setq adjust (1+ adjust)))))
     (+ line adjust)))
-
-(defsubst egg-hunk-info-at (pos)
-  "Rebuild the hunk info at POS.
-Hunk info are relative offsets. This function compute the
-physical offsets. The hunk-line may be NIL if this is not status
-or commit buffer and `egg-calculate-hunk-ranges' was
-not called"
-  (let* ((diff-info (get-text-property pos :diff))
-         (head-beg (nth 1 diff-info))
-         (hunk-info (get-text-property pos :hunk))
-         (hunk-beg (and hunk-info (+ (nth 1 hunk-info) head-beg)))
-         (hunk-end (and hunk-info (+ (nth 2 hunk-info) head-beg)))
-         (hunk-ranges (and hunk-info (nth 3 hunk-info))))
-    (and hunk-info
-	 (list (car diff-info) (car hunk-info) hunk-beg hunk-end hunk-ranges))))
 
 (defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end
                                              hunk-ranges &rest ignored)
@@ -2191,7 +2191,7 @@ Also the the first section after the point in `my-egg-stage/unstage-point"
                  ;; for hunks, unconditionally restore invisibility
                  ((and (eq type :hunk))
                   (let* ((old-state
-                          (find-if
+                          (egg-find-if
                            (lambda (elem)
                              (destructuring-bind (old-ranges old-state)
                                  elem
@@ -2685,6 +2685,288 @@ If INIT was not nil, then perform 1st-time initializations as well."
           (t (display-buffer buf)))))
 
 ;;;========================================================
+;;; log message
+;;;========================================================
+
+(require 'derived)
+(require 'ring)
+
+(defvar egg-log-msg-ring (make-ring 32))
+(defvar egg-log-msg-ring-idx nil)
+
+(defvar egg-log-msg-closure nil 
+  "Closure for be called when done composing a message.
+It must be a local variable in the msg buffer. It's a list
+in the form (func arg1 arg2 arg3...).
+
+func should be a function expecting the following args:
+PREFIX-LEVEL the prefix argument converted to a number.
+BEG a marker for the beginning of the composed text.
+END a marker for the end of the composed text.
+NEXT-BEG is a marker for the beginnning the next section.
+ARG1 ARG2 ARG3... are the items composing the closure
+when the buffer was created.")
+
+(defsubst egg-log-msg-func () (car egg-log-msg-closure))
+(defsubst egg-log-msg-args () (cdr egg-log-msg-closure))
+(defsubst egg-log-msg-prefix () (nth 0 (egg-log-msg-args)))
+(defsubst egg-log-msg-gpg-uid () (nth 1 (egg-log-msg-args)))
+(defsubst egg-log-msg-text-beg () (nth 2 (egg-log-msg-args)))
+(defsubst egg-log-msg-text-end () (nth 3 (egg-log-msg-args)))
+(defsubst egg-log-msg-next-beg () (nth 4 (egg-log-msg-args)))
+(defsubst egg-log-msg-extras () (nthcdr 5 (egg-log-msg-args)))
+(defsubst egg-log-msg-set-prefix (prefix) (setcar (egg-log-msg-args) prefix))
+(defsubst egg-log-msg-set-gpg-uid (uid) (setcar (cdr (egg-log-msg-args)) uid))
+(defsubst egg-log-msg-mk-closure-input (func &rest args)
+  (cons func args))
+(defsubst egg-log-msg-mk-closure-from-input (input gpg-uid prefix beg end next)
+  (cons (car input) (nconc (list prefix gpg-uid beg end next) (cdr input))))
+(defsubst egg-log-msg-apply-closure (prefix) 
+  (egg-log-msg-set-prefix prefix)
+  (apply (egg-log-msg-func) (egg-log-msg-args)))
+
+
+(define-derived-mode egg-log-msg-mode text-mode "Egg-LogMsg"
+  "Major mode for editing Git log message.\n\n
+\{egg-log-msg-mode-map}."
+  (setq default-directory (egg-work-tree-dir))
+  (set (make-local-variable 'egg-log-msg-closure) nil)
+  (set (make-local-variable 'egg-log-msg-ring-idx) nil))
+
+(define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
+(define-key egg-log-msg-mode-map (kbd "C-c C-k") 'egg-log-msg-cancel)
+(define-key egg-log-msg-mode-map (kbd "C-c C-s") 'egg-log-msg-buffer-toggle-signed)
+(define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
+(define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
+(define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
+
+(defsubst egg-log-msg-commit (prefix gpg-uid text-beg text-end &rest ignored)
+  "Commit the index using the text between TEXT-BEG and TEXT-END as message.
+PREFIX and IGNORED are ignored."
+  (egg-cleanup-n-commit-msg (if gpg-uid
+				#'egg--async-create-signed-commit-cmd
+			      #'egg--git-commit-with-region-cmd)
+			    text-beg text-end gpg-uid))
+
+(defsubst egg-log-msg-amend-commit (prefix gpg-uid text-beg text-end &rest ignored)
+  "Amend the last commit with the index using the text between TEXT-BEG and TEXT-END
+as message. PREFIX and IGNORED are ignored."
+  (egg-cleanup-n-commit-msg (if gpg-uid
+				#'egg--async-create-signed-commit-cmd
+			      #'egg--git-commit-with-region-cmd)
+			    text-beg text-end gpg-uid "--amend"))
+
+(defun egg-log-msg-buffer-toggle-signed ()
+  "Toggle the to-be-gpg-signed state of the message being composed."
+  (interactive)
+  (let* ((gpg-uid (egg-log-msg-gpg-uid))
+	 (new-uid (if gpg-uid 
+		      "None"
+		    (read-string "Sign with gpg key uid: " (egg-user-name))))
+	 (inhibit-read-only t))
+    (egg-log-msg-set-gpg-uid (if gpg-uid nil new-uid))
+    (save-excursion
+      (save-match-data
+	(goto-char (point-min))
+	(re-search-forward "^GPG-Signed by: \\(.+\\)$" (egg-log-msg-text-beg))
+	(replace-match (egg-text new-uid 'egg-text-2) nil t nil 1)
+	(set-buffer-modified-p nil)))))
+
+(defun egg-log-msg-done (level)
+  "Take action with the composed message.
+This usually means calling the lambda returned from (egg-log-msg-func)
+with the appropriate arguments."
+  (interactive "p")
+  (widen)
+  (let* ((text-beg (egg-log-msg-text-beg))
+	 (text-end (egg-log-msg-text-end))
+	 (diff-beg (egg-log-msg-next-beg)))
+  (goto-char text-beg)
+  (if (save-excursion (re-search-forward "\\sw\\|\\-" text-end t))
+      (when (functionp (egg-log-msg-func))
+        (ring-insert egg-log-msg-ring
+                     (buffer-substring-no-properties text-beg text-end))
+        (save-excursion (egg-log-msg-apply-closure level))
+        (let ((inhibit-read-only t)
+              (win (get-buffer-window (current-buffer))))
+          (erase-buffer)
+          (kill-buffer)))
+    (message "Please enter a log message!")
+    (ding))))
+
+(defun egg-log-msg-cancel ()
+  "Cancel the current message editing."
+  (interactive)
+  (kill-buffer))
+
+(defun egg-log-msg-hist-cycle (&optional forward)
+  "Cycle through message log history."
+  (let* ((len (ring-length egg-log-msg-ring))
+	 (closure egg-log-msg-closure)
+	 (text-beg (nth 2 closure))
+	 (text-end (nth 3 closure)))
+    (cond ((<= len 0)
+           ;; no history
+           (message "No previous log message.")
+           (ding))
+          ;; don't accidentally throw away unsaved text
+          ((and  (null egg-log-msg-ring-idx)
+                 (> text-end text-beg)
+                 (not (y-or-n-p "throw away current text? "))))
+          ;; do it
+          (t (delete-region text-beg text-end)
+             (setq egg-log-msg-ring-idx
+                   (if (null egg-log-msg-ring-idx)
+                       (if forward
+                           ;; 1st-time + fwd = oldest
+                           (ring-minus1 0 len)
+                         ;; 1st-time + bwd = newest
+                         0)
+                     (if forward
+                         ;; newer
+                         (ring-minus1 egg-log-msg-ring-idx len)
+                       ;; older
+                       (ring-plus1 egg-log-msg-ring-idx len))))
+             (goto-char text-beg)
+             (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx))))))
+
+(defun egg-log-msg-older-text ()
+  "Cycle backward through comment history."
+  (interactive)
+  (egg-log-msg-hist-cycle))
+
+(defun egg-log-msg-newer-text ()
+  "Cycle forward through comment history."
+  (interactive)
+  (egg-log-msg-hist-cycle t))
+
+(defun egg-commit-log-buffer-show-diffs (buf &optional init diff-beg)
+  "Show the diff sections in the commit buffer.
+See `egg-commit-buffer-sections'"
+  (with-current-buffer buf
+    (let* ((inhibit-read-only t)
+	   (diff-beg (or diff-beg (egg-log-msg-next-beg)))
+	   beg)
+      (egg-save-section-visibility)
+      (goto-char diff-beg)
+      (delete-region (point) (point-max))
+      (setq beg (point))
+
+      (dolist (sect egg-commit-buffer-sections)
+        (cond ((eq sect 'staged)
+               (egg-sb-insert-staged-section "Changes to Commit:" "--stat"))
+              ((eq sect 'unstaged)
+               (egg-sb-insert-unstaged-section "Deferred Changes:"))
+              ((eq sect 'untracked)
+               (egg-sb-insert-untracked-section))))
+      (egg-calculate-hunk-ranges)
+      (put-text-property beg (point) 'read-only t)
+      (put-text-property beg (point) 'front-sticky nil)
+      (if init (egg-buffer-maybe-hide-all))
+      (egg-restore-section-visibility)
+      (force-window-update buf))))
+
+(define-egg-buffer commit "*%s-commit@%s*"
+  (egg-log-msg-mode)
+  (setq major-mode 'egg-commit-buffer-mode
+        mode-name "Egg-Commit"
+        mode-line-process "")
+  (set (make-local-variable 'egg-buffer-refresh-func)
+       'egg-commit-log-buffer-show-diffs)
+  (setq buffer-invisibility-spec nil)
+  (run-mode-hooks 'egg-commit-buffer-mode-hook))
+
+(defun egg-commit-log-edit (title-function
+                            action-closure
+                            insert-init-text-function &optional amend-no-msg)
+  "Open the commit buffer for composing a message.
+With C-u prefix, the message will be use to amend the last commit.
+With C-u C-u prefix, just amend the last commit with the old message.
+For non interactive use:
+TITLE-FUNCTION is either a string describing the text to compose or
+a function return a string for the same purpose.
+ACTION-CLOSURE is the input to build `egg-log-msg-closure'. It should
+be the results of `egg-log-msg-mk-closure-from-input'.
+INSERT-INIT-TEXT-FUNCTION is either a string or function returning a string
+describing the initial text in the editing area.
+if AMEND-NO-MSG is non-nil, the do nothing but amending the last commit
+using git's default msg."
+  (interactive (let ((prefix (prefix-numeric-value current-prefix-arg)))
+		 (cond ((> prefix 15)	;; C-u C-u
+			;; only set amend-no-msg
+			(list nil nil nil t))
+		       ((> prefix 3)	;; C-u
+			(list (concat
+			       (egg-text "Amending  " 'egg-text-3)
+			       (egg-text (egg-pretty-head-name) 'egg-branch))
+			      (egg-log-msg-mk-closure-input #'egg-log-msg-amend-commit)
+			      (egg-commit-message "HEAD")))
+		       (t 		;; regular commit
+			(list (concat
+				 (egg-text "Committing into  " 'egg-text-3)
+				 (egg-text (egg-pretty-head-name) 'egg-branch))
+				(egg-log-msg-mk-closure-input #'egg-log-msg-commit)
+				nil)))))
+  (if amend-no-msg
+      (egg-buffer-do-amend-no-edit)
+    (let* ((git-dir (egg-git-dir))
+	   (default-directory (egg-work-tree-dir git-dir))
+	   (buf (egg-get-commit-buffer 'create))
+	   (state (egg-repo-state :name :email))
+	   (head-info (egg-head))
+	   (head (or (cdr head-info)
+		     (format "Detached HEAD! (%s)" (car head-info))))
+	   (inhibit-read-only inhibit-read-only)
+	   text-beg text-end diff-beg)
+      (with-current-buffer buf
+	(setq inhibit-read-only t)
+	(erase-buffer)
+
+	(insert (cond ((functionp title-function)
+		       (funcall title-function state))
+		      ((stringp title-function) title-function)
+		      (t "Shit happens!"))
+		"\n"
+		(egg-text "Repository: " 'egg-text-1) 
+		(egg-text git-dir 'font-lock-constant-face) "\n"
+		(egg-text "Committer: " 'egg-text-1) 
+		(egg-text (plist-get state :name) 'egg-text-2) " "
+		(egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
+		(egg-text "GPG-Signed by: " 'egg-text-1)
+		(egg-text "None" 'egg-text-2) "\n"
+		(egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` to cancel) -"
+			  'font-lock-comment-face))
+	(put-text-property (point-min) (point) 'read-only t)
+	(put-text-property (point-min) (point) 'rear-sticky nil)
+	(insert "\n")
+
+	(setq text-beg (point-marker))
+	(set-marker-insertion-type text-beg nil)
+	(put-text-property (1- text-beg) text-beg :navigation 'commit-log-text)
+	
+	(insert (egg-prop "\n------------------------ End of Commit Message ------------------------"
+			  'read-only t 'front-sticky nil
+			  'face 'font-lock-comment-face))
+	
+	(setq diff-beg (point-marker))
+	(set-marker-insertion-type diff-beg nil)
+	(egg-commit-log-buffer-show-diffs buf 'init diff-beg)
+
+	(goto-char text-beg)
+	(cond ((functionp insert-init-text-function)
+	       (funcall insert-init-text-function))
+	      ((stringp insert-init-text-function)
+	       (insert insert-init-text-function)))
+
+	(setq text-end (point-marker))
+	(set-marker-insertion-type text-end t)
+
+	(set (make-local-variable 'egg-log-msg-closure)
+	     (egg-log-msg-mk-closure-from-input action-closure 
+						nil nil text-beg text-end diff-beg)))
+      (pop-to-buffer buf))))
+
+;;;========================================================
 ;;; action
 ;;;========================================================
 
@@ -3173,288 +3455,6 @@ perform the indicated rebase action."
       (setq modified-files (egg-git-to-lines "diff" "--name-only" pre-merge))
       (when (consp cmd-res) (plist-put cmd-res :files modified-files))
       (egg--buffer-handle-result cmd-res t current-action))))
-
-;;;========================================================
-;;; log message
-;;;========================================================
-
-(require 'derived)
-(require 'ring)
-
-(defvar egg-log-msg-ring (make-ring 32))
-(defvar egg-log-msg-ring-idx nil)
-
-(defvar egg-log-msg-closure nil 
-  "Closure for be called when done composing a message.
-It must be a local variable in the msg buffer. It's a list
-in the form (func arg1 arg2 arg3...).
-
-func should be a function expecting the following args:
-PREFIX-LEVEL the prefix argument converted to a number.
-BEG a marker for the beginning of the composed text.
-END a marker for the end of the composed text.
-NEXT-BEG is a marker for the beginnning the next section.
-ARG1 ARG2 ARG3... are the items composing the closure
-when the buffer was created.")
-
-(defsubst egg-log-msg-func () (car egg-log-msg-closure))
-(defsubst egg-log-msg-args () (cdr egg-log-msg-closure))
-(defsubst egg-log-msg-prefix () (nth 0 (egg-log-msg-args)))
-(defsubst egg-log-msg-gpg-uid () (nth 1 (egg-log-msg-args)))
-(defsubst egg-log-msg-text-beg () (nth 2 (egg-log-msg-args)))
-(defsubst egg-log-msg-text-end () (nth 3 (egg-log-msg-args)))
-(defsubst egg-log-msg-next-beg () (nth 4 (egg-log-msg-args)))
-(defsubst egg-log-msg-extras () (nthcdr 5 (egg-log-msg-args)))
-(defsubst egg-log-msg-set-prefix (prefix) (setcar (egg-log-msg-args) prefix))
-(defsubst egg-log-msg-set-gpg-uid (uid) (setcar (cdr (egg-log-msg-args)) uid))
-(defsubst egg-log-msg-mk-closure-input (func &rest args)
-  (cons func args))
-(defsubst egg-log-msg-mk-closure-from-input (input gpg-uid prefix beg end next)
-  (cons (car input) (nconc (list prefix gpg-uid beg end next) (cdr input))))
-(defsubst egg-log-msg-apply-closure (prefix) 
-  (egg-log-msg-set-prefix prefix)
-  (apply (egg-log-msg-func) (egg-log-msg-args)))
-
-
-(define-derived-mode egg-log-msg-mode text-mode "Egg-LogMsg"
-  "Major mode for editing Git log message.\n\n
-\{egg-log-msg-mode-map}."
-  (setq default-directory (egg-work-tree-dir))
-  (set (make-local-variable 'egg-log-msg-closure) nil)
-  (set (make-local-variable 'egg-log-msg-ring-idx) nil))
-
-(define-key egg-log-msg-mode-map (kbd "C-c C-c") 'egg-log-msg-done)
-(define-key egg-log-msg-mode-map (kbd "C-c C-k") 'egg-log-msg-cancel)
-(define-key egg-log-msg-mode-map (kbd "C-c C-s") 'egg-log-msg-buffer-toggle-signed)
-(define-key egg-log-msg-mode-map (kbd "M-p") 'egg-log-msg-older-text)
-(define-key egg-log-msg-mode-map (kbd "M-n") 'egg-log-msg-newer-text)
-(define-key egg-log-msg-mode-map (kbd "C-l") 'egg-buffer-cmd-refresh)
-
-(defsubst egg-log-msg-commit (prefix gpg-uid text-beg text-end &rest ignored)
-  "Commit the index using the text between TEXT-BEG and TEXT-END as message.
-PREFIX and IGNORED are ignored."
-  (egg-cleanup-n-commit-msg (if gpg-uid
-				#'egg--async-create-signed-commit-cmd
-			      #'egg--git-commit-with-region-cmd)
-			    text-beg text-end gpg-uid))
-
-(defsubst egg-log-msg-amend-commit (prefix gpg-uid text-beg text-end &rest ignored)
-  "Amend the last commit with the index using the text between TEXT-BEG and TEXT-END
-as message. PREFIX and IGNORED are ignored."
-  (egg-cleanup-n-commit-msg (if gpg-uid
-				#'egg--async-create-signed-commit-cmd
-			      #'egg--git-commit-with-region-cmd)
-			    text-beg text-end gpg-uid "--amend"))
-
-(defun egg-log-msg-buffer-toggle-signed ()
-  "Toggle the to-be-gpg-signed state of the message being composed."
-  (interactive)
-  (let* ((gpg-uid (egg-log-msg-gpg-uid))
-	 (new-uid (if gpg-uid 
-		      "None"
-		    (read-string "Sign with gpg key uid: " (egg-user-name))))
-	 (inhibit-read-only t))
-    (egg-log-msg-set-gpg-uid (if gpg-uid nil new-uid))
-    (save-excursion
-      (save-match-data
-	(goto-char (point-min))
-	(re-search-forward "^GPG-Signed by: \\(.+\\)$" (egg-log-msg-text-beg))
-	(replace-match (egg-text new-uid 'egg-text-2) nil t nil 1)
-	(set-buffer-modified-p nil)))))
-
-(defun egg-log-msg-done (level)
-  "Take action with the composed message.
-This usually means calling the lambda returned from (egg-log-msg-func)
-with the appropriate arguments."
-  (interactive "p")
-  (widen)
-  (let* ((text-beg (egg-log-msg-text-beg))
-	 (text-end (egg-log-msg-text-end))
-	 (diff-beg (egg-log-msg-next-beg)))
-  (goto-char text-beg)
-  (if (save-excursion (re-search-forward "\\sw\\|\\-" text-end t))
-      (when (functionp (egg-log-msg-func))
-        (ring-insert egg-log-msg-ring
-                     (buffer-substring-no-properties text-beg text-end))
-        (save-excursion (egg-log-msg-apply-closure level))
-        (let ((inhibit-read-only t)
-              (win (get-buffer-window (current-buffer))))
-          (erase-buffer)
-          (kill-buffer)))
-    (message "Please enter a log message!")
-    (ding))))
-
-(defun egg-log-msg-cancel ()
-  "Cancel the current message editing."
-  (interactive)
-  (kill-buffer))
-
-(defun egg-log-msg-hist-cycle (&optional forward)
-  "Cycle through message log history."
-  (let* ((len (ring-length egg-log-msg-ring))
-	 (closure egg-log-msg-closure)
-	 (text-beg (nth 2 closure))
-	 (text-end (nth 3 closure)))
-    (cond ((<= len 0)
-           ;; no history
-           (message "No previous log message.")
-           (ding))
-          ;; don't accidentally throw away unsaved text
-          ((and  (null egg-log-msg-ring-idx)
-                 (> text-end text-beg)
-                 (not (y-or-n-p "throw away current text? "))))
-          ;; do it
-          (t (delete-region text-beg text-end)
-             (setq egg-log-msg-ring-idx
-                   (if (null egg-log-msg-ring-idx)
-                       (if forward
-                           ;; 1st-time + fwd = oldest
-                           (ring-minus1 0 len)
-                         ;; 1st-time + bwd = newest
-                         0)
-                     (if forward
-                         ;; newer
-                         (ring-minus1 egg-log-msg-ring-idx len)
-                       ;; older
-                       (ring-plus1 egg-log-msg-ring-idx len))))
-             (goto-char text-beg)
-             (insert (ring-ref egg-log-msg-ring egg-log-msg-ring-idx))))))
-
-(defun egg-log-msg-older-text ()
-  "Cycle backward through comment history."
-  (interactive)
-  (egg-log-msg-hist-cycle))
-
-(defun egg-log-msg-newer-text ()
-  "Cycle forward through comment history."
-  (interactive)
-  (egg-log-msg-hist-cycle t))
-
-(defun egg-commit-log-buffer-show-diffs (buf &optional init diff-beg)
-  "Show the diff sections in the commit buffer.
-See `egg-commit-buffer-sections'"
-  (with-current-buffer buf
-    (let* ((inhibit-read-only t)
-	   (diff-beg (or diff-beg (egg-log-msg-next-beg)))
-	   beg)
-      (egg-save-section-visibility)
-      (goto-char diff-beg)
-      (delete-region (point) (point-max))
-      (setq beg (point))
-
-      (dolist (sect egg-commit-buffer-sections)
-        (cond ((eq sect 'staged)
-               (egg-sb-insert-staged-section "Changes to Commit:" "--stat"))
-              ((eq sect 'unstaged)
-               (egg-sb-insert-unstaged-section "Deferred Changes:"))
-              ((eq sect 'untracked)
-               (egg-sb-insert-untracked-section))))
-      (egg-calculate-hunk-ranges)
-      (put-text-property beg (point) 'read-only t)
-      (put-text-property beg (point) 'front-sticky nil)
-      (if init (egg-buffer-maybe-hide-all))
-      (egg-restore-section-visibility)
-      (force-window-update buf))))
-
-(define-egg-buffer commit "*%s-commit@%s*"
-  (egg-log-msg-mode)
-  (setq major-mode 'egg-commit-buffer-mode
-        mode-name "Egg-Commit"
-        mode-line-process "")
-  (set (make-local-variable 'egg-buffer-refresh-func)
-       'egg-commit-log-buffer-show-diffs)
-  (setq buffer-invisibility-spec nil)
-  (run-mode-hooks 'egg-commit-buffer-mode-hook))
-
-(defun egg-commit-log-edit (title-function
-                            action-closure
-                            insert-init-text-function &optional amend-no-msg)
-  "Open the commit buffer for composing a message.
-With C-u prefix, the message will be use to amend the last commit.
-With C-u C-u prefix, just amend the last commit with the old message.
-For non interactive use:
-TITLE-FUNCTION is either a string describing the text to compose or
-a function return a string for the same purpose.
-ACTION-CLOSURE is the input to build `egg-log-msg-closure'. It should
-be the results of `egg-log-msg-mk-closure-from-input'.
-INSERT-INIT-TEXT-FUNCTION is either a string or function returning a string
-describing the initial text in the editing area.
-if AMEND-NO-MSG is non-nil, the do nothing but amending the last commit
-using git's default msg."
-  (interactive (let ((prefix (prefix-numeric-value current-prefix-arg)))
-		 (cond ((> prefix 15)	;; C-u C-u
-			;; only set amend-no-msg
-			(list nil nil nil t))
-		       ((> prefix 3)	;; C-u
-			(list (concat
-			       (egg-text "Amending  " 'egg-text-3)
-			       (egg-text (egg-pretty-head-name) 'egg-branch))
-			      (egg-log-msg-mk-closure-input #'egg-log-msg-amend-commit)
-			      (egg-commit-message "HEAD")))
-		       (t 		;; regular commit
-			(list (concat
-				 (egg-text "Committing into  " 'egg-text-3)
-				 (egg-text (egg-pretty-head-name) 'egg-branch))
-				(egg-log-msg-mk-closure-input #'egg-log-msg-commit)
-				nil)))))
-  (if amend-no-msg
-      (egg-buffer-do-amend-no-edit)
-    (let* ((git-dir (egg-git-dir))
-	   (default-directory (egg-work-tree-dir git-dir))
-	   (buf (egg-get-commit-buffer 'create))
-	   (state (egg-repo-state :name :email))
-	   (head-info (egg-head))
-	   (head (or (cdr head-info)
-		     (format "Detached HEAD! (%s)" (car head-info))))
-	   (inhibit-read-only inhibit-read-only)
-	   text-beg text-end diff-beg)
-      (with-current-buffer buf
-	(setq inhibit-read-only t)
-	(erase-buffer)
-
-	(insert (cond ((functionp title-function)
-		       (funcall title-function state))
-		      ((stringp title-function) title-function)
-		      (t "Shit happens!"))
-		"\n"
-		(egg-text "Repository: " 'egg-text-1) 
-		(egg-text git-dir 'font-lock-constant-face) "\n"
-		(egg-text "Committer: " 'egg-text-1) 
-		(egg-text (plist-get state :name) 'egg-text-2) " "
-		(egg-text (concat "<" (plist-get state :email) ">") 'egg-text-2) "\n"
-		(egg-text "GPG-Signed by: " 'egg-text-1)
-		(egg-text "None" 'egg-text-2) "\n"
-		(egg-text "-- Commit Message (type `C-c C-c` when done or `C-c C-k` to cancel) -"
-			  'font-lock-comment-face))
-	(put-text-property (point-min) (point) 'read-only t)
-	(put-text-property (point-min) (point) 'rear-sticky nil)
-	(insert "\n")
-
-	(setq text-beg (point-marker))
-	(set-marker-insertion-type text-beg nil)
-	(put-text-property (1- text-beg) text-beg :navigation 'commit-log-text)
-	
-	(insert (egg-prop "\n------------------------ End of Commit Message ------------------------"
-			  'read-only t 'front-sticky nil
-			  'face 'font-lock-comment-face))
-	
-	(setq diff-beg (point-marker))
-	(set-marker-insertion-type diff-beg nil)
-	(egg-commit-log-buffer-show-diffs buf 'init diff-beg)
-
-	(goto-char text-beg)
-	(cond ((functionp insert-init-text-function)
-	       (funcall insert-init-text-function))
-	      ((stringp insert-init-text-function)
-	       (insert insert-init-text-function)))
-
-	(setq text-end (point-marker))
-	(set-marker-insertion-type text-end t)
-
-	(set (make-local-variable 'egg-log-msg-closure)
-	     (egg-log-msg-mk-closure-from-input action-closure 
-						nil nil text-beg text-end diff-beg)))
-      (pop-to-buffer buf))))
 
 ;;;========================================================
 ;;; diff-mode

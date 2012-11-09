@@ -83,7 +83,7 @@ if DONE then stops the loop and return DONE.
 ;; avoid cl
 (defsubst subseq (seq start &optional end) (edmacro-subseq seq start end))
 
-(defun find-if (predicate seq)
+(defun egg-find-if (predicate seq)
   (dolist-done (item seq found)
     (when (funcall predicate item)
       (setq found item))))
