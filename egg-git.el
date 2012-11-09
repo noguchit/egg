@@ -32,116 +32,188 @@
 (require 'egg-custom)
 (require 'egg-base)
 
-(defsubst egg-git-ok (buffer &rest args)
+(defvar egg--internal-index-file nil)
+
+(defsubst egg--git (buffer &rest args)
   "run GIT with ARGS and insert output into BUFFER at point.
 return the t if the exit-code was 0. if BUFFER was t then
 current-buffer would be used."
   (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+
+(defsubst egg--git-args (buffer args)
+  "run GIT with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
+  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+
+(defsubst egg--git-region (start end &rest args)
+  "run GIT with ARGS and insert output into current buffer at point.
+return the t if the exit-code was 0. The text between START and END
+is used as input to GIT."
+  (= (apply 'call-process-region start end egg-git-command t t nil args) 0))
+
+(defsubst egg--git-region-args (start end args)
+  "run GIT with ARGS and insert output into current buffer at point.
+return the t if the exit-code was 0. The text between START and END
+is used as input to GIT."
+  (= (apply 'call-process-region start end egg-git-command t t nil args) 0))
+
+(defsubst egg--git-check-index ()
+  (if egg--internal-index-file
+      (setenv-internal (copy-sequence process-environment)
+		       "GIT_INDEX_FILE" egg--internal-index-file nil)
+    process-environment))
+
+(defmacro with-egg-index (&rest body)
+  (declare (indent 0) (debug t))
+  `(let ((process-environment (egg--git-check-index)))
+     ,@body))
+
+
+(defsubst egg-git-ok (buffer &rest args)
+  "run GIT with ARGS and insert output into BUFFER at point.
+return the t if the exit-code was 0. if BUFFER was t then
+current-buffer would be used."
+  (with-egg-index (egg--git-args buffer args)))
 
 (defsubst egg-git-ok-args (buffer args)
   "run GIT with ARGS and insert output into BUFFER at point.
 return the t if the exit-code was 0. if BUFFER was t then
 current-buffer would be used."
-  (= (apply 'call-process egg-git-command nil buffer nil args) 0))
+  (with-egg-index (egg--git-args buffer args)))
 
+(defsubst egg-git-region-ok (start end &rest args)
+  "run GIT with ARGS and insert output into current buffer at point.
+return the t if the exit-code was 0. The text between START and END
+is used as input to GIT."
+  (with-egg-index (egg--git-region-args start end args)))
 
+(defsubst egg-git-region-ok-args (start end args)
+  "run GIT with ARGS and insert output into current buffer at point.
+return the t if the exit-code was 0. The text between START and END
+is used as input to GIT."
+  (with-egg-index (egg--git-region-args start end args)))
 
 (defsubst egg-commit-contents (rev)
   "Retrieve the raw-contents of the commit REV."
   (with-temp-buffer
-    (call-process egg-git-command nil t nil "cat-file" "commit" rev)
-    (buffer-string)))
+    (when (egg--git t "cat-file" "commit" rev)
+      (buffer-string))))
 
 (defsubst egg-commit-message (rev)
   "Retrieve the commit message of REV."
   (save-match-data
     (with-temp-buffer
-      (call-process egg-git-command nil t nil "cat-file" "commit" rev)
-      (goto-char (point-min))
-      (re-search-forward "^\n")
-      (buffer-substring-no-properties (match-end 0) (point-max)))))
+      (when (egg--git t "cat-file" "commit" rev)
+	(goto-char (point-min))
+	(re-search-forward "^\n")
+	(buffer-substring-no-properties (match-end 0) (point-max))))))
 
 (defun egg-commit-subject (rev)
   "Retrieve the commit subject of REV."
   (save-match-data
     (with-temp-buffer
-      (call-process egg-git-command nil t nil "cat-file" "commit" rev)
-      (goto-char (point-min))
-      (re-search-forward "^\n")
-      (buffer-substring-no-properties (match-end 0)
-				      (if (or (re-search-forward "\n\n" nil t)
-					      (re-search-forward "\n" nil t))
-					  (match-beginning 0)
-					(point-max))))))
+      (when (egg--git t "cat-file" "commit" rev)
+	(goto-char (point-min))
+	(re-search-forward "^\n")
+	(buffer-substring-no-properties (match-end 0)
+					(if (or (re-search-forward "\n\n" nil t)
+						(re-search-forward "\n" nil t))
+					    (match-beginning 0)
+					  (point-max)))))))
 
 (defsubst egg-cmd-to-string-1 (program args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
   (with-temp-buffer
-    (if (= (apply 'call-process program nil t nil args) 0)
-        (buffer-substring-no-properties
-         (point-min) (if (> (point-max) (point-min))
-                         (1- (point-max)) (point-max))))))
+    (when (= (apply 'call-process program nil t nil args) 0)
+      (buffer-substring-no-properties
+       (point-min) (if (> (point-max) (point-min))
+		       (1- (point-max)) (point-max))))))
 
 (defsubst egg-cmd-to-string (program &rest args)
   "Execute PROGRAM and return its output as a string.
 ARGS is a list of arguments to pass to PROGRAM."
   (egg-cmd-to-string-1 program args))
 
+(defsubst egg-git-to-string-args (args)
+  "run GIT wih ARGS and return the output as a string."
+  (with-temp-buffer
+    (when (egg-git-ok-args t args)
+      (buffer-substring-no-properties
+       (point-min) (if (> (point-max) (point-min))
+		       (1- (point-max))
+		     (point-max))))))
+
+(defsubst egg--git-to-string-args (args)
+  "run GIT wih ARGS and return the output as a string."
+  (with-temp-buffer
+    (when (egg--git-args t args)
+      (buffer-substring-no-properties
+       (point-min) (if (> (point-max) (point-min))
+		       (1- (point-max))
+		     (point-max))))))
 
 (defsubst egg-git-to-string (&rest args)
   "run GIT wih ARGS and return the output as a string."
-  (egg-cmd-to-string-1 egg-git-command args))
+  (egg-git-to-string-args args))
+
+(defsubst egg--git-to-string (&rest args)
+  "run GIT wih ARGS and return the output as a string."
+  (egg--git-to-string-args args))
 
 (defun egg-git-show-file-args (buffer file rev args)
   (let* ((mode (assoc-default file auto-mode-alist 'string-match))
 	 (extras (and mode (assoc-default mode egg-git-diff-file-options-alist 'eq))))
-    (egg-git-ok-args buffer (append (list "--no-pager" "show")
-				    extras
-				    args
-				    (list rev "--" file)))))
+    (egg--git-args buffer (append (list "--no-pager" "show")
+				  extras
+				  args
+				  (list rev "--" file)))))
 
 (defsubst egg-git-show-file (buffer file rev &rest args)
   (egg-git-show-file-args buffer file rev args))
-
-(defsubst egg-git-region-ok (start end &rest args)
-  "run GIT with ARGS and insert output into current buffer at point.
-return the t if the exit-code was 0. The text between START and END
-is used as input to GIT."
-  (= (apply 'call-process-region start end egg-git-command t t nil args) 0))
 
 (defsubst egg-wdir-clean () (egg-git-ok nil "diff" "--quiet"))
 (defsubst egg-file-updated (file)
   (egg-git-ok nil "diff" "--quiet" "--" file))
 (defsubst egg-file-committed (file)
-  (egg-git-ok nil "diff" "--quiet" "HEAD" "--" file))
+  (egg--git nil "diff" "--quiet" "HEAD" "--" file))
 (defsubst egg-file-index-empty (file)
   (egg-git-ok nil "diff" "--quiet" "--cached" "--" file))
 (defsubst egg-index-empty () (egg-git-ok nil "diff" "--cached" "--quiet"))
 
 (defsubst egg-has-stashed-wip ()
-  (egg-git-ok nil "rev-parse" "--verify" "-q" "stash@{0}"))
-
+  (egg--git nil "rev-parse" "--verify" "-q" "stash@{0}"))
 
 (defsubst egg-git-to-lines (&rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (save-match-data
-    (split-string (or (egg-cmd-to-string-1 egg-git-command args) "")
-                  "[\n]+" t)))
+    (split-string (or (egg-git-to-string-args args) "") "[\n]+" t)))
+
+(defsubst egg--git-to-lines (&rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
+  (save-match-data
+    (split-string (or (egg--git-to-string-args args) "") "[\n]+" t)))
 
 (defsubst egg-git-to-string-list (&rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (save-match-data
-    (split-string (or (egg-cmd-to-string-1 egg-git-command args) "")
-                  "[\n\t ]+" t)))
+    (split-string (or (egg-git-to-string-args args) "") "[\n\t ]+" t)))
+
+(defsubst egg--git-to-string-list (&rest args)
+  "run GIT with ARGS.
+Return the output lines as a list of strings."
+  (save-match-data
+    (split-string (or (egg--git-to-string-args args) "") "[\n\t ]+" t)))
 
 (defun egg-git-lines-matching (re idx &rest args)
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (with-temp-buffer
-    (when (= (apply 'call-process egg-git-command nil t nil args) 0)
+    (when (egg-git-ok-args t args)
       (let (lines)
         (save-match-data
           (goto-char (point-min))
@@ -156,8 +228,7 @@ Return the output lines as a list of strings."
     (let (lines pos)
       (insert stdin)
       (setq pos (point-max))
-      (when (= (apply 'call-process-region (point-min) (point-max)
-		      egg-git-command nil t nil args) 0)
+      (when (egg-git-region-ok-args (point-min) (point-max) args)
         (save-match-data
           (goto-char pos)
           (while (re-search-forward re nil t)
@@ -168,7 +239,7 @@ Return the output lines as a list of strings."
   "run GIT with ARGS.
 Return the output lines as a list of strings."
   (with-temp-buffer
-    (when (= (apply 'call-process egg-git-command nil t nil args) 0)
+    (when (egg-git-ok-args t args)
       (let (lines matches)
         (save-match-data
           (goto-char (point-min))
@@ -184,7 +255,7 @@ Return the output lines as a list of strings."
 
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
-  (car (egg-git-to-lines "ls-files" "--full-name" "--" file)))
+  (car (egg--git-to-lines "ls-files" "--full-name" "--" file)))
 
 (defsubst egg-buf-git-name (&optional buf)
   "return the repo-relative name of the file visited by BUF.
@@ -194,7 +265,7 @@ if BUF was nil then use current-buffer"
 (defsubst egg-files-git-name (files)
   "return the repo-relative name for each file in the list of files FILES."
   (delete-dups
-   (apply 'egg-git-to-lines "ls-files" "--full-name" "--" files)))
+   (apply 'egg--git-to-lines "ls-files" "--full-name" "--" files)))
 
 (defsubst egg-unmerged-files ()
   "return a list of repo-relative names for each unmerged files."
@@ -247,15 +318,15 @@ if BUF was nil then use current-buffer"
 
 (defsubst egg-local-branches ()
   "Get a list of local branches. E.g. (\"master\", \"wip1\")."
-  (egg-git-to-lines "rev-parse" "--symbolic" "--branches"))
+  (egg--git-to-lines "rev-parse" "--symbolic" "--branches"))
 
 (defsubst egg-local-refs ()
   "Get a list of local refs. E.g. (\"master\", \"wip1\")."
-  (egg-git-to-lines "rev-parse" "--symbolic" "--branches" "--tags"))
+  (egg--git-to-lines "rev-parse" "--symbolic" "--branches" "--tags"))
 
 (defun egg-remote-branches (&optional raw)
   "Get a list of remote branches. E.g. (\"origin/master\", \"joe/fork1\")."
-  (let ((lst (egg-git-to-lines "rev-parse" "--symbolic" "--remotes")))
+  (let ((lst (egg--git-to-lines "rev-parse" "--symbolic" "--remotes")))
     (if raw lst
       (mapcar (lambda (full-name)
                 (let ((tmp (save-match-data (split-string full-name "/"))))
@@ -263,7 +334,7 @@ if BUF was nil then use current-buffer"
               lst))))
 
 (defun egg-upstream (branch)
-  (and (egg-git-ok nil "config" (concat "branch." branch ".merge"))
+  (and (egg--git nil "config" (concat "branch." branch ".merge"))
        (let ((upstream (egg-git-to-string "name-rev" "--name-only" 
 					  (concat branch "@{upstream}"))))
 	 (if (and (> (length upstream) 8)
@@ -278,7 +349,7 @@ if BUF was nil then use current-buffer"
 
 (defsubst egg-is-in-git ()
   "is the default-directory in a git repo."
-  (= (call-process egg-git-command nil nil nil "rev-parse" "--git-dir") 0))
+  (egg--git nil "rev-parse" "--git-dir"))
 
 (defsubst egg-is-dir-in-git (dir)
   "is DIR in a git repo."
@@ -286,7 +357,7 @@ if BUF was nil then use current-buffer"
 
 (defsubst egg-name-rev (rev)
   "get the symbolic name of REV."
-  (egg-git-to-string "name-rev" "--always" "--name-only" rev))
+  (egg--git-to-string "name-rev" "--always" "--name-only" rev))
 
 (defun egg-pretty-short-rev (rev)
   (let ((rev (egg-name-rev rev))
@@ -304,15 +375,15 @@ if BUF was nil then use current-buffer"
 
 (defsubst egg-describe-rev (rev)
   "get the long symbolic name of REV."
-  (egg-git-to-string "describe" "--always" "--tags" rev))
+  (egg--git-to-string "describe" "--always" "--tags" rev))
 
 (defsubst egg-sha1 (rev)
   "get the SHA1 of REV."
-  (egg-git-to-string "rev-parse" (concat rev "~0")))
+  (egg--git-to-string "rev-parse" (concat rev "~0")))
 
 (defun egg-completing-read-sha1 (from prompt &optional default max-back)
   (let* ((max-count (or max-back 100))
-	 (sha1-list (egg-git-to-lines "rev-list" "--topo-order"
+	 (sha1-list (egg--git-to-lines "rev-list" "--topo-order"
 				      (format "--max-count=%d" max-count)
 				      "--abbrev-commit" 
 				     from))
@@ -324,7 +395,7 @@ if BUF was nil then use current-buffer"
   (let* ((dotgit-parent (locate-dominating-file default-directory ".git"))
 	 (dotgit (and dotgit-parent (concat dotgit-parent "/.git")))
          (dir (or (and dotgit (file-directory-p dotgit) dotgit)
-		  (egg-git-to-string "rev-parse" "--git-dir")))
+		  (egg--git-to-string "rev-parse" "--git-dir")))
 	 (work-tree dotgit-parent))
     (when (stringp dir)
       (setq dir (expand-file-name dir))
@@ -379,7 +450,7 @@ if BUF was nil then use current-buffer"
   (let ((default-directory (egg-work-tree-dir))
 	parents)
     (with-temp-buffer
-      (egg-git-ok t "--no-pager" "cat-file" "-p" rev)
+      (egg--git t "--no-pager" "cat-file" "-p" rev)
       (goto-char (point-min))
       (while (re-search-forward (rx line-start 
 				    "parent " (group (= 40 hex-digit)) 
@@ -894,7 +965,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; rev^, rev~10 etc.
           ((string-match "[\\^~][\\^~0-9]*\\'" string)
            ;; check with rev-parse
-           (if (egg-git-ok nil "rev-parse" string)
+           (if (egg--git nil "rev-parse" string)
                ;; rev-parse ok
                (if all
                    ;; fixme: how to do a full expansion?
@@ -1182,10 +1253,11 @@ See also `with-temp-file' and `with-output-to-string'."
 See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))  
   `(with-current-buffer (egg--do-output t)
-     (setq default-directory (egg-work-tree-dir))
-     (unwind-protect
-	 (progn ,@body)
-       )))
+     (let ((process-environment (egg--git-check-index)))
+       (setq default-directory (egg-work-tree-dir))
+       (unwind-protect
+	   (progn ,@body)
+	 ))))
 
 (defun egg--do (stdin program args)
   "Run PROGRAM with ARGS synchronously using STDIN as starndard input.
@@ -2009,10 +2081,10 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 
 
 (defsubst egg-list-stash (&optional ignored)
-  (egg-git-ok t "stash" "list"))
+  (egg--git t "stash" "list"))
 
 (defun egg-run-git-log (ref &optional git-log-extra-options paths)
-  (egg-git-ok-args 
+  (egg--git-args 
    t (nconc (list "--no-pager" "log"
 		  "--pretty=oneline"
 		  "--decorate=full"

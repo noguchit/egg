@@ -147,7 +147,7 @@
       (unless (string-equal (buffer-name) new-buf-name)
 	(rename-buffer new-buf-name))
       (erase-buffer)
-      (unless (egg-git-ok t "show" "-s" tag)
+      (unless (egg--git t "show" "-s" tag)
 	(error "Failed to show tag %s" tag))
       (save-match-data
 	(goto-char (point-min))
@@ -165,7 +165,7 @@
 	  (goto-char sig-beg)
 	  (delete-region sig-beg sig-end)
 	  (with-temp-buffer
-	    (egg-git-ok t "tag" "-v" tag)
+	    (egg--git t "tag" "-v" tag)
 	    (goto-char (point-min))
 	    (re-search-forward "^gpg:")
 	    (setq verify (buffer-substring-no-properties (match-beginning 0)
@@ -559,7 +559,7 @@ OV-ATTRIBUTES are the extra decorations for each blame chunk."
     (with-current-buffer buffer
       (save-restriction
         (with-temp-buffer
-          (when (egg-git-ok t "blame" "-w" "-M" "-C" "--porcelain" "--"
+          (when (egg--git t "blame" "-w" "-M" "-C" "--porcelain" "--"
                             (file-name-nondirectory
                              (buffer-file-name buffer)))
             (egg-parse-git-blame buffer (current-buffer)
@@ -1672,8 +1672,7 @@ adding the contents."
                          'help-echo (egg-tooltip-func))
             "\n")
     (setq inv-beg (1- (point)))
-    (call-process egg-git-command nil t nil "ls-files" "--others"
-                  "--exclude-standard")
+    (egg--git t "ls-files" "--others" "--exclude-standard")
     (setq end (point))
     (egg-delimit-section :section 'untracked beg end
                          inv-beg egg-section-map 'untracked)
@@ -4534,8 +4533,8 @@ With C-u prefix, unmark all."
       (insert (plist-get repo-state :head) "\n")
       (insert "TODO START:\n" tmp "TODO END:\n")
       
-      (egg-git-ok nil "update-ref" "ORIG_HEAD" orig-head-sha1)
-      (egg-git-ok nil "checkout" onto)
+      (egg--git nil "update-ref" "ORIG_HEAD" orig-head-sha1)
+      (egg--git nil "checkout" onto)
 
       (egg-do-async-rebase-continue #'egg-handle-rebase-interactive-exit
                                     orig-head-sha1))))
@@ -4936,7 +4935,8 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
       (egg-log-buffer-handle-result
        (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))
 
-(defun egg-log-buffer-do-pick-partial-cherry (rev head-name files &optional revert prompt cancel-msg)
+(defun egg-log-buffer-do-pick-partial-cherry (rev head-name files &optional 
+						  revert prompt cancel-msg)
   (if (not (y-or-n-p (or prompt (format "pick selected files from %s and put i on %s"
 					rev head-name))))
       (message (or cancel-msg (format "Nah! that cherry (%s) looks rotten!!!" rev)))
@@ -4945,7 +4945,7 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
 	  patch)
       (with-temp-buffer
 	(setq default-directory dir)
-	(unless (apply 'egg-git-ok t "--no-pager" "show" "--no-color" rev "--" files)
+	(unless (apply 'egg--git t "--no-pager" "show" "--no-color" rev "--" files)
 	  (error "Error retrieving rev %s" rev))
 	(setq patch (buffer-string)))
       (when revert (setq args (cons "--reverse" args)))
@@ -5273,7 +5273,7 @@ prompt for a remote repo."
       (setq commit-beg (line-beginning-position))
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok-args 
+      (unless (egg--git-args 
 	       t (nconc (list "show" "--no-color" "--show-signature")
 			(copy-sequence egg-git-diff-options)
 			(copy-sequence args)
@@ -6568,7 +6568,7 @@ This is just an alternative way to launch `egg-log'"
       (goto-char pos)
       (goto-char (1+ (line-end-position)))
       (setq beg (point))
-      (unless (egg-git-ok-args t
+      (unless (egg--git-args t
 			       (append '("stash" "show" "-p")
 				       egg-git-diff-options
 				       (list "--src-prefix=BASE:/" "--dst-prefix=WIP:/"
