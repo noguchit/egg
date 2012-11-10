@@ -1248,8 +1248,6 @@ See also `with-temp-file' and `with-output-to-string'."
 	 (progn ,@body)
        )))
 
-(defvar egg--internal-index-file nil)
-
 (defmacro with-clean-egg--do-buffer (&rest body)
   "Evaluate BODY there like `progn' in the egg--do-output buffer.
 See also `with-temp-file' and `with-output-to-string'."

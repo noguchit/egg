@@ -1816,11 +1816,7 @@ adding the contents."
 
 (defun egg-sb-insert-unstaged-section (title &rest extra-diff-options)
   "Insert the unstaged changes section into the status buffer."
-  (let ((process-environment (copy-sequence process-environment))
-	(beg (point)) inv-beg diff-beg end path tmp status)
-    (when egg-status-buffer-interactive-stash-info
-      (setenv "GIT_INDEX_FILE" 
-	      (plist-get egg-status-buffer-interactive-stash-info :stash-index-file)))
+  (let ((beg (point)) inv-beg diff-beg end path tmp status)
     (insert (egg-prepend title "\n\n" 'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
             "\n")
@@ -1860,11 +1856,7 @@ adding the contents."
 
 (defun egg-sb-insert-staged-section (title &rest extra-diff-options)
   "Insert the staged changes section into the status buffer."
-  (let ((process-environment (copy-sequence process-environment))
-	(beg (point)) inv-beg diff-beg end)
-    (when egg-status-buffer-interactive-stash-info
-      (setenv "GIT_INDEX_FILE" 
-	      (plist-get egg-status-buffer-interactive-stash-info :stash-index-file)))
+  (let ((beg (point)) inv-beg diff-beg end)
     (insert (egg-prepend title "\n\n"
                          'face 'egg-section-title
                          'help-echo (egg-tooltip-func))
