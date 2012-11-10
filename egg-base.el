@@ -70,7 +70,7 @@
 Evaluate BODY with VAR bound to each car from LIST, in turn.
 if DONE then stops the loop and return DONE.
 \(fn (VAR LIST DONE) BODY...)"
-  (declare (indent 1) (debug ((symbolp form &optional form) body)))
+  (declare (indent 1))
   (let ((temp '--dolist-tail--))
     `(let ((,temp ,(nth 1 spec))
 	   ,(car spec) ,(nth 2 spec))
@@ -87,6 +87,24 @@ if DONE then stops the loop and return DONE.
   (dolist-done (item seq found)
     (when (funcall predicate item)
       (setq found item))))
+
+(defsubst egg--find-not (list predicate)
+  (let (item found)
+    (while (and (not found) list)
+      (setq item (car list))
+      (setq list (cdr list))
+      (unless (funcall predicate item)
+	(setq found item)))
+    found))
+
+(defsubst egg--find (list predicate)
+  (let (item found)
+    (while (and (not found) list)
+      (setq item (car list))
+      (setq list (cdr list))
+      (when (funcall predicate item)
+	(setq found item)))
+    found))
 
 (defsubst egg-unquote-posix-regexp (string)
   (while (string-match "\\\\[\\|()]" string)

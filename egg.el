@@ -4498,6 +4498,59 @@ With C-u prefix, unmark all."
 (defsubst egg-marked-commit-follower (commit) (nth 5 commit))
 
 (defun egg-log-buffer-get-rebase-marked-alist ()
+  (let ((tbd (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
+					       (egg-log-buffer-squash-mark)
+					       (egg-log-buffer-edit-mark)
+					       (egg-log-buffer-fixup-mark)))
+	add-some-func add-one-func done)
+    (setq add-some-func
+	  (lambda ()
+	    (let (commit)
+	      ;; find 1st commit without leader
+	      (setq commit
+		    ;; (dolist-done (c tbd found)
+		    ;;   (unless (egg-marked-commit-leader c)
+		    ;; 	(setq found c)))
+		    (egg--find-not tbd #'egg-marked-commit-leader)
+		    )
+	      (when commit
+		(setq tbd (delq commit tbd))
+		;; add commit to done list
+		(funcall add-one-func commit)))))
+    (setq add-one-func
+	  (lambda (commit)
+	    (let (sha1 second-sha1 second followers)
+	      ;; actually add to the done list
+	      (push commit done)
+	      (setq sha1 (egg-marked-commit-sha1 commit))
+	      ;; find commit's second-in-command 
+	      (setq second-sha1 (egg-marked-commit-follower commit))
+	      (when second-sha1
+		(setq second (dolist-done (c tbd found)
+			       (when (equal (egg-marked-commit-sha1 c) second-sha1)
+				 (setq found c))))
+		(setq tbd (remq second tbd)))
+	      ;; find commits' followers
+	      (dolist (c tbd)
+		(when (equal (egg-marked-commit-leader c) sha1)
+		  (setq tbd (remq c tbd))
+		  (push c followers)))
+
+	      ;; add followers one-by-one to done list
+	      (dolist (c followers)
+		(funcall add-one-func c))
+
+	      ;; add second-in-command to done list
+	      (when second
+		(funcall add-one-func second))
+	      ;; add the remaining unrelated to commits
+	      (when tbd
+		(funcall add-some-func)))))
+    (funcall add-some-func)
+    (nreverse done)))
+
+
+(defun egg-log-buffer-get-rebase-marked-alist-old ()
   (let* ((tbd (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
 					       (egg-log-buffer-squash-mark)
 					       (egg-log-buffer-edit-mark)
