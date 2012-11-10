@@ -964,19 +964,19 @@ not called"
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
-(defun egg-staged-diff-section-cmd-visit-file (file)
+(defun egg-staged-diff-section-cmd-visit-index (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (egg-buffer-pop-to-file file ":0"))
 
-(defun egg-staged-diff-section-cmd-visit-file-other-window (file)
+(defun egg-staged-diff-section-cmd-visit-index-other-window (file)
   (interactive (list (car (get-text-property (point) :diff))))
   (egg-buffer-pop-to-file file ":0" t))
 
-(defun egg-staged-hunk-cmd-visit-file-other-window (file hunk-header hunk-beg &rest ignored)
+(defun egg-staged-hunk-cmd-visit-index-other-window (file hunk-header hunk-beg &rest ignored)
   (interactive (egg-hunk-info-at (point)))
   (egg-log-pop-to-file file ":0" t nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
-(defun egg-staged-hunk-cmd-visit-file (file hunk-header hunk-beg &rest ignored)
+(defun egg-staged-hunk-cmd-visit-index (file hunk-header hunk-beg &rest ignored)
   (interactive (egg-hunk-info-at (point)))
   (egg-log-pop-to-file file ":0" nil nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
@@ -1444,9 +1444,20 @@ as: (format FMT current-dir-name git-dir-full-path)."
 ;;;========================================================
 ;;; Status Buffer
 ;;;========================================================
+(defconst egg-status-base-map
+  (let ((map (make-sparse-keymap "Egg:StatusBase")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map (kbd "c") 'egg-commit-log-edit)
+    (define-key map (kbd "d") 'egg-diff-ref)
+    (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "S") 'egg-stage-all-files)
+    (define-key map (kbd "U") 'egg-unstage-all-files)
+    map)
+  "Basic keymap for the status buffer.\\{egg-status-base-map}")
+
 (defconst egg-status-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
-    (set-keymap-parent map egg-buffer-mode-map)
+    (set-keymap-parent map egg-status-base-map)
     (define-key map (kbd "c") 'egg-commit-log-edit)
     (define-key map (kbd "d") 'egg-diff-ref)
     (define-key map (kbd "l") 'egg-log)
@@ -1460,6 +1471,16 @@ as: (format FMT current-dir-name git-dir-full-path)."
     (define-key map (kbd "X") 'egg-status-buffer-undo-wdir)
     map)
   "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
+
+(defconst egg-status-buffer-istash-map
+  (let ((map (make-sparse-keymap "Egg:StatusBufferIStash")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "x") 'egg-sb-istash-abort)
+    (define-key map (kbd "C-c C-c") 'egg-sb-istash-go)
+    (define-key map (kbd "RET") 'egg-sb-istash-go)
+    map)
+  "Context keymap for the repo section of the status buffer when
+  interactive stash is in progress.\\{egg-status-buffer-istash-map}")
 
 (defconst egg-status-buffer-rebase-map
   (let ((map (make-sparse-keymap "Egg:StatusBufferRebase")))
@@ -1560,9 +1581,10 @@ rebase session."
     (with-current-buffer "*i-stash-debug*"
       (erase-buffer)
       (setq default-directory dir)
-      (setq index-unchanged (egg-git-ok t "diff-index" "--cached" "HEAD" 
+      (setq index-unchanged (egg-git-ok t "diff-index" "--exit-code" "--cached" "HEAD" 
 					"--ignore-submodules"))
-      (setq worktree-unchanged (egg-git-ok t "diff-files" "--ignore-submodules"))
+      (setq worktree-unchanged (egg-git-ok t "diff-files" "--exit-code"
+					   "--ignore-submodules"))
       (when (and worktree-unchanged index-unchanged)
 	(error "nothing to stash"))
       (unless (egg-git-ok t "update-index" "--refresh")
@@ -1591,6 +1613,48 @@ rebase session."
     (setq egg-status-buffer-interactive-stash-info info)
     (egg-status nil t)
     (set (make-local-variable 'egg--internal-index-file) stash-index-file)))
+
+(defun egg-sb-istash-abort ()
+  (interactive)
+  (unless (consp egg-status-buffer-interactive-stash-info)
+    (error "Something wrong, no interactive stash session is in progress!"))
+  (let ((info egg-status-buffer-interactive-stash-info))
+    (setq egg--internal-index-file nil)
+    (delete-file (plist-get info :stash-index-file))
+    (egg-status nil t)))
+
+(defun egg-sb-istash-go ()
+  (interactive)
+  (unless (consp egg-status-buffer-interactive-stash-info)
+    (error "Something wrong, no interactive stash session is in progress!"))
+  (let ((info egg-status-buffer-interactive-stash-info)
+	(msg (read-string "Sort message for this WiP: "))
+	(stash-ref-file (concat (egg-git-dir) "/refs/stash"))
+	worktree-commit workdir-tree old-stash patch res)
+    (setq workdir-tree (egg-git-to-string "write-tree"))
+    (setq msg (format "On %s: %s" ) (plist-get info :branch) msg)
+    (setq patch (egg-git-to-string "diff-tree" "HEAD" workdir-tree))
+    (unless (> (length patch) 1)
+      (error "No changes selected to stash!"))
+    (setq worktree-commit (egg-git-to-string "commit-tree" 
+					     "-p" (plist-get :base-commit)
+					     "-p" (plist-get :index-commit)
+					     "-m" msg workdir-tree))
+    (when (file-exists-p stash-ref-file)
+      (setq old-stash (egg-git-to-string "rev-parse" "--verify" "refs/stash"))
+      (egg--git "update-ref" "-d" "refs/stash" old-stash))
+    (write-region (point-min) (point-min) stash-ref-file t)
+    (unless (egg-git-ok "update-ref" "-m" msg "refs/stash" worktree-commit)
+      (error "Failed to stash WiP!"))
+
+    (setq egg--internal-index-file nil)
+    (delete-file (plist-get info :stash-index-file))
+    (setq egg-status-buffer-interactive-stash-info nil)
+
+    (if (y-or-n-p "Discard unstashed local changes? ")
+	(egg-sb-undo-wdir-back-to-HEAD t t 'status)
+      (egg-status-buffer-handle-result
+       (egg--git-apply-cmd (current-buffer) patch (list "--reverse"))))))
 
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
