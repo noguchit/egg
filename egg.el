@@ -6293,6 +6293,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
     (egg-build-log-closure (if all nil head-name) 
 			   file-name buffer egg-file-log-help-text single-mom
 			   :title title
+			   :paths (list (egg-file-git-name file-name))
 			   :command `(lambda (&optional all)
 				       (interactive "P")
 				       (egg-file-log ,file-name all)))

@@ -2098,8 +2098,8 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 			(list (format "--max-count=%d" egg-log-HEAD-max-len))))
 		  (t (error "Invalid ref: %s" ref)))
 	    git-log-extra-options
-	    (when (and paths (null (cdr paths)))
-	      (list "--follow"))
+	    ;; (when (and paths (null (cdr paths)))
+	    ;;   (list "--follow"))
 	    (cond ((null ref) (list "--all"))
 		  ((stringp ref) (list ref))
 		  ((consp ref) ref))
