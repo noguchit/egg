@@ -6,3 +6,5 @@ GRTAGS
 GSYMS
 GTAGS
 .*.d
+.*.deps
+egg-reload.el
