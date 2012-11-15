@@ -168,6 +168,7 @@ works around the deprecation of 'interactive-p' after Emacs 23.2"
 
 (autoload  'find-file-at-point "ffap" 
   "Find filename, guessing a default from text around point." t)
+(defalias 'egg-find-file-at-point 'find-file-at-point)
 (defsubst egg-string-at-point () (current-word t))
 
 (defsubst egg-goto-line (line)

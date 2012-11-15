@@ -1036,9 +1036,9 @@ HUNK-BEG is the starting position of the current hunk."
       (goto-char hunk-beg)
       (forward-line 1)
       (end-of-line)
-      (if (< (point) limit)
-          (while (re-search-forward "^\\(?:\\+\\| \\).*" limit t)
-            (setq adjust (1+ adjust)))))
+      (while (and (< (point) limit) 
+		  (re-search-forward "^\\(?:\\+\\| \\).*" limit t))
+	(setq adjust (1+ adjust))))
     (+ line adjust)))
 
 (defun egg-hunk-section-cmd-visit-file (file hunk-header hunk-beg hunk-end
@@ -1444,54 +1444,6 @@ as: (format FMT current-dir-name git-dir-full-path)."
 ;;;========================================================
 ;;; Status Buffer
 ;;;========================================================
-(defconst egg-status-base-map
-  (let ((map (make-sparse-keymap "Egg:StatusBase")))
-    (set-keymap-parent map egg-buffer-mode-map)
-    (define-key map (kbd "c") 'egg-commit-log-edit)
-    (define-key map (kbd "d") 'egg-diff-ref)
-    (define-key map (kbd "l") 'egg-log)
-    (define-key map (kbd "S") 'egg-stage-all-files)
-    (define-key map (kbd "U") 'egg-unstage-all-files)
-    map)
-  "Basic keymap for the status buffer.\\{egg-status-base-map}")
-
-(defconst egg-status-buffer-mode-map
-  (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
-    (set-keymap-parent map egg-status-base-map)
-    (define-key map (kbd "c") 'egg-commit-log-edit)
-    (define-key map (kbd "d") 'egg-diff-ref)
-    (define-key map (kbd "l") 'egg-log)
-    (define-key map (kbd "b") 'egg-start-new-branch)
-    (define-key map (kbd "o") 'egg-status-buffer-checkout-ref)
-    (define-key map (kbd "w") 'egg-status-buffer-stash-wip)
-    (define-key map (kbd "G") 'egg-status)
-    (define-key map (kbd "L") 'egg-reflog)
-    (define-key map (kbd "S") 'egg-stage-all-files)
-    (define-key map (kbd "U") 'egg-unstage-all-files)
-    (define-key map (kbd "X") 'egg-status-buffer-undo-wdir)
-    map)
-  "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
-
-(defconst egg-status-buffer-istash-map
-  (let ((map (make-sparse-keymap "Egg:StatusBufferIStash")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "x") 'egg-sb-istash-abort)
-    (define-key map (kbd "C-c C-c") 'egg-sb-istash-go)
-    (define-key map (kbd "RET") 'egg-sb-istash-go)
-    map)
-  "Context keymap for the repo section of the status buffer when
-  interactive stash is in progress.\\{egg-status-buffer-istash-map}")
-
-(defconst egg-status-buffer-rebase-map
-  (let ((map (make-sparse-keymap "Egg:StatusBufferRebase")))
-    (set-keymap-parent map egg-section-map)
-    (define-key map (kbd "x") 'egg-buffer-rebase-abort)
-    (define-key map (kbd "u") 'egg-buffer-selective-rebase-skip)
-    (define-key map (kbd "RET") 'egg-buffer-selective-rebase-continue)
-    map)
-  "Context keymap for the repo section of the status buffer when
-  rebase is in progress.\\{egg-status-buffer-rebase-map}")
-
 (defun egg-buffer-do-rebase (upstream-or-action &optional onto current-action)
   "Perform rebase action from an egg special buffer.
 See `egg-do-rebase-head'."
@@ -1632,13 +1584,13 @@ rebase session."
 	(stash-ref-file (concat (egg-git-dir) "/refs/stash"))
 	worktree-commit workdir-tree old-stash patch res)
     (setq workdir-tree (egg-git-to-string "write-tree"))
-    (setq msg (format "On %s: %s" ) (plist-get info :branch) msg)
+    (setq msg (format "On %s: %s" (plist-get info :branch) msg))
     (setq patch (egg-git-to-string "diff-tree" "HEAD" workdir-tree))
     (unless (> (length patch) 1)
       (error "No changes selected to stash!"))
     (setq worktree-commit (egg-git-to-string "commit-tree" 
-					     "-p" (plist-get :base-commit)
-					     "-p" (plist-get :index-commit)
+					     "-p" (plist-get info :base-commit)
+					     "-p" (plist-get info :index-commit)
 					     "-m" msg workdir-tree))
     (when (file-exists-p stash-ref-file)
       (setq old-stash (egg-git-to-string "rev-parse" "--verify" "refs/stash"))
@@ -2942,9 +2894,8 @@ with the appropriate arguments."
 (defun egg-log-msg-hist-cycle (&optional forward)
   "Cycle through message log history."
   (let* ((len (ring-length egg-log-msg-ring))
-	 (closure egg-log-msg-closure)
-	 (text-beg (nth 2 closure))
-	 (text-end (nth 3 closure)))
+	 (text-beg (egg-log-msg-text-beg))
+	 (text-end (egg-log-msg-text-end)))
     (cond ((<= len 0)
            ;; no history
            (message "No previous log message.")
@@ -3010,7 +2961,8 @@ See `egg-commit-buffer-sections'"
   (egg-log-msg-mode)
   (setq major-mode 'egg-commit-buffer-mode
         mode-name "Egg-Commit"
-        mode-line-process "")
+        mode-line-process ""
+	truncate-lines t)
   (set (make-local-variable 'egg-buffer-refresh-func)
        'egg-commit-log-buffer-show-diffs)
   (setq buffer-invisibility-spec nil)
@@ -4333,31 +4285,36 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 
 (defalias 'egg-log-pop-to-file 'egg-buffer-pop-to-file)
 
+(defsubst egg-log-diff-interactive ()
+  (list (car (get-text-property (point) :diff))
+	(or (get-text-property (point) :commit) 
+	    (get-text-property (point) :stash))
+	current-prefix-arg))
+
+(defsubst egg-log-hunk-interactive ()
+  (nconc (list (or (get-text-property (point) :commit) (get-text-property (point) :stash))
+	       current-prefix-arg)
+	 (egg-hunk-info-at (point))))
+
 (defun egg-log-diff-cmd-visit-file (file sha1 &optional use-wdir-file)
   "Open revision SHA1's FILE.
 With C-u prefix, use the work-tree's version instead."
-  (interactive (list (car (get-text-property (point) :diff))
-                     (get-text-property (point) :commit)
-		     current-prefix-arg))
+  (interactive (egg-log-diff-interactive))
   (egg-log-pop-to-file file sha1 nil use-wdir-file))
 
 (defun egg-log-diff-cmd-visit-file-other-window (file sha1 &optional use-wdir-file)
   "Open revision SHA1's FILE in other window.
 With C-u prefix, use the work-tree's version instead."
-  (interactive (list (car (get-text-property (point) :diff))
-                     (get-text-property (point) :commit)
-		     current-prefix-arg))
+  (interactive (egg-log-diff-interactive))
   (egg-log-pop-to-file file sha1 t use-wdir-file))
 
 (defun egg-log-hunk-cmd-visit-file (sha1 use-wdir-file file hunk-header hunk-beg &rest ignored)
-  (interactive (nconc (list (get-text-property (point) :commit) current-prefix-arg)
-		      (egg-hunk-info-at (point))))
+  (interactive (egg-log-hunk-interactive))
   (egg-log-pop-to-file file sha1 nil use-wdir-file 
 		       (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
 (defun egg-log-hunk-cmd-visit-file-other-window (sha1 use-wdir-file file hunk-header hunk-beg &rest ignored)
-  (interactive (nconc (list (get-text-property (point) :commit) current-prefix-arg)
-		      (egg-hunk-info-at (point))))
+  (interactive (egg-log-hunk-interactive))
   (egg-log-pop-to-file file sha1 t use-wdir-file (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
 (defun egg-log-buffer-get-rev-at (pos &rest options)

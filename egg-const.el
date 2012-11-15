@@ -200,6 +200,54 @@ the index. \\{egg-wdir-diff-section-map}")
   "Keymap for a hunk in a unmerged diff section.
 \\{egg-unmerged-conflict-map}")
 
+(defconst egg-status-base-map
+  (let ((map (make-sparse-keymap "Egg:StatusBase")))
+    (set-keymap-parent map egg-buffer-mode-map)
+    (define-key map (kbd "c") 'egg-commit-log-edit)
+    (define-key map (kbd "d") 'egg-diff-ref)
+    (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "S") 'egg-stage-all-files)
+    (define-key map (kbd "U") 'egg-unstage-all-files)
+    map)
+  "Basic keymap for the status buffer.\\{egg-status-base-map}")
+
+(defconst egg-status-buffer-mode-map
+  (let ((map (make-sparse-keymap "Egg:StatusBuffer")))
+    (set-keymap-parent map egg-status-base-map)
+    (define-key map (kbd "c") 'egg-commit-log-edit)
+    (define-key map (kbd "d") 'egg-diff-ref)
+    (define-key map (kbd "l") 'egg-log)
+    (define-key map (kbd "b") 'egg-start-new-branch)
+    (define-key map (kbd "o") 'egg-status-buffer-checkout-ref)
+    (define-key map (kbd "w") 'egg-status-buffer-stash-wip)
+    (define-key map (kbd "G") 'egg-status)
+    (define-key map (kbd "L") 'egg-reflog)
+    (define-key map (kbd "S") 'egg-stage-all-files)
+    (define-key map (kbd "U") 'egg-unstage-all-files)
+    (define-key map (kbd "X") 'egg-status-buffer-undo-wdir)
+    map)
+  "Keymap for the status buffer.\\{egg-status-buffer-mode-map}")
+
+(defconst egg-status-buffer-istash-map
+  (let ((map (make-sparse-keymap "Egg:StatusBufferIStash")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "x") 'egg-sb-istash-abort)
+    (define-key map (kbd "C-c C-c") 'egg-sb-istash-go)
+    (define-key map (kbd "RET") 'egg-sb-istash-go)
+    map)
+  "Context keymap for the repo section of the status buffer when
+  interactive stash is in progress.\\{egg-status-buffer-istash-map}")
+
+(defconst egg-status-buffer-rebase-map
+  (let ((map (make-sparse-keymap "Egg:StatusBufferRebase")))
+    (set-keymap-parent map egg-section-map)
+    (define-key map (kbd "x") 'egg-buffer-rebase-abort)
+    (define-key map (kbd "u") 'egg-buffer-selective-rebase-skip)
+    (define-key map (kbd "RET") 'egg-buffer-selective-rebase-continue)
+    map)
+  "Context keymap for the repo section of the status buffer when
+  rebase is in progress.\\{egg-status-buffer-rebase-map}")
+
 (defconst egg-status-buffer-common-help-text
   (concat
    (egg-text "Common Key Bindings:" 'egg-help-header-2)
