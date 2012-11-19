@@ -201,7 +201,7 @@
       (cond ((eq buffer-contents :index)
 	     (egg-git-ok t "--no-pager" "show" (concat ":0:" file-git-name)))
 	    ((eq buffer-contents :file)
-	     (insert-file-contents-literally file-git-name)))
+	     (insert-file-contents file-git-name)))
       (setq patch
 	    (if has-new-text
 		;; already has new text in buffer, pass the old text in
