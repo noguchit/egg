@@ -1626,6 +1626,9 @@ rebase session."
       (egg-status-buffer-handle-result
        (egg--git-apply-cmd (current-buffer) patch (list "--reverse"))))))
 
+(defun egg-sb-interactive-stash-wip ()
+  (message "TBD"))
+
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
   (let* ((state (egg-repo-state))
