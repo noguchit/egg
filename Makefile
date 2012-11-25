@@ -33,7 +33,7 @@ doc.clean :
 	$(MAKE) -C doc clean
 
 clean : doc.clean
-	-rm $(ELCS) $(DEPS) $(LOAD_DEPS)
+	-rm $(ELCS) $(DEPS) $(LOAD_DEPS) egg-reload.el
 
 loaddeps : $(LOAD_DEPS)
 

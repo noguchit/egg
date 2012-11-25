@@ -964,21 +964,37 @@ not called"
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
-(defun egg-staged-diff-section-cmd-visit-index (file)
-  (interactive (list (car (get-text-property (point) :diff))))
-  (egg-buffer-pop-to-file file ":0"))
+(defun egg-staged-diff-section-cmd-visit-index (file &optional use-wdir-file)
+  "Visit the index of FILE.
+With C-u prefix, visit the work-tree's file instead."
+  (interactive (list (car (get-text-property (point) :diff))
+		     current-prefix-arg))
+  (if use-wdir-file
+      (find-file file)
+    (egg-buffer-pop-to-file file ":0")))
 
-(defun egg-staged-diff-section-cmd-visit-index-other-window (file)
-  (interactive (list (car (get-text-property (point) :diff))))
-  (egg-buffer-pop-to-file file ":0" t))
+(defun egg-staged-diff-section-cmd-visit-index-other-window (file &optional use-wdir-file)
+  (interactive (list (car (get-text-property (point) :diff))
+		     current-prefix-arg))
+  (if use-wdir-file
+      (find-file-other-window file)
+    (egg-buffer-pop-to-file file ":0" t)))
 
-(defun egg-staged-hunk-cmd-visit-index-other-window (file hunk-header hunk-beg &rest ignored)
-  (interactive (egg-hunk-info-at (point)))
-  (egg-log-pop-to-file file ":0" t nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
+(defun egg-staged-hunk-cmd-visit-index-other-window (use-wdir-file file hunk-header hunk-beg &rest ignored)
+  (interactive (cons current-prefix-arg (egg-hunk-info-at (point))))
+  (egg-buffer-pop-to-file file 
+			  (unless use-wdir-file ":0")
+			  t
+			  use-wdir-file
+			  (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
-(defun egg-staged-hunk-cmd-visit-index (file hunk-header hunk-beg &rest ignored)
-  (interactive (egg-hunk-info-at (point)))
-  (egg-log-pop-to-file file ":0" nil nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
+(defun egg-staged-hunk-cmd-visit-index (use-wdir-file file hunk-header hunk-beg &rest ignored)
+  (interactive (cons current-prefix-arg (egg-hunk-info-at (point))))
+  (egg-buffer-pop-to-file file 
+			  (unless use-wdir-file ":0")
+			  nil
+			  use-wdir-file
+			  (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
 (defun egg-diff-section-cmd-visit-file-other-window (file)
   "Visit file FILE in other window."
@@ -1062,9 +1078,11 @@ HUNK-BEG is the starting position of the current hunk."
 (defun egg-unmerged-conflict-checkout-side (pos)
   "Checkout one side of the conflict at POS."
   (interactive "d")
-  (let* ((side (get-text-property pos :conflict-side))
-	 (head (get-text-property pos :conflict-head))
+  (let* ((side (or (get-text-property pos :conflict-side) "theirs"))
+	 (head (or (get-text-property pos :conflict-head) "ours"))
 	 (file (car (get-text-property pos :diff))))
+    (unless (memq :unmerged (assoc file egg-status-buffer-changed-files-status))
+      (error "Not an unmerged file: %s" file))
     (when (y-or-n-p (format "use %s's contents for unmerged file %s? " head file))
       (when (egg-status-buffer-handle-result 
 	     (egg--git-co-files-cmd (current-buffer) file (concat "--" (symbol-name side))))
@@ -2509,7 +2527,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
          pos)
 
       (set (make-local-variable 'egg-status-buffer-changed-files-status)
-          (egg--get-status-code))
+	   (egg--get-status-code))
       ;; Emacs tries to be too smart, if we erase and re-fill the buffer
       ;; that is currently being displayed in the other window,
       ;; it remembers it, and no matter where we move the point, it will
