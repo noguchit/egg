@@ -4509,7 +4509,8 @@ With C-u prefix, unmark all."
   (let ((pos (point-min))
         marker subject alist)
     (save-excursion
-      (while (setq pos (next-single-property-change (1+ pos) :mark))
+      (while (and (< pos (point-max))
+		  (setq pos (next-single-property-change (1+ pos) :mark)))
 	(when (or (null types) (memq (get-text-property pos :mark) types))
 	  (goto-char pos)
 	  (setq marker (point-marker))
