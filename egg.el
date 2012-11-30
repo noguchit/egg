@@ -6376,7 +6376,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
                          (egg-text short-sha1 'egg-term))
                  :closure
                  `(lambda ()
-		    (egg-insert-logs-with-full-decoration (list ,head-name ,sha1)))))
+		    (egg-insert-logs-with-full-decoration (list :locate ,head-name ,sha1)))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos

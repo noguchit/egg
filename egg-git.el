@@ -2085,24 +2085,36 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--git t "stash" "list"))
 
 (defun egg-run-git-log (ref &optional git-log-extra-options paths)
-  (egg--git-args 
-   t (nconc (list "--no-pager" "log"
-		  "--pretty=oneline"
-		  "--decorate=full"
-		  "--no-color")
-	    (cond ((null ref)
-		   (and egg-log-all-max-len
-			(list (format "--max-count=%d" egg-log-all-max-len))))
-		  ((or (stringp ref) (consp ref))
-		   (and egg-log-HEAD-max-len
-			(list (format "--max-count=%d" egg-log-HEAD-max-len))))
-		  (t (error "Invalid ref: %s" ref)))
-	    git-log-extra-options
-	    ;; (when (and paths (null (cdr paths)))
-	    ;;   (list "--follow"))
-	    (cond ((null ref) (list "--all"))
-		  ((stringp ref) (list ref))
-		  ((consp ref) ref))
-	    (when paths (cons "--" paths)))))
+  (let (max-count-option max-count)
+    (setq max-count-option 
+	  (cond ((null ref)
+		 (and egg-log-all-max-len
+		      (list (format "--max-count=%d" egg-log-all-max-len))))
+		((and egg-log-HEAD-max-len
+		      (consp ref) 
+		      (eq (car ref) :locate)
+		      (= (length (cdr ref)) 2))
+		 (setq max-count (max (length (egg-git-to-lines "log" "--oneline"
+								(nth 1 ref)
+								(concat "^" (nth 2 ref) "^")))
+				      egg-log-HEAD-max-len))
+		 (setq ref (cdr ref))	;; remove :locate
+		 (list (format "--max-count=%d" max-count)))
+		((and (or (stringp ref) (consp ref)) egg-log-HEAD-max-len)
+		 (list (format "--max-count=%d" egg-log-HEAD-max-len)))
+		(t (error "Invalid ref: %s" ref))))
+    (egg--git-args 
+     t (nconc (list "--no-pager" "log"
+		    "--pretty=oneline"
+		    "--decorate=full"
+		    "--no-color")
+	      max-count-option
+	      git-log-extra-options
+	      ;; (when (and paths (null (cdr paths)))
+	      ;;   (list "--follow"))
+	      (cond ((null ref) (list "--all"))
+		    ((stringp ref) (list ref))
+		    ((consp ref) ref))
+	      (when paths (cons "--" paths))))))
 
 (provide 'egg-git)
