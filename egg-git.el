@@ -253,6 +253,10 @@ Return the output lines as a list of strings."
             (setq lines (cons matches lines)))
           lines)))))
 
+(defsubst egg-git-range-length (young-commitish old-commitish)
+  ;; add one for the base commit which was excluded by the ... notation
+  (1+ (length (egg-git-to-lines "rev-list" (concat old-commitish "..." young-commitish)))))
+
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
   (car (egg--git-to-lines "ls-files" "--full-name" "--" file)))
@@ -2094,9 +2098,7 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
 		      (consp ref) 
 		      (eq (car ref) :locate)
 		      (= (length (cdr ref)) 2))
-		 (setq max-count (max (length (egg-git-to-lines "log" "--oneline"
-								(nth 1 ref)
-								(concat "^" (nth 2 ref) "^")))
+		 (setq max-count (max (egg-git-range-length (nth 1 ref) (nth 2 ref))
 				      egg-log-HEAD-max-len))
 		 (setq ref (cdr ref))	;; remove :locate
 		 (list (format "--max-count=%d" max-count)))
