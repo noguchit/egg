@@ -424,10 +424,12 @@ if BUF was nil then use current-buffer"
     (set (intern (concat "egg-" egg-git-dir "-HEAD")) " Egg")
     egg-git-dir))
 
-(defsubst egg-work-tree-dir (&optional git-dir)
+(defsubst egg-work-tree-dir (&optional git-dir fall-back)
   (unless git-dir (setq git-dir (egg-git-dir)))
-  (or (get-text-property 0 :work-tree git-dir)
-      (file-name-directory git-dir)))
+  (if git-dir 
+      (or (get-text-property 0 :work-tree git-dir)
+	  (file-name-directory git-dir))
+    fall-back))
 
 (defun egg-file-get-index-buffer ()
   (let* ((git-name (egg-file-git-name (buffer-file-name)))
@@ -1074,7 +1076,19 @@ success."
         (accepted-msg (and (integerp exit-code)
                            (format "exited abnormally with code %d"
                                    exit-code)))
-        proc)
+	(command egg-git-command)
+	(proc-name "egg-git")
+        proc tmp)
+
+    (when (setq tmp (plist-get args :program))
+      (setq command tmp)
+      (plist-put args :program nil)
+      (setq args (delq nil (remove :program args))))
+
+    (when (setq tmp (plist-get args :process-name))
+      (setq proc-name tmp)
+      (plist-put args :process-name nil)
+      (setq args (delq nil (remove :process-name args))))
     
     (with-egg-async-buffer
       (setq proc (get-buffer-process (current-buffer)))
@@ -1089,7 +1103,7 @@ success."
       (insert "EGG-GIT-CMD:\n")
       (insert (format "%S\n" args))
       (insert "EGG-GIT-OUTPUT:\n")
-      (setq proc (apply 'start-process "egg-git" (current-buffer) egg-git-command args))
+      (setq proc (apply 'start-process proc-name (current-buffer) command args))
       (setq mode-line-process " git")
       (when (and (consp func-args) (functionp (car func-args)))
 	(process-put proc :callback-func (car func-args))
@@ -1097,7 +1111,7 @@ success."
       (when (stringp accepted-msg)
 	(process-put proc :accepted-msg accepted-msg)
 	(process-put proc :accepted-code exit-code))
-      (process-put proc :cmds (cons egg-git-command args))
+      (process-put proc :cmds (cons command args))
       (set-process-sentinel proc #'egg-process-sentinel))
     proc))
 
@@ -1237,7 +1251,7 @@ erase the buffer's contents if ERASE was non-nil."
   (let ((buffer (get-buffer-create (concat " *egg-output:" (egg-git-dir) "*")))
 	(default-directory default-directory))
     (with-current-buffer buffer
-      (setq default-directory (egg-work-tree-dir))
+      (setq default-directory (egg-work-tree-dir default-directory))
       (widen)
       (if erase (erase-buffer)))
     buffer))
@@ -1247,7 +1261,7 @@ erase the buffer's contents if ERASE was non-nil."
 See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))  
   `(with-current-buffer (egg--do-output)
-     (setq default-directory (egg-work-tree-dir))
+     (setq default-directory (egg-work-tree-dir default-directory))
      (unwind-protect
 	 (progn ,@body)
        )))
@@ -1258,18 +1272,19 @@ See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))  
   `(with-current-buffer (egg--do-output t)
      (let ((process-environment (egg--git-check-index)))
-       (setq default-directory (egg-work-tree-dir))
+       (setq default-directory (egg-work-tree-dir default-directory))
        (unwind-protect
 	   (progn ,@body)
 	 ))))
 
-(defun egg--do (stdin program args)
+(defun egg--do (stdin program args &optional no-log)
   "Run PROGRAM with ARGS synchronously using STDIN as starndard input.
 ARGS should be a list of arguments for PROGRAM."
   (let ((buf (current-buffer))
 	ret)
-    (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
-		 (if stdin " <REGION\n" "\n"))
+    (unless no-log
+      (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
+		   (if stdin " <REGION\n" "\n")))
     (with-clean-egg--do-buffer
       (cond ((stringp stdin)
 	     (insert stdin))
@@ -1281,14 +1296,15 @@ ARGS should be a list of arguments for PROGRAM."
 		    (apply 'call-process-region (point-min) (point-max)
 			   program t t nil args)
 		  (apply 'call-process program nil t nil args)))
-      (egg-cmd-log-whole-buffer (current-buffer))
-      (egg-cmd-log (format "RET:%d\n" ret))
+      (unless no-log
+	(egg-cmd-log-whole-buffer (current-buffer))
+	(egg-cmd-log (format "RET:%d\n" ret)))
       (cons ret (current-buffer)))))
 
-(defun egg--do-git (stdin cmd args)
+(defun egg--do-git (stdin cmd args &optional no-log)
   "Run git command CMD with ARGS synchronously, using STDIN as starndard input.
 ARGS should be a list of arguments for the git command CMD."
-  (egg--do stdin "git" (cons cmd args)))
+  (egg--do stdin egg-git-command (cons cmd args) no-log))
 
 (defun egg--do-handle-exit (exit-info post-proc-func &optional buffer-to-update)
   "Handle the exit code and the output of a synchronous action.
@@ -1344,22 +1360,22 @@ used as the returned value of this function."
     (unless ok (ding))
     output-info))
 
-(defun egg--do-git-action (cmd buffer-to-update post-proc-func args)
+(defun egg--do-git-action (cmd buffer-to-update post-proc-func args &optional no-log)
   "Run git command CMD with arguments list ARGS.
 Show the output of CMD as feedback of the emacs command.
 Update the buffer BUFFER-TO-UPDATE and use POST-PROC-FUNC as the
 output processing function for `egg--do-handle-exit'."
   (egg--do-show-output (concat "GIT-" (upcase cmd))
-		       (egg--do-handle-exit (egg--do-git nil cmd args)
+		       (egg--do-handle-exit (egg--do-git nil cmd args no-log)
 					    post-proc-func buffer-to-update)))
 
-(defun egg--do-git-action-stdin (cmd stdin buffer-to-update post-proc-func args)
+(defun egg--do-git-action-stdin (cmd stdin buffer-to-update post-proc-func args &optional no-log)
   "Run git command CMD with arguments list ARGS and STDIN as standard input.
 Show the output of CMD as feedback of the emacs command.
 Update the buffer BUFFER-TO-UPDATE and use POST-PROC-FUNC as the
 output processing function for `egg--do-handle-exit'."
   (egg--do-show-output (concat "GIT-" (upcase cmd))
-		       (egg--do-handle-exit (egg--do-git stdin cmd args)
+		       (egg--do-handle-exit (egg--do-git stdin cmd args no-log)
 					    post-proc-func buffer-to-update)))
 
 
