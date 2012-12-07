@@ -5086,13 +5086,19 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
       (message "non interactive"))
     (unless candidate (setq candidate (last refs)))
     (setq candidate (completing-read "remove reference: " refs nil nil candidate))
-    (setq victim (egg-git-to-string "show-ref" candidate))
-    (unless (stringp victim) (error "No such ref: %s!!!" candidate))
-    (save-match-data
-      (setq victim (nth 1 (split-string victim " " t)))
-      (setq parts (and (stringp victim) (split-string victim "/" t))))
+    (setq victim (save-match-data
+		   (mapcar 'cadr 
+			   (mapcar 'split-string
+				   (egg-git-to-lines "show-ref" candidate)))))
+    (unless (consp victim) (error "No such ref: %s!!!" candidate))
+    (setq victim (if (null (cdr victim))
+		     (car victim)
+		   (completing-read "name collision! please specify the full name of the ref to delete: "
+				    victim nil t (car victim))))
     
-    (unless (equal (car parts) "refs") (error "Invalid ref: %s" victim))
+    (save-match-data
+      (setq parts (and (stringp victim) (split-string victim "/" t)))
+      (unless (equal (car parts) "refs") (error "Invalid ref: %s" victim)))
     
     (setq remote-site (and (equal (nth 1 parts) "remotes") (nth 2 parts)))
     (setq name-at-remote (and remote-site (mapconcat 'identity (nthcdr 3 parts) "/")))
@@ -5285,7 +5291,7 @@ prompt for a remote repo."
   (let* ((ref-at-point (get-text-property pos :ref))
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
-         rref tracking remote spec)
+         rref tracking remote spec special-push)
     (unless ref-at-point
       (error "Nothing to push here!"))
     (cond ((eq type :remote)		;; delete a remote head
@@ -5296,7 +5302,9 @@ prompt for a remote repo."
           ((eq type :head)
            (setq tracking (egg-tracking-target lref :remote))
            (if (consp tracking)
-               (setq rref (car tracking) remote (cdr tracking))
+               (setq rref (nth 0 tracking)
+		     remote (nth 1 tracking)
+		     special-push (get-text-property 0 :push remote))
              (setq remote (egg-read-remote
                            (format "push branch %s to remote: " lref)))
              (setq rref (read-string
@@ -5316,10 +5324,12 @@ prompt for a remote repo."
         (message "cancel removal of %s/%s" remote rref)
         (setq remote nil rref nil lref nil)))
     (when (and remote rref lref)
-      (setq spec (concat lref ":" rref))
-      (message "GIT> pushing %s to %s on %s..." lref rref remote)
-      (egg-buffer-async-do nil "push" (if non-ff "-vf" "-v")
-                           remote spec))))
+      (if (functionp special-push)
+	  (apply special-push (list remote lref rref))
+	(setq spec (concat lref ":" rref))
+	(message "GIT> pushing %s to %s on %s..." lref rref remote)
+	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v")
+			     remote spec)))))
 
 (defun egg-log-buffer-push (pos)
   "Push some refs to the remote at POS"

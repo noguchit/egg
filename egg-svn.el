@@ -38,6 +38,7 @@
 
 (require 'egg-git)
 (require 'egg-const)
+(require 'egg)
 
 (defcustom egg-svn-command "svn"
   "Name or full-path to the svn command.
@@ -141,6 +142,14 @@ ARGS should be a list of arguments for the git command CMD."
   (let ((default-directory (concat (egg-git-dir) "/svn/refs/remotes/")))
     (car (file-expand-wildcards (concat "*/" svn-name)))))
 
+(defsubst egg-svn-all-refs (&optional prefix)
+  (let ((default-directory (concat (egg-git-dir) "/svn/refs/remotes/")))
+    (file-expand-wildcards (concat (or prefix "*") "/*"))))
+
+(defsubst egg-svn-all-full-refs (&optional prefix)
+  (let ((default-directory (concat (egg-git-dir) "/svn/")))
+    (file-expand-wildcards (concat "refs/remotes/" (or prefix "*") "/*"))))
+
 
 (defun egg--do-svn-action (cmd buffer-to-update post-proc-func args)
   "Run svn command CMD with arguments list ARGS.
@@ -162,7 +171,54 @@ output processing function for `egg--do-handle-exit'."
 	 (concat "--ignore-paths=" ignore-paths-pcre))
    'no-log))
 
-(defun egg--svn-get-1st-revision (svn-branch-path &optional remote-name)
+(defun egg--git-svn-create-branch (buffer-to-update log-msg branch-name &optional svn-parent-url)
+  (egg--do-git-action
+   "svn" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (or (egg--git-pp-grab-line-matching (concat "^r[0-9]+ = .+ (refs/.+/" branch-name ")$")
+						:success t :next-action 'log)
+		(egg--git-pp-grab-line-matching "^r[0-9]+ = .+ (refs/.+)$"
+						:success t :next-action 'log)
+		(egg--git-pp-grab-line-matching "^Successfully.+" :success t :next-action 'log)
+		(egg--git-pp-grab-line-matching "^Found branch.+" :success t :next-action 'log)
+		(egg--git-pp-grab-line-matching "^Found possible branch.+" :success t :next-action 'log)
+		(egg--git-pp-grab-line-matching (concat "/" branch-name) :success t :next-action 'log)))
+	   (t (egg--git-pp-fatal-result))))
+   (nconc (list "branch" "-m" log-msg)
+	  (if svn-parent-url (list "-d" svn-parent-url))
+	  (list branch-name))))
+
+(defun egg--git-svn-reset-max-rev (buffer-to-update svn-rev)
+  (egg--do-git-action
+   "svn" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t)
+		(egg--git-pp-grab-line-no -1 :success t)))
+	   (t (egg--git-pp-fatal-result))))
+   (list "reset" (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
+
+(defun egg--git-svn-fetch-rev (buffer-to-update svn-rev)
+  (egg--do-git-action
+   "svn" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t)
+		(egg--git-pp-grab-line-no -1 :success t)))
+	   (t (egg--git-pp-fatal-result))))
+   (list "fetch" (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
+
+(defun egg--svn-delete (buffer-to-update log-msg svn-url)
+  (egg--do-svn-action
+   "delete" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (egg--git-pp-grab-line-matching "^Committed revision.+" :success t :next-action 'log))
+	   (t (egg--git-pp-fatal-result))))
+   (list "-m" log-msg svn-url)))
+
+(defun egg--svn-get-parent-revision (svn-branch-path &optional remote-name)
   (with-egg-debug-buffer
     (let* ((url (egg-git-svn-url remote-name))
 	  (path (and url (concat url "/" svn-branch-path))))
@@ -195,7 +251,8 @@ output processing function for `egg--do-handle-exit'."
 		(set-process-sentinel process #'egg-svn-start-initial-fetch))
 	    (message "cannot start svn to do initial fetching!")))
       (goto-char (point-max))
-      (insert "EGG-SVN:done fetching initial SVN revisions.\n"))))
+      (insert "EGG-SVN:done fetching initial SVN revisions.\n")
+      (egg-log nil))))
 
 (defun egg-svn-init-repo (profile)
   (interactive (let ((alist egg-svn-profile-alist)
@@ -251,7 +308,7 @@ output processing function for `egg--do-handle-exit'."
 
       (setq oldest (cond ((numberp oldest) oldest)
 			 ((stringp oldest)
-			  (egg--svn-get-1st-revision oldest remote))
+			  (egg--svn-get-parent-revision oldest remote))
 			 (t nil)))
       (when oldest 
 	(setq oldest (number-to-string oldest))
@@ -285,6 +342,23 @@ output processing function for `egg--do-handle-exit'."
 	(plist-put profile :todo todo)
 
 	(egg-svn-start-initial-fetch profile nil)))))
+
+(defsubst egg-svn-full-to-remote (full-ref)
+  (file-name-nondirectory (directory-file-name (file-name-directory full-ref))))
+
+(defun egg-svn-handle-svn-remote (branch remote &rest names)
+ (if (or (egg-git-to-string "config" "--get" (concat "svn-remote." remote ".url"))
+	 (and (member branch (egg-svn-all-full-refs))
+	      (setq remote (egg-svn-full-to-remote branch))))
+     (cons branch (mapcar (lambda (name)
+			    (propertize name 
+					:svn-remote (egg-git-svn-remote-name)
+					:push #'egg-push-to-svn 
+					:fetch #'egg-fetch-from-svn))
+			  (cons remote names)))))
+
+(add-hook 'egg-speciall-remote-handlers #'egg-svn-handle-svn-remote)
+
 
 
 (provide 'egg-svn)

@@ -790,14 +790,18 @@ as repo state instead of re-read from disc."
   (and (egg-git-dir)
        (cadr (assoc attr (egg-config-section type name)))))
 
+(defvar egg-speciall-remote-handlers nil)
+
 (defun egg-tracking-target (branch &optional mode)
   (let ((remote (egg-config-get "branch" "remote" branch))
-        (rbranch (egg-config-get "branch" "merge" branch)))
-    (when (stringp rbranch)
-      (setq rbranch (egg-rbranch-name rbranch))
+        (rbranch-full (egg-config-get "branch" "merge" branch))
+	rbranch)
+    (when (stringp rbranch-full)
+      (setq rbranch (egg-rbranch-name rbranch-full))
       (cond ((null mode) (concat remote "/" rbranch))
             ((eq :name-only mode) rbranch)
-            (t (cons rbranch remote))))))
+            (t (or (run-hook-with-args-until-success 'egg-speciall-remote-handlers rbranch-full remote)
+		   (list rbranch remote)))))))
 
 (defun egg-complete-get-all-refs (prefix &optional matches)
   (if matches
@@ -897,7 +901,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; 8: is annotated tag
           '(1 2 3 4 5 6 7) "show-ref" "-d"))
 	(symbolic-HEAD (egg-get-symbolic-HEAD))
-        annotated-tags refs)
+        annotated-tags refs special-names r-remote r-branch)
     ;; remove the annotated tags from the list
     (setq refs-desc-list
           (delq nil
@@ -938,17 +942,25 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 			    ((assq 4 desc)
 			     ;; remote
 			     (cons full-name
-				   (concat
-				    (if (stringp remote)
-					(apply 'propertize remote
-					       :ref (cons name :remote)
-					       remote-site-properties)
-				      ;; svn has no remote name
-				      "")
-				    (apply 'propertize (substring name (length remote))
-					   :full-name full-name
-					   :ref (cons name :remote)
-					   remote-ref-properties))))
+				   (progn
+				     (setq special-names 
+					   (or (cdr (run-hook-with-args-until-success
+						     'egg-speciall-remote-handlers full-name remote
+						     (substring name (length remote))))
+					       (list remote (substring name (length remote)))))
+				     (setq r-remote (nth 0 special-names)
+					   r-branch (nth 1 special-names))
+				     (concat (if (stringp r-remote)
+						 (apply 'propertize r-remote
+							:ref (cons name :remote)
+							remote-site-properties)
+					       ;; svn has no remote namee
+					       "")
+					     (apply 'propertize r-branch
+						    :full-name full-name
+						    :ref (cons name :remote)
+						    remote-ref-properties))
+				     )))
 			    ((assq 7 desc)
 			     ;; stash
 			     (cons full-name
