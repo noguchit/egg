@@ -5301,12 +5301,15 @@ prompt for a remote repo."
 		     special-remote (get-text-property 0 :svn-remote remote)
 		     special-push (get-text-property 0 :push remote))
              (setq remote (egg-read-remote
-                           (format "push branch %s to remote: " lref)))
+                           (format "push branch %s to remote: " (propertize lref 'face 'bold))))
              (setq rref (read-string
-                         (format "push branch %s to %s as: " lref remote)
+                         (format "push branch %s to %s as: " 
+				 (propertize lref 'face 'bold)
+				 (propertize remote 'face 'bold))
                          lref))
-	     (setq remote (run-hook-with-args-until-success 
-				   'egg-special-remote-handlers remote))
+	     (setq remote (or (run-hook-with-args-until-success 
+			       'egg-special-remote-handlers remote)
+			      remote))
 	     (setq special-remote (get-text-property 0 :svn-remote remote))
 	     (when special-remote
 	       (setq special-push (get-text-property 0 :push remote)))))
