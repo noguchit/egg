@@ -493,12 +493,18 @@ if BUF was nil then use current-buffer"
   (or (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD")
       "0000000000000000000000000000000000000000"))
 
-(defun egg-get-all-refs (prefix)
-  (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
-		    (format "refs/heads/%s*" prefix)
-		    (format "refs/tags/%s*" prefix)
-		    (format "refs/remotes/%s*/*" prefix)
-		    (format "refs/remotes/%s*" prefix)))
+(defun egg-get-all-refs (prefix &optional exact)
+  (if exact
+      (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
+			(format "refs/heads/%s" prefix)
+			(format "refs/tags/%s" prefix)
+			(format "refs/remotes/%s" prefix))
+    (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
+		      (format "refs/heads/%s*" prefix)
+		      (format "refs/tags/%s*" prefix)
+		      (format "refs/remotes/%s*/*" prefix)
+		      (format "refs/remotes/%s*" prefix))))
+
 
 (defun egg-get-local-refs (prefix)
   (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 

@@ -346,7 +346,7 @@ output processing function for `egg--do-handle-exit'."
 (defsubst egg-svn-full-to-remote (full-ref)
   (file-name-nondirectory (directory-file-name (file-name-directory full-ref))))
 
-(defun egg-svn-handle-svn-remote (remote branch &rest names)
+(defun egg-svn-handle-svn-remote (remote &optional branch &rest names)
  (when (or (egg-git-to-string "config" "--get" (concat "svn-remote." remote ".url"))
 	   (and (stringp branch)
 		(member branch (egg-svn-all-full-refs))

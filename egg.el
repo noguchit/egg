@@ -5076,43 +5076,39 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
 (defun egg-log-buffer-rm-ref (pos &optional force)
   "Remove the ref at POS."
   (interactive "d\nP")
-  (let ((refs (egg-references-at-point pos))
-        (candidate (egg-ref-at-point pos))
-	(full-name (get-text-property pos :full-name))
-        victim parts delete-on-remote remote-site name-at-remote
-	remote-ok)
-    (if (invoked-interactively-p)
-	(message "interactive")
-      (message "non interactive"))
-    (unless candidate (setq candidate (last refs)))
-    (setq candidate (completing-read "remove reference: " refs nil nil candidate))
-    (setq victim (save-match-data
-		   (mapcar 'cadr 
-			   (mapcar 'split-string
-				   (egg-git-to-lines "show-ref" candidate)))))
-    (unless (consp victim) (error "No such ref: %s!!!" candidate))
-    (setq victim (if (null (cdr victim))
-		     (car victim)
-		   (completing-read "name collision! please specify the full name of the ref to delete: "
-				    victim nil t (car victim))))
-    
-    (save-match-data
-      (setq parts (and (stringp victim) (split-string victim "/" t)))
-      (unless (equal (car parts) "refs") (error "Invalid ref: %s" victim)))
-    
-    (setq remote-site (and (equal (nth 1 parts) "remotes") (nth 2 parts)))
-    (setq name-at-remote (and remote-site (mapconcat 'identity (nthcdr 3 parts) "/")))
-    (setq delete-on-remote (and remote-site
+  (let ((victim (get-text-property pos :full-name))
+	(special-remote (get-text-property pos :svn-remote))
+	(special-push (get-text-property pos :push))
+	parts delete-on-remote remote-site name-at-remote
+	remote-ok pretty)
+
+    (when (stringp victim)
+      (setq pretty (propertize victim 'face 'bold)))
+
+    (cond ((null victim)
+	   (message "No ref to remove here!"))
+	  ((not (y-or-n-p (format "remove ref %s? " pretty)))
+	   (message "Canceled removal of %s" pretty))
+	  ((null (egg-git-to-string "show-ref" victim))
+	   (message "Ref %s vanished!" pretty))
+	  (t
+	   (setq parts (save-match-data (split-string victim "/" t)))
+	   (setq remote-site (and (equal (nth 1 parts) "remotes") (nth 2 parts)))
+	   (setq name-at-remote (and remote-site (mapconcat 'identity (nthcdr 3 parts) "/")))
+	   (setq delete-on-remote (and remote-site
 				(y-or-n-p (format "delete %s on %s too? "
 						  name-at-remote remote-site))))
-    (setq remote-ok 
-	  (if delete-on-remote (egg--buffer-handle-result
-				(egg--git-push-cmd (current-buffer) "--delete" 
-						   remote-site name-at-remote))
-	    t))
-    (when remote-ok
-      (egg-log-buffer-handle-result
-       (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))
+	   (setq remote-ok
+		 (if delete-on-remote
+		     (if (and special-push special-remote)
+			 (funcall special-push (current-buffer) "--delete" special-remote name-at-remote)
+		       (egg--buffer-handle-result
+			(egg--git-push-cmd (current-buffer) "--delete" remote-site name-at-remote)))
+		   t))
+
+	   (when remote-ok
+	     (egg-log-buffer-handle-result
+	      (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))))
 
 (defun egg-log-buffer-do-pick-partial-cherry (rev head-name files &optional 
 						  revert prompt cancel-msg)
