@@ -346,23 +346,56 @@ output processing function for `egg--do-handle-exit'."
 (defsubst egg-svn-full-to-remote (full-ref)
   (file-name-nondirectory (directory-file-name (file-name-directory full-ref))))
 
+(defun egg-svn-map-name (name branch spec)
+  (save-match-data
+    (let ((mappings (mapcar (lambda (line)
+			      (split-string line "[:* \t]+" t))
+			    (egg-git-to-lines "config" "--get-regexp" 
+					      "svn-remote\\..*\\.(branches|fetch)")))
+	  match tmp remote type)
+      (setq mappings
+	    (mapcar 
+	     (lambda (map)
+	       (setq tmp (split-string (car map) "\\." t))
+	       (setq remote (nth 1 tmp))
+	       (setq type (nth 2 tmp))
+	       (list (nth 2 map) remote (intern (concat ":" type)) (nth 1 map) ))
+	     mappings))
+      (setq match (or (and branch (assoc branch mappings))
+		      (and spec (assoc spec mappings))))
+      (when match
+	(propertize name
+		    :push #'egg-push-to-svn
+		    :fetch #'egg-fetch-from-svn
+		    :svn-remote (cdr match))))))
+
+(defsubst egg-svn-full-ref-to-svn (branch)
+  (egg-svn-map-name (egg-svn-full-to-remote branch) branch (file-name-directory branch)))
+
+(defsubst egg-svn-ref-prefix-to-svn (prefix)
+  (egg-svn-map-name prefix nil (concat "refs/remotes/" prefix "/")))
+
+(defun egg-svn-copy-remote-properties (dest src)
+  (add-text-properties 0 (length dest)
+		       (apply 'nconc (mapcar (lambda (prop)
+					       (list prop (get-text-property 0 prop src)))
+					     '(:push :fetch :svn-remote)))
+		       dest))
+
 (defun egg-svn-handle-svn-remote (remote &optional branch &rest names)
- (when (or (egg-git-to-string "config" "--get" (concat "svn-remote." remote ".url"))
-	   (and (stringp branch)
-		(member branch (egg-svn-all-full-refs))
-		(setq remote (egg-svn-full-to-remote branch))))
-   (setq remote (propertize remote
-			    :svn-remote (egg-git-svn-remote-name)
-			    :push #'egg-push-to-svn 
-			    :fetch #'egg-fetch-from-svn))
-   (mapc (lambda (name)
-	   (add-text-properties 0 (length name) 
-				(list :svn-remote (egg-git-svn-remote-name)
-				      :push #'egg-push-to-svn 
-				      :fetch #'egg-fetch-from-svn)
-				name))
-	 names)
-   remote))
+  (let ((svn-remote (cond ((stringp branch) 
+			   (egg-svn-full-ref-to-svn branch))
+			  ((and (stringp remote) (not (equal "." remote)))
+			   (egg-svn-ref-prefix-to-svn remote))
+			  (t nil))))
+    
+    (when svn-remote
+      (mapc (lambda (name)
+	      (egg-svn-copy-remote-properties name svn-remote))
+	    names))
+
+    svn-remote))
+
 
 (add-hook 'egg-special-remote-handlers #'egg-svn-handle-svn-remote)
 

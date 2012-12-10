@@ -5287,25 +5287,28 @@ prompt for a remote repo."
   (let* ((ref-at-point (get-text-property pos :ref))
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
-         rref tracking remote spec special-push)
+         rref tracking remote spec special-push special-remote)
     (unless ref-at-point
       (error "Nothing to push here!"))
-    (cond ((eq type :remote)		;; delete a remote head
-           (setq rref (file-name-nondirectory lref))
-           (setq remote (directory-file-name
-                         (file-name-directory lref)))
-           (setq lref ""))
+    (cond ((eq type :remote)
+	   (error "Refuse to upload remote-tracking ref %s" lref)
+	   (setq lref nil))
           ((eq type :head)
            (setq tracking (egg-tracking-target lref :remote))
            (if (consp tracking)
                (setq rref (nth 0 tracking)
 		     remote (nth 1 tracking)
+		     special-remote (get-text-property 0 :svn-remote remote)
 		     special-push (get-text-property 0 :push remote))
              (setq remote (egg-read-remote
                            (format "push branch %s to remote: " lref)))
              (setq rref (read-string
                          (format "push branch %s to %s as: " lref remote)
-                         lref))))
+                         lref))
+	     (setq special-remote (run-hook-with-args-until-success 
+				   'egg-special-remote-handlers remote))
+	     (when special-remote
+	       (setq special-push (get-text-property 0 :push)))))
           ((eq type :tag)
            (setq remote (egg-read-remote "push to remote: "))
            (setq rref (read-string
@@ -5315,17 +5318,12 @@ prompt for a remote repo."
                        (format "local tag to push at %s/%s (empty mean delete the remote tag) : "
                                remote rref)
                        rref))))
-    (unless (> (length lref) 0)
-      (unless (y-or-n-p (format "delete %s/%s? " remote rref))
-        (message "cancel removal of %s/%s" remote rref)
-        (setq remote nil rref nil lref nil)))
     (when (and remote rref lref)
       (if (functionp special-push)
-	  (apply special-push (list remote lref rref))
+	  (funcall special-push remote lref rref)
 	(setq spec (concat lref ":" rref))
 	(message "GIT> pushing %s to %s on %s..." lref rref remote)
-	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v")
-			     remote spec)))))
+	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))
 
 (defun egg-log-buffer-push (pos)
   "Push some refs to the remote at POS"
