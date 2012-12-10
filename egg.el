@@ -5100,10 +5100,10 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
 						  name-at-remote remote-site))))
 	   (setq remote-ok
 		 (if delete-on-remote
-		     (if (and special-push special-remote)
-			 (funcall special-push (current-buffer) "--delete" special-remote name-at-remote)
-		       (egg--buffer-handle-result
-			(egg--git-push-cmd (current-buffer) "--delete" remote-site name-at-remote)))
+		     (egg--buffer-handle-result
+		      (if (and special-push special-remote)
+			 (funcall special-push (current-buffer) special-remote "--delete" name-at-remote)
+		       (egg--git-push-cmd (current-buffer) "--delete" remote-site name-at-remote)))
 		   t))
 
 	   (when remote-ok
@@ -5305,10 +5305,11 @@ prompt for a remote repo."
              (setq rref (read-string
                          (format "push branch %s to %s as: " lref remote)
                          lref))
-	     (setq special-remote (run-hook-with-args-until-success 
+	     (setq remote (run-hook-with-args-until-success 
 				   'egg-special-remote-handlers remote))
+	     (setq special-remote (get-text-property 0 :svn-remote remote))
 	     (when special-remote
-	       (setq special-push (get-text-property 0 :push)))))
+	       (setq special-push (get-text-property 0 :push remote)))))
           ((eq type :tag)
            (setq remote (egg-read-remote "push to remote: "))
            (setq rref (read-string
@@ -5320,7 +5321,7 @@ prompt for a remote repo."
                        rref))))
     (when (and remote rref lref)
       (if (functionp special-push)
-	  (funcall special-push remote lref rref)
+	  (funcall special-push (current-buffer) special-remote lref rref)
 	(setq spec (concat lref ":" rref))
 	(message "GIT> pushing %s to %s on %s..." lref rref remote)
 	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))

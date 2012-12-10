@@ -109,6 +109,16 @@ is used as input to GIT."
 	(re-search-forward "^\n")
 	(buffer-substring-no-properties (match-end 0) (point-max))))))
 
+(defsubst egg-pick-from-commit-message (rev regex &optional index)
+  "Retrieve the commit message of REV."
+  (save-match-data
+    (with-temp-buffer
+      (when (egg--git t "cat-file" "commit" rev)
+	(goto-char (point-min))
+	(re-search-forward "^\n")
+	(when (re-search-forward regex nil t)
+	  (match-string-no-properties (or index 0)))))))
+
 (defun egg-commit-subject (rev)
   "Retrieve the commit subject of REV."
   (save-match-data
@@ -790,7 +800,8 @@ as repo state instead of re-read from disc."
   (egg-config-get-all nil (concat (egg-git-dir) "/config") "remote"))
 
 (defsubst egg-config-get-all-remote-names ()
-  (mapcar 'car (egg-config-get-all-remotes)))
+  (nconc (mapcar 'car (egg-config-get-all-remotes))
+	 (run-hook-with-args-until-success 'egg-special-remotes)))
 
 (defsubst egg-config-get (type attr &optional name)
   (and (egg-git-dir)

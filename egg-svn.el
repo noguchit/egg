@@ -150,6 +150,11 @@ ARGS should be a list of arguments for the git command CMD."
   (let ((default-directory (concat (egg-git-dir) "/svn/")))
     (file-expand-wildcards (concat "refs/remotes/" (or prefix "*") "/*"))))
 
+(defun egg-svn-get-all-prefixes ()
+  (delete-dups (egg-git-lines-matching "^svn-remote.+:refs/remotes/\\([^/]+\\)/.+$" 1 
+				       "config" "--get-regexp"
+				       "svn-remote\\..+\\\.(branches|fetch)")))
+
 
 (defun egg--do-svn-action (cmd buffer-to-update post-proc-func args)
   "Run svn command CMD with arguments list ARGS.
@@ -204,10 +209,22 @@ output processing function for `egg--do-handle-exit'."
    "svn" buffer-to-update
    (lambda (ret-code)
      (cond ((= ret-code 0)
-	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t)
-		(egg--git-pp-grab-line-no -1 :success t)))
+	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t :next-action 'log)
+		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
 	   (t (egg--git-pp-fatal-result))))
    (list "fetch" (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
+
+(defun egg--git-svn-dcommit (buffer-to-update branch)
+  (egg--do-git-action
+   "svn" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t :next-action 'log)
+		(egg--git-pp-grab-line-matching "^dcommitted " :success t :next-action 'log)
+		(egg--git-pp-grab-line-matching "^Committed " :success t :next-action 'log)
+		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
+	   (t (egg--git-pp-fatal-result))))
+   (list "dcommit" branch)))
 
 (defun egg--svn-delete (buffer-to-update log-msg svn-url)
   (egg--do-svn-action
@@ -217,6 +234,15 @@ output processing function for `egg--do-handle-exit'."
 	    (egg--git-pp-grab-line-matching "^Committed revision.+" :success t :next-action 'log))
 	   (t (egg--git-pp-fatal-result))))
    (list "-m" log-msg svn-url)))
+
+(defun egg--svn-copy (buffer-to-update log-msg from-url to-url)
+  (egg--do-svn-action
+   "copy" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (egg--git-pp-grab-line-matching "^Committed revision.+" :success t :next-action 'log))
+	   (t (egg--git-pp-fatal-result))))
+   (list "-m" log-msg from-url to-url)))
 
 (defun egg--svn-get-parent-revision (svn-branch-path &optional remote-name)
   (with-egg-debug-buffer
@@ -359,7 +385,7 @@ output processing function for `egg--do-handle-exit'."
 	       (setq tmp (split-string (car map) "\\." t))
 	       (setq remote (nth 1 tmp))
 	       (setq type (nth 2 tmp))
-	       (list (nth 2 map) remote (intern (concat ":" type)) (nth 1 map) ))
+	       (list (nth 2 map) remote (intern (concat ":" type)) (nth 1 map) (nth 2 map)))
 	     mappings))
       (setq match (or (and branch (assoc branch mappings))
 		      (and spec (assoc spec mappings))))
@@ -381,7 +407,7 @@ output processing function for `egg--do-handle-exit'."
 					       (list prop (get-text-property 0 prop src)))
 					     '(:push :fetch :svn-remote)))
 		       dest))
-
+ 
 (defun egg-svn-handle-svn-remote (remote &optional branch &rest names)
   (let ((svn-remote (cond ((stringp branch) 
 			   (egg-svn-full-ref-to-svn branch))
@@ -396,9 +422,78 @@ output processing function for `egg--do-handle-exit'."
 
     svn-remote))
 
+(defun egg-push-to-svn (buffer-to-update svn-remote l-ref r-ref)
+  (let* ((svn-name (car svn-remote))
+	 (map-type (nth 1 svn-remote))
+	 (dest (nth 2 svn-remote))
+	 (local-base (nth 3 svn-remote))
+	 (r-ref (and (stringp r-ref) (file-name-nondirectory r-ref)))
+	 (r-full-name (and r-ref (concat local-base r-ref)))
+	 (url (and svn-name (egg-git-svn-url svn-name)))
+	 (svn-branch-url (and r-ref url 
+			      (concat url "/" 
+				      (cond ((eq map-type :fetch) dest)
+					    ((eq map-type :branches) 
+					     (concat dest r-ref))
+					    (t (error "Unknown svn-to-git mapping type: %s"
+						      map-type))))))
+	 git-commit svn-rev res line base-commit)
+    (cond ((null svn-branch-url)
+	   (error "Failed to map branch %s on svn remote %s" r-ref svn-name))
+	  ((not (stringp l-ref))
+	   (error "Can't push local ref: %s" l-ref))
+	  ((equal l-ref "--delete")
+	   (when (y-or-n-p (format "Delete svn path %s? " (propertize svn-branch-url 'face 'bold)))
+	     (egg--svn-delete buffer-to-update "Delete branch" svn-branch-url)))
+	  ((and (null (egg--svn nil "info" svn-branch-url))
+		(progn 
+		  (setq git-commit
+			(egg-git-to-string "rev-list" "--max-count=1" (concat l-ref "^{/git-svn-id:}")))
+		  (setq svn-rev 
+			(and git-commit
+			     (egg-pick-from-commit-message git-commit
+							   "^git-svn-id: \\(.+\\) .+$" 1)))
+		  (y-or-n-p (format "create new svn branch %s at %s? " 
+				    (propertize svn-branch-url 'face 'bold) 
+				    (propertize svn-rev 'face 'bold)))))
+	   (setq res (egg--svn-copy nil (concat "create branch " r-ref) 
+				    svn-rev svn-branch-url))
+	   (setq line (plist-get res :line))
+	   (unless (plist-get res :success)
+	     (error (or (plist-get res :line)
+			(format "Failed to create svn branch: %s at %s" 
+				svn-branch-url svn-rev))))
+	   (setq svn-rev (save-match-data
+			   (if (string-match "Committed revision \\([0-9]+\\)\\." line)
+			       (match-string-no-properties 1 line)
+			     (error "Can't parse svn revision number in: \"%s\"" line))))
+	   (setq res (egg--git-svn-fetch-rev buffer-to-update svn-rev))
+	   (message "created svn branch %s, please rebase %s on %s and push again" 
+		    (propertize svn-branch-url 'face 'bold)
+		    (propertize l-ref 'face 'bold)
+		    (propertize r-full-name 'face 'bold))
+	   nil)
+	  ((progn
+	     (setq git-commit (egg-git-to-string "rev-parse" r-full-name))
+	     (setq base-commit (egg-git-to-string "merge-base" l-ref r-full-name))
+	     (not (equal git-commit base-commit)))
+	   (message "please rebase %s on %s before pushing on svn-remote %s"
+		    (propertize l-ref 'face 'bold)
+		    (propertize r-full-name 'face 'bold) 
+		    (propertize svn-name 'face 'bold))
+	   nil)
+	  ((not (equal (setq res (car (egg-git-lines-matching "Committing to \\(.+\\) \\.\\.\\." 1
+							      "svn" "dcommit" "-n" l-ref)))
+		       svn-branch-url))
+	   (error "Fatal: git-svn would dcommit %s on %s instead of %s!"
+		  l-ref res svn-branch-url))
+	  ((y-or-n-p (format "push %s, %d revision(s), on svn-path %s? "
+			     (propertize l-ref 'face 'bold) 
+			     (length (egg-git-to-lines "rev-list" (concat r-full-name ".." l-ref)))
+			     (propertize svn-branch-url 'face 'bold)))
+	   (egg--git-svn-dcommit buffer-to-update l-ref)))))
 
 (add-hook 'egg-special-remote-handlers #'egg-svn-handle-svn-remote)
-
-
+(add-hook 'egg-special-remotes #'egg-svn-get-all-prefixes)
 
 (provide 'egg-svn)
