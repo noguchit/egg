@@ -346,18 +346,25 @@ output processing function for `egg--do-handle-exit'."
 (defsubst egg-svn-full-to-remote (full-ref)
   (file-name-nondirectory (directory-file-name (file-name-directory full-ref))))
 
-(defun egg-svn-handle-svn-remote (branch remote &rest names)
- (if (or (egg-git-to-string "config" "--get" (concat "svn-remote." remote ".url"))
-	 (and (member branch (egg-svn-all-full-refs))
-	      (setq remote (egg-svn-full-to-remote branch))))
-     (cons branch (mapcar (lambda (name)
-			    (propertize name 
-					:svn-remote (egg-git-svn-remote-name)
-					:push #'egg-push-to-svn 
-					:fetch #'egg-fetch-from-svn))
-			  (cons remote names)))))
+(defun egg-svn-handle-svn-remote (remote branch &rest names)
+ (when (or (egg-git-to-string "config" "--get" (concat "svn-remote." remote ".url"))
+	   (and (stringp branch)
+		(member branch (egg-svn-all-full-refs))
+		(setq remote (egg-svn-full-to-remote branch))))
+   (setq remote (propertize remote
+			    :svn-remote (egg-git-svn-remote-name)
+			    :push #'egg-push-to-svn 
+			    :fetch #'egg-fetch-from-svn))
+   (mapc (lambda (name)
+	   (add-text-properties 0 (length name) 
+				(list :svn-remote (egg-git-svn-remote-name)
+				      :push #'egg-push-to-svn 
+				      :fetch #'egg-fetch-from-svn)
+				name))
+	 names)
+   remote))
 
-(add-hook 'egg-speciall-remote-handlers #'egg-svn-handle-svn-remote)
+(add-hook 'egg-special-remote-handlers #'egg-svn-handle-svn-remote)
 
 
 

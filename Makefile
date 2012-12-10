@@ -37,8 +37,10 @@ clean : doc.clean
 
 loaddeps : $(LOAD_DEPS)
 
-egg-reload.el : $(LOAD_DEPS)
+egg-reload.el : Makefile $(LOAD_DEPS)
 	@echo Generating $@
-	@cat $^ | tsort | sed -nre 's/^(.+)$$/\(load "\1"\)/p' > $@
+	@cat $(filter-out $<, $^) | tsort | sed -nre 's/^(.+)$$/\(load "\1"\)/p' > $@
+	@echo "(defun egg-reload ()\n  (interactive)" >> $@
+	@echo "  (load \"egg-reload\"))\n" >> $@
 
 -include $(DEPS)

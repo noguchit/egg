@@ -790,7 +790,7 @@ as repo state instead of re-read from disc."
   (and (egg-git-dir)
        (cadr (assoc attr (egg-config-section type name)))))
 
-(defvar egg-speciall-remote-handlers nil)
+(defvar egg-special-remote-handlers nil)
 
 (defun egg-tracking-target (branch &optional mode)
   (let ((remote (egg-config-get "branch" "remote" branch))
@@ -800,7 +800,8 @@ as repo state instead of re-read from disc."
       (setq rbranch (egg-rbranch-name rbranch-full))
       (cond ((null mode) (concat remote "/" rbranch))
             ((eq :name-only mode) rbranch)
-            (t (or (run-hook-with-args-until-success 'egg-speciall-remote-handlers rbranch-full remote)
+            (t (if (setq remote (run-hook-with-args-until-success 'egg-special-remote-handlers
+								  remote rbranch-full))
 		   (list rbranch remote)))))))
 
 (defun egg-complete-get-all-refs (prefix &optional matches)
@@ -901,7 +902,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; 8: is annotated tag
           '(1 2 3 4 5 6 7) "show-ref" "-d"))
 	(symbolic-HEAD (egg-get-symbolic-HEAD))
-        annotated-tags refs special-names r-remote r-branch)
+        annotated-tags refs)
     ;; remove the annotated tags from the list
     (setq refs-desc-list
           (delq nil
@@ -919,7 +920,8 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	  (mapcar (lambda (desc)
 		    (let ((full-name (cdr (assq 1 desc)))
 			  (name (cdr (or (assq 5 desc) (assq 7 desc))))
-			  (remote (cdr (assq 6 desc))))
+			  (remote (cdr (assq 6 desc)))
+			  short-name)
 		      (cond ((assq 2 desc)
 			     ;; head
 			     (cons full-name
@@ -941,26 +943,21 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 					    tag-properties))))
 			    ((assq 4 desc)
 			     ;; remote
+			     (setq short-name (substring name (length remote)))
+			     (setq remote (or (run-hook-with-args-until-success
+					       'egg-special-remote-handlers remote full-name short-name)
+					      remote))
 			     (cons full-name
-				   (progn
-				     (setq special-names 
-					   (or (cdr (run-hook-with-args-until-success
-						     'egg-speciall-remote-handlers full-name remote
-						     (substring name (length remote))))
-					       (list remote (substring name (length remote)))))
-				     (setq r-remote (nth 0 special-names)
-					   r-branch (nth 1 special-names))
-				     (concat (if (stringp r-remote)
-						 (apply 'propertize r-remote
+				   (concat (if (stringp remote)
+						 (apply 'propertize remote
 							:ref (cons name :remote)
 							remote-site-properties)
 					       ;; svn has no remote namee
 					       "")
-					     (apply 'propertize r-branch
+					     (apply 'propertize short-name
 						    :full-name full-name
 						    :ref (cons name :remote)
-						    remote-ref-properties))
-				     )))
+						    remote-ref-properties))))
 			    ((assq 7 desc)
 			     ;; stash
 			     (cons full-name
