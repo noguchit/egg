@@ -5096,8 +5096,9 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
 	   (setq remote-site (and (equal (nth 1 parts) "remotes") (nth 2 parts)))
 	   (setq name-at-remote (and remote-site (mapconcat 'identity (nthcdr 3 parts) "/")))
 	   (setq delete-on-remote (and remote-site
-				(y-or-n-p (format "delete %s on %s too? "
-						  name-at-remote remote-site))))
+				       (y-or-n-p (format "delete %s on %s too? "
+							 (propertize name-at-remote 'face 'bold) 
+							 (propertize remote-site 'face 'bold)))))
 	   (setq remote-ok
 		 (if delete-on-remote
 		     (egg--buffer-handle-result
@@ -5296,24 +5297,20 @@ prompt for a remote repo."
 	   (setq lref nil))
           ((eq type :head)
            (setq tracking (egg-tracking-target lref :remote))
+
            (if (consp tracking)
                (setq rref (nth 0 tracking)
-		     remote (nth 1 tracking)
-		     remote-info (get-text-property 0 :x-info remote)
-		     push-function (get-text-property 0 :x-push remote))
+		     remote (nth 1 tracking))
              (setq remote (egg-read-remote
                            (format "push branch %s to remote: " (propertize lref 'face 'bold))))
              (setq rref (read-string
                          (format "push branch %s to %s as: " 
 				 (propertize lref 'face 'bold)
 				 (propertize remote 'face 'bold))
-                         lref))
-	     (setq remote (or (run-hook-with-args-until-success 
-			       'egg-remote-info-handlers remote)
-			      remote))
-	     (setq remote-info (get-text-property 0 :x-info remote))
-	     (when remote-info
-	       (setq push-function (get-text-property 0 :x-push remote)))))
+                         lref)))
+	   (setq remote-info (egg-get-remote-properties remote rref))
+	   (setq push-function (plist-get remote-info :x-push))
+	   (setq remote-info (plist-get remote-info :x-info)))
           ((eq type :tag)
            (setq remote (egg-read-remote "push to remote: "))
            (setq rref (read-string

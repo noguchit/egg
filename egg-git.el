@@ -801,13 +801,11 @@ as repo state instead of re-read from disc."
 
 (defsubst egg-config-get-all-remote-names ()
   (nconc (mapcar 'car (egg-config-get-all-remotes))
-	 (run-hook-with-args-until-success 'egg-special-remotes)))
+	 (egg-get-all-remotes)))
 
 (defsubst egg-config-get (type attr &optional name)
   (and (egg-git-dir)
        (cadr (assoc attr (egg-config-section type name)))))
-
-(defvar egg-special-remote-handlers nil)
 
 (defun egg-tracking-target (branch &optional mode)
   (let ((remote (egg-config-get "branch" "remote" branch))
@@ -817,9 +815,8 @@ as repo state instead of re-read from disc."
       (setq rbranch (egg-rbranch-name rbranch-full))
       (cond ((null mode) (concat remote "/" rbranch))
             ((eq :name-only mode) rbranch)
-            (t (if (setq remote (run-hook-with-args-until-success 'egg-special-remote-handlers
-								  remote rbranch-full))
-		   (list rbranch remote)))))))
+	    ((eq :remote mode) (list rbranch-full remote))
+            (t (list rbranch remote))))))
 
 (defun egg-complete-get-all-refs (prefix &optional matches)
   (if matches
@@ -880,7 +877,6 @@ as repo state instead of re-read from disc."
   (completing-read prompt (egg-config-get-all-remote-names) nil t default))
 
 (defvar egg-add-remote-properties nil)
-
 (defun egg-add-remote-properties (name remote)
   (or (and (functionp egg-add-remote-properties)
 	   (funcall egg-add-remote-properties name remote))
@@ -890,6 +886,23 @@ as repo state instead of re-read from disc."
 	       (setq name (funcall func name remote)))
 	     name))
       name))
+
+(defvar egg-get-remote-properties nil)
+(defun egg-get-remote-properties (remote branch)
+  (cond ((functionp egg-get-remote-properties)
+	 (funcall egg-get-remote-properties remote branch))
+	((consp egg-get-remote-properties)
+	 (dolist-done (func egg-get-remote-properties props)
+	   (setq props (funcall func remote branch))))
+	(t nil)))
+
+(defvar egg-get-all-remotes nil)
+(defun egg-get-all-remotes ()
+  (cond ((functionp egg-get-all-remotes)
+	 (funcall egg-get-all-remotes))
+	((consp egg-get-all-remotes)
+	 (apply #'append (mapcar #'funcall egg-get-all-remotes)))
+	(t nil)))
 
 (defun egg-full-ref-decorated-alist (head-properties
                                      tag-properties
@@ -1450,6 +1463,24 @@ structure instead of the matching line."
 	   (save-match-data
 	     (goto-char (point-min))
 	     (when (re-search-forward regex nil t)
+	       (goto-char (match-beginning 0))
+	       (buffer-substring-no-properties 
+		(line-beginning-position)
+		(line-end-position)))))))
+    (when (stringp matched-line)
+      (nconc (list :line (if (stringp replacement) replacement matched-line))
+	     extras))))
+
+(defun egg--git-pp-grab-line-matching-backward (regex &optional replacement &rest extras)
+  "If REGEX matched a line in the current buffer, return it in a form suitable
+for `egg--do-show-output'. If REPLACEMENT was provided, use it in the returned
+structure instead of the matching line."
+  (let* ((case-fold-search nil)
+	 (matched-line 
+	 (when (stringp regex)
+	   (save-match-data
+	     (goto-char (point-max))
+	     (when (re-search-backward regex nil t)
 	       (goto-char (match-beginning 0))
 	       (buffer-substring-no-properties 
 		(line-beginning-position)

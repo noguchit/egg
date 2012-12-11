@@ -214,6 +214,16 @@ output processing function for `egg--do-handle-exit'."
 	   (t (egg--git-pp-fatal-result))))
    (list "fetch" (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
 
+(defun egg--git-svn-fetch (buffer-to-update)
+  (egg--do-git-action
+   "svn" buffer-to-update
+   (lambda (ret-code)
+     (cond ((= ret-code 0)
+	    (or (egg--git-pp-grab-line-matching-backward "^r[0-9]+ =" :success t :next-action 'log)
+		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
+	   (t (egg--git-pp-fatal-result))))
+   (list "fetch")))
+
 (defun egg--git-svn-dcommit (buffer-to-update branch)
   (egg--do-git-action
    "svn" buffer-to-update
@@ -378,7 +388,7 @@ output processing function for `egg--do-handle-exit'."
 			      (split-string line "[:* \t]+" t))
 			    (egg-git-to-lines "config" "--get-regexp" 
 					      "svn-remote\\..*\\.(branches|fetch)")))
-	  match tmp remote type)
+	  match tmp remote type props)
       (setq mappings
 	    (mapcar 
 	     (lambda (map)
@@ -390,14 +400,22 @@ output processing function for `egg--do-handle-exit'."
       (setq match (or (and branch (assoc branch mappings))
 		      (and spec (assoc spec mappings))))
       (when match
-	(propertize name
-		    :x-delete #'egg-delete-svn-path
-		    :x-push #'egg-push-to-svn
-		    :x-fetch #'egg-fetch-from-svn
-		    :x-info (cdr match))))))
+	(setq props (list :x-delete #'egg-delete-svn-path
+			  :x-push #'egg-push-to-svn
+			  :x-fetch #'egg-fetch-from-svn
+			  :x-info (cdr match)))
+	(if (stringp name)
+	    (apply #'propertize name props)
+	  props)))))
 
 (defun egg-svn-add-remote-properies (name prefix)
   (egg-svn-map-name name nil (concat "refs/remotes/" prefix "/")))
+
+(defun egg-svn-get-remote-properies (prefix branch)
+  (or (and (not (equal prefix "."))
+	   (egg-svn-map-name nil nil (concat "refs/remotes/" prefix "/")))
+      (and (stringp branch) 
+	   (egg-svn-map-name nil branch (file-name-directory branch)))))
 
 (defun egg-svn-ref-to-path (r-ref x-info)
   (when (and (stringp r-ref) (consp x-info))
@@ -424,40 +442,62 @@ output processing function for `egg--do-handle-exit'."
 	(r-ref (file-name-nondirectory r-ref))
 	res)
     (when (stringp svn-path)
-      (setq res (egg--svn-delete buffer-to-update (concat "delete " r-ref)
-				 svn-path))
+      (setq res (if (save-match-data (string-match "@" r-ref)) 
+		    ;; git-svn's metadata only, not on svn repo
+		    (list :success t :next-action 'log)
+		  (egg--svn-delete buffer-to-update (concat "delete " r-ref)
+				   svn-path)))
       (when (and (plist-get res :success) (stringp local-dir))
 	(delete-directory local-dir t)))
     res))
 
-(defsubst egg-svn-full-ref-to-svn (branch)
-  (egg-svn-map-name (egg-svn-full-to-remote branch) branch (file-name-directory branch)))
+(defun egg-svn-find-last-mapped-rev (git-start)
+  (let ((commit (egg-git-to-string "rev-parse" (concat git-start "^{/git-svn-id:}")))
+	found svn-rev)
+    (while (and (not found) commit)
+      (setq svn-rev (egg-git-to-string "svn" "find-rev" commit))
+      (unless (and svn-rev
+		   (setq found (egg-git-to-string "svn" "find-rev" (concat "r" svn-rev) git-start))
+		   (equal found commit))
+	(setq found nil)
+	(setq commit (egg-git-to-string "rev-parse" (concat commit "^^{/git-svn-id:}")))))
+    found))
 
-(defsubst egg-svn-ref-prefix-to-svn (prefix)
-  (egg-svn-map-name prefix nil (concat "refs/remotes/" prefix "/")))
+(defun egg-svn-path-exists-p (path-url)
+  (egg--svn nil "info" path-url))
 
-(defun egg-svn-copy-remote-properties (dest src)
-  (add-text-properties 0 (length dest)
-		       (apply 'nconc (mapcar (lambda (prop)
-					       (list prop (get-text-property 0 prop src)))
-					     '(:x-push :x-fetch :x-info :x-delete)))
-		       dest))
- 
-(defun egg-svn-handle-svn-remote (remote &optional branch &rest names)
-  (let ((svn-remote (cond ((stringp branch) 
-			   (egg-svn-full-ref-to-svn branch))
-			  ((and (stringp remote) (not (equal "." remote)))
-			   (egg-svn-ref-prefix-to-svn remote))
-			  (t nil))))
+(defun egg-svn-make-branch-from (buffer-to-update svn-repo-name new-url from-url)
+  (let ((res (egg--svn-copy nil (concat "create branch " (file-name-nondirectory new-url))
+			    from-url new-url))
+	(pretty-new (propertize new-url 'face 'bold))
+	(pretty-from (propertize from-url 'face 'bold))
+	line ok new-rev fetched-rev)
     
-    (when svn-remote
-      (mapc (lambda (name)
-	      (egg-svn-copy-remote-properties name svn-remote))
-	    names))
-
-    svn-remote))
-
-
+    (setq line (plist-get res :line))
+    (if (not (plist-get res :success))
+	(error "Failed to create %s from %s: %s" pretty-new pretty-from line)
+      (setq new-rev (save-match-data
+		      (if (string-match "Committed revision \\([0-9]+\\)\\." line)
+			  (match-string-no-properties 1 line)
+			(error "Can't parse svn revision number in: \"%s\"" line))))
+      (setq new-rev (string-to-number new-rev))
+      (setq res (egg--git-svn-fetch buffer-to-update))
+      (setq line (plist-get res :line))
+      (if (not (plist-get res :success))
+	  (error "Failed to do post-copy fetch: %s" line)
+	(setq fetched-rev (string-to-number (egg-git-svn-max-rev svn-repo-name)))
+	(if (>= fetched-rev new-rev)
+	    (setq ok t)
+	  (setq res (egg--git-svn-fetch-rev buffer-to-update new-rev))
+	  (setq line (plist-get res :line))
+	  (if (not (plist-get res :success))
+	      (error "Failed to fetch svn revision %s: %s" new-rev line)
+	    (setq fetched-rev (string-to-number (egg-git-svn-max-rev svn-repo-name)))
+	    (if (>= fetched-rev new-rev)
+		(setq ok t)
+	      (error "Problems with git-svn: needs to fetch r%s but git-svn only fetch up to r%s" 
+		     new-rev fetched-rev))))))
+    ok))
 
 (defun egg-push-to-svn (buffer-to-update svn-remote l-ref r-ref)
   (let* ((svn-name (car svn-remote))
@@ -479,36 +519,21 @@ output processing function for `egg--do-handle-exit'."
 	   (error "Failed to map branch %s on svn remote %s" r-ref svn-name))
 	  ((not (stringp l-ref))
 	   (error "Can't push local ref: %s" l-ref))
-	  ((equal l-ref "--delete")
-	   (when (y-or-n-p (format "Delete svn path %s? " (propertize svn-branch-url 'face 'bold)))
-	     (egg--svn-delete buffer-to-update "Delete branch" svn-branch-url)))
-	  ((and (null (egg--svn nil "info" svn-branch-url))
+	  ((and (not (egg-svn-path-exists-p svn-branch-url))
 		(progn 
-		  (setq git-commit
-			(egg-git-to-string "rev-list" "--max-count=1" (concat l-ref "^{/git-svn-id:}")))
-		  (setq svn-rev 
-			(and git-commit
-			     (egg-pick-from-commit-message git-commit
-							   "^git-svn-id: \\(.+\\) .+$" 1)))
-		  (y-or-n-p (format "create new svn branch %s at %s? " 
+		  (setq git-commit (egg-svn-find-last-mapped-rev l-ref))
+		  (setq svn-rev (and git-commit
+				     (egg-pick-from-commit-message git-commit
+								   "^git-svn-id: \\(.+\\) .+$" 1)))
+		  (y-or-n-p (format "create new svn branch %s at %s (%s)? " 
 				    (propertize svn-branch-url 'face 'bold) 
-				    (propertize svn-rev 'face 'bold)))))
-	   (setq res (egg--svn-copy nil (concat "create branch " r-ref) 
-				    svn-rev svn-branch-url))
-	   (setq line (plist-get res :line))
-	   (unless (plist-get res :success)
-	     (error (or (plist-get res :line)
-			(format "Failed to create svn branch: %s at %s" 
-				svn-branch-url svn-rev))))
-	   (setq svn-rev (save-match-data
-			   (if (string-match "Committed revision \\([0-9]+\\)\\." line)
-			       (match-string-no-properties 1 line)
-			     (error "Can't parse svn revision number in: \"%s\"" line))))
-	   (setq res (egg--git-svn-fetch-rev buffer-to-update svn-rev))
-	   (message "created svn branch %s, please rebase %s on %s and push again" 
-		    (propertize svn-branch-url 'face 'bold)
-		    (propertize l-ref 'face 'bold)
-		    (propertize r-full-name 'face 'bold))
+				    (propertize svn-rev 'face 'bold)
+				    git-commit))))
+	   (when (egg-svn-make-branch-from buffer-to-update svn-name svn-branch-url svn-rev)
+	     (message "created svn branch %s, please rebasese %s on %s and push again" 
+		      (propertize svn-branch-url 'face 'bold)
+		      (propertize l-ref 'face 'bold)
+		      (propertize r-full-name 'face 'bold)))
 	   nil)
 	  ((progn
 	     (setq git-commit (egg-git-to-string "rev-parse" r-full-name))
@@ -533,8 +558,7 @@ output processing function for `egg--do-handle-exit'."
 
 
 (add-to-list 'egg-add-remote-properties #'egg-svn-add-remote-properies)
-
-(add-hook 'egg-special-remote-handlers #'egg-svn-handle-svn-remote)
-(add-hook 'egg-special-remotes #'egg-svn-get-all-prefixes)
+(add-to-list 'egg-get-remote-properties #'egg-svn-get-remote-properies)
+(add-to-list 'egg-get-all-remotes #'egg-svn-get-all-prefixes)
 
 (provide 'egg-svn)
