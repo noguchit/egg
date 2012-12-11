@@ -879,7 +879,17 @@ as repo state instead of re-read from disc."
   "Query user for a remote using PROMPT. DEFAULT is the default value."
   (completing-read prompt (egg-config-get-all-remote-names) nil t default))
 
+(defvar egg-add-remote-properties nil)
 
+(defun egg-add-remote-properties (name remote)
+  (or (and (functionp egg-add-remote-properties)
+	   (funcall egg-add-remote-properties name remote))
+      (and (consp egg-add-remote-properties)
+	   (let ((name name))
+	     (dolist (func egg-add-remote-properties)
+	       (setq name (funcall func name remote)))
+	     name))
+      name))
 
 (defun egg-full-ref-decorated-alist (head-properties
                                      tag-properties
@@ -960,21 +970,15 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 					    tag-properties))))
 			    ((assq 4 desc)
 			     ;; remote
-			     (setq short-name (substring name (length remote)))
-			     (setq remote (or (run-hook-with-args-until-success
-					       'egg-special-remote-handlers remote full-name short-name)
-					      remote))
 			     (cons full-name
-				   (concat (if (stringp remote)
-						 (apply 'propertize remote
-							:ref (cons name :remote)
-							remote-site-properties)
-					       ;; svn has no remote namee
-					       "")
-					     (apply 'propertize short-name
-						    :full-name full-name
-						    :ref (cons name :remote)
-						    remote-ref-properties))))
+				   (egg-add-remote-properties 
+				    (concat (apply 'propertize remote
+						   :ref (cons name :remote)
+						   remote-site-properties)
+					    (apply 'propertize (substring name (length remote))
+						   :full-name full-name
+						   :ref (cons name :remote)
+						   remote-ref-properties)) remote)))
 			    ((assq 7 desc)
 			     ;; stash
 			     (cons full-name

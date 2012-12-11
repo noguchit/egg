@@ -5077,8 +5077,8 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
   "Remove the ref at POS."
   (interactive "d\nP")
   (let ((victim (get-text-property pos :full-name))
-	(special-remote (get-text-property pos :svn-remote))
-	(special-push (get-text-property pos :push))
+	(remote-info (get-text-property pos :x-info))
+	(delete-on-remote-func (get-text-property pos :x-delete))
 	parts delete-on-remote remote-site name-at-remote
 	remote-ok pretty)
 
@@ -5101,8 +5101,8 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
 	   (setq remote-ok
 		 (if delete-on-remote
 		     (egg--buffer-handle-result
-		      (if (and special-push special-remote)
-			 (funcall special-push (current-buffer) special-remote "--delete" name-at-remote)
+		      (if (and delete-on-remote-func remote-info)
+			 (funcall delete-on-remote-func (current-buffer) remote-info name-at-remote)
 		       (egg--git-push-cmd (current-buffer) "--delete" remote-site name-at-remote)))
 		   t))
 
@@ -5287,7 +5287,8 @@ prompt for a remote repo."
   (let* ((ref-at-point (get-text-property pos :ref))
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
-         rref tracking remote spec special-push special-remote)
+	 (commit (egg-commit-at-point pos))
+         rref tracking remote spec push-function remote-info)
     (unless ref-at-point
       (error "Nothing to push here!"))
     (cond ((eq type :remote)
@@ -5298,8 +5299,8 @@ prompt for a remote repo."
            (if (consp tracking)
                (setq rref (nth 0 tracking)
 		     remote (nth 1 tracking)
-		     special-remote (get-text-property 0 :svn-remote remote)
-		     special-push (get-text-property 0 :push remote))
+		     remote-info (get-text-property 0 :x-info remote)
+		     push-function (get-text-property 0 :x-push remote))
              (setq remote (egg-read-remote
                            (format "push branch %s to remote: " (propertize lref 'face 'bold))))
              (setq rref (read-string
@@ -5308,11 +5309,11 @@ prompt for a remote repo."
 				 (propertize remote 'face 'bold))
                          lref))
 	     (setq remote (or (run-hook-with-args-until-success 
-			       'egg-special-remote-handlers remote)
+			       'egg-remote-info-handlers remote)
 			      remote))
-	     (setq special-remote (get-text-property 0 :svn-remote remote))
-	     (when special-remote
-	       (setq special-push (get-text-property 0 :push remote)))))
+	     (setq remote-info (get-text-property 0 :x-info remote))
+	     (when remote-info
+	       (setq push-function (get-text-property 0 :x-push remote)))))
           ((eq type :tag)
            (setq remote (egg-read-remote "push to remote: "))
            (setq rref (read-string
@@ -5323,8 +5324,8 @@ prompt for a remote repo."
                                remote rref)
                        rref))))
     (when (and remote rref lref)
-      (if (functionp special-push)
-	  (funcall special-push (current-buffer) special-remote lref rref)
+      (if (functionp push-function)
+	  (funcall push-function (current-buffer) remote-info lref rref)
 	(setq spec (concat lref ":" rref))
 	(message "GIT> pushing %s to %s on %s..." lref rref remote)
 	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))

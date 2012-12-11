@@ -391,9 +391,44 @@ output processing function for `egg--do-handle-exit'."
 		      (and spec (assoc spec mappings))))
       (when match
 	(propertize name
-		    :push #'egg-push-to-svn
-		    :fetch #'egg-fetch-from-svn
-		    :svn-remote (cdr match))))))
+		    :x-delete #'egg-delete-svn-path
+		    :x-push #'egg-push-to-svn
+		    :x-fetch #'egg-fetch-from-svn
+		    :x-info (cdr match))))))
+
+(defun egg-svn-add-remote-properies (name prefix)
+  (egg-svn-map-name name nil (concat "refs/remotes/" prefix "/")))
+
+(defun egg-svn-ref-to-path (r-ref x-info)
+  (when (and (stringp r-ref) (consp x-info))
+    (let ((r-ref (file-name-nondirectory r-ref))
+	  (svn-name (car x-info))
+	  (map-type (nth 1 x-info))
+	  (dest (nth 2 x-info))
+	  url)
+      (setq url (and svn-name (egg-git-svn-url svn-name)))
+      (when (and (stringp url) (memq map-type '(:fetch :branches)) (stringp dest))
+	(concat url "/" (cond ((eq map-type :fetch) dest)
+			      ((eq map-type :branches) (concat dest r-ref))))))))
+
+(defun egg-svn-ref-to-git-svn-dir (r-ref x-info)
+  (when (and (stringp r-ref) (consp x-info))
+    (let ((r-ref (file-name-nondirectory r-ref))
+	  (local-base (nth 3 x-info)))
+      (when (stringp local-base)
+	(concat (egg-git-dir) "/svn/" local-base r-ref)))))
+
+(defun egg-delete-svn-path (buffer-to-update x-info r-ref)
+  (let ((svn-path (egg-svn-ref-to-path r-ref x-info))
+	(local-dir (egg-svn-ref-to-git-svn-dir r-ref x-info))
+	(r-ref (file-name-nondirectory r-ref))
+	res)
+    (when (stringp svn-path)
+      (setq res (egg--svn-delete buffer-to-update (concat "delete " r-ref)
+				 svn-path))
+      (when (and (plist-get res :success) (stringp local-dir))
+	(delete-directory local-dir t)))
+    res))
 
 (defsubst egg-svn-full-ref-to-svn (branch)
   (egg-svn-map-name (egg-svn-full-to-remote branch) branch (file-name-directory branch)))
@@ -405,7 +440,7 @@ output processing function for `egg--do-handle-exit'."
   (add-text-properties 0 (length dest)
 		       (apply 'nconc (mapcar (lambda (prop)
 					       (list prop (get-text-property 0 prop src)))
-					     '(:push :fetch :svn-remote)))
+					     '(:x-push :x-fetch :x-info :x-delete)))
 		       dest))
  
 (defun egg-svn-handle-svn-remote (remote &optional branch &rest names)
@@ -421,6 +456,8 @@ output processing function for `egg--do-handle-exit'."
 	    names))
 
     svn-remote))
+
+
 
 (defun egg-push-to-svn (buffer-to-update svn-remote l-ref r-ref)
   (let* ((svn-name (car svn-remote))
@@ -492,6 +529,10 @@ output processing function for `egg--do-handle-exit'."
 			     (length (egg-git-to-lines "rev-list" (concat r-full-name ".." l-ref)))
 			     (propertize svn-branch-url 'face 'bold)))
 	   (egg--git-svn-dcommit buffer-to-update l-ref)))))
+
+
+
+(add-to-list 'egg-add-remote-properties #'egg-svn-add-remote-properies)
 
 (add-hook 'egg-special-remote-handlers #'egg-svn-handle-svn-remote)
 (add-hook 'egg-special-remotes #'egg-svn-get-all-prefixes)
