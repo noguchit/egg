@@ -5226,6 +5226,8 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
+	 (remote-info (get-text-property pos :x-info))
+	 (fetch-function (get-text-property pos :x-fetch))
          site name def remote)
     (unless (eq type :remote)
       (error "No site here to fetch from!"))
@@ -5236,11 +5238,15 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
       (if (equal name "--all")
           (progn
             (message "GIT> fetching everything from %s..." remote)
-            (egg-buffer-async-do nil "fetch" remote))
+            (if (functionp fetch-function)
+		(funcall fetch-function (current-buffer) remote-info "--all")
+	      (egg-buffer-async-do nil "fetch" remote)))
         (message "GIT> fetching %s from %s..." name remote)
-        (egg-buffer-async-do nil "fetch" remote
-                             (format "refs/heads/%s:refs/remotes/%s/%s"
-                                     name remote name))))))
+        (if (functionp fetch-function)
+	    (funcall fetch-function (current-buffer) remote-info (concat remote "/" name))
+	  (egg-buffer-async-do nil "fetch" remote
+			       (format "refs/heads/%s:refs/remotes/%s/%s"
+				       name remote name)))))))
 
 (defun egg-log-buffer-push-to-local (pos &optional level)
   "Push commit at POS onto HEAD.

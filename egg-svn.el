@@ -724,13 +724,16 @@ output processing function for `egg--do-handle-exit'."
 
 
 (defun egg-fetch-from-svn (buffer-to-update svn-remote r-ref)
-  (let* ((svn-name (car svn-remote))
+  (let* ((r-ref (if (equal r-ref "--all") nil r-ref))
+	 (svn-name (car svn-remote))
 	 (map-type (nth 1 svn-remote))
-	 (full-ref (save-match-data
-		     (if (string-match "\\`refs/remotes/" r-ref)
-			 r-ref
-		       (car (egg-git-lines-matching " \\(refs/remotes/.+\\)$" 1 "show-ref" r-ref)))))
-	 (shor-ref (and full-ref (file-name-nondirectory full-ref)))
+	 (full-ref (and r-ref
+			(save-match-data
+			  (if (string-match "\\`refs/remotes/" r-ref)
+			      r-ref
+			    (car (egg-git-lines-matching " \\(refs/remotes/.+\\)$" 1
+							 "show-ref" r-ref))))))
+	 (short-ref (and full-ref (file-name-nondirectory full-ref)))
 	 (url (and svn-name (egg-git-svn-url svn-name)))
 	 (svn-path (if full-ref
 		       (egg-git-svn-map-full-ref full-ref)
@@ -738,19 +741,24 @@ output processing function for `egg--do-handle-exit'."
 	 (svn-path-url (and url svn-path (concat url "/" svn-path)))
 	 (local-base (or (and full-ref (file-name-directory full-ref))
 			 (and svn-path (egg-git-svn-map-svn-path svn-path))))
+	 (local-name full-ref)
 	 max-rev rev-to-fetch res line fetch-unknown)
 
-    (when (null full-ref)
-      (egg-fetch-unknown-svn-path buffer-to-update svn-remote svn-path local-base)
-      (setq fetch-unknown t))
+    (if r-ref
+	(when (null full-ref)
+	  (egg-fetch-unknown-svn-path buffer-to-update svn-remote svn-path local-base)
+	  (setq fetch-unknown t))
+      ;; fetch all
+      (setq svn-path-url url)
+      (setq local-name "everything"))
 
     (setq rev-to-fetch (string-to-number (egg-svn-path-last-rev svn-path-url)))
 
     (setq max-rev (string-to-number (egg-git-svn-max-rev svn-name)))
     (if (>= max-rev rev-to-fetch)
 	(if fetch-unknown 
-	    (message "%s is now up-to-date, no extra fetching required!" full-ref)
-	  (message "%s is already up-to-date, no fetching required!" full-ref))
+	    (message "%s is now up-to-date, no extra fetching required!" local-name)
+	  (message "%s is already up-to-date, no fetching required!" local-name))
       (setq res (egg--git-svn-fetch buffer-to-update))
       (setq line (plist-get res :line))
       (unless (plist-get res :success)
