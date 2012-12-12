@@ -5243,7 +5243,7 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
 	      (egg-buffer-async-do nil "fetch" remote)))
         (message "GIT> fetching %s from %s..." name remote)
         (if (functionp fetch-function)
-	    (funcall fetch-function (current-buffer) remote-info (concat remote "/" name))
+	    (funcall fetch-function (current-buffer) remote-info name)
 	  (egg-buffer-async-do nil "fetch" remote
 			       (format "refs/heads/%s:refs/remotes/%s/%s"
 				       name remote name)))))))

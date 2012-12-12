@@ -162,6 +162,9 @@ Return the output lines as a list of strings."
   (let ((default-directory (concat (egg-git-dir) "/svn/refs/remotes/")))
     (car (file-expand-wildcards (concat "*/" svn-name)))))
 
+(defsubst egg-svn-is-known-ref (full-ref &optional svn-name)
+  (file-directory-p (concat (egg-git-dir) "/svn/" full-ref)))
+
 (defsubst egg-svn-all-refs (&optional prefix)
   (let ((default-directory (concat (egg-git-dir) "/svn/refs/remotes/")))
     (file-expand-wildcards (concat (or prefix "*") "/*"))))
@@ -545,6 +548,9 @@ output processing function for `egg--do-handle-exit'."
     (egg--git nil "config" "--add" (egg-git-svn-config-name "branches")
 	      (concat svn-path-prefix "*:" git-svn-prefix "*"))))
 
+(defun egg--git-svn-add-custom-branch-mapping (mapping)
+  (egg--git nil "config" "--add" (egg-git-svn-config-name "branches") mapping))
+
 (defun egg--git-svn-add-direct-mapping (svn-path git-full-ref)
   (let ((svn-path (directory-file-name svn-path)))
     (egg--git nil "config" "--add" (egg-git-svn-config-name "fetch")
@@ -670,13 +676,16 @@ output processing function for `egg--do-handle-exit'."
       
       (if (setq use-direct-mapping
 		(y-or-n-p (format "use direct mapping (%s:%s)? " svn-path full-ref)))
-	  (setq mapping-config (concat svn-path ":" full-ref))
+	  (progn
+	    (setq mapping-config (concat svn-path ":" full-ref))
+	    (egg--git-svn-add-direct-mapping svn-path full-ref))
 	(setq mapping-config (concat (file-name-directory svn-path) "*:"
 				     (file-name-directory full-ref) "*"))
 	(setq mapping-config
 	      (read-string "add svn->git mapping rule: " mapping-config))
-	(unless (string-match (concat "\\*:" (file-name-directory full-ref) "\\*\\'")
-			      mapping-config)
+	(if (string-match (concat "\\*:" (file-name-directory full-ref) "\\*\\'")
+			  mapping-config)
+	    (egg--git-svn-add-custom-branch-mapping mapping-config)
 	  (error "Cannot handle mapping svn->git mapping: %s" mapping-config)))
 
       (setq rev-to-fetch (egg--svn-get-parent-revision svn-path svn-name))
@@ -727,28 +736,51 @@ output processing function for `egg--do-handle-exit'."
   (let* ((r-ref (if (equal r-ref "--all") nil r-ref))
 	 (svn-name (car svn-remote))
 	 (map-type (nth 1 svn-remote))
-	 (full-ref (and r-ref
-			(save-match-data
-			  (if (string-match "\\`refs/remotes/" r-ref)
-			      r-ref
-			    (car (egg-git-lines-matching " \\(refs/remotes/.+\\)$" 1
-							 "show-ref" r-ref))))))
-	 (short-ref (and full-ref (file-name-nondirectory full-ref)))
 	 (url (and svn-name (egg-git-svn-url svn-name)))
-	 (svn-path (if full-ref
-		       (egg-git-svn-map-full-ref full-ref)
-		     r-ref))
-	 (svn-path-url (and url svn-path (concat url "/" svn-path)))
-	 (local-base (or (and full-ref (file-name-directory full-ref))
-			 (and svn-path (egg-git-svn-map-svn-path svn-path))))
-	 (local-name full-ref)
+	 (local-base (nth 3 svn-remote))
+	 full-ref short-ref svn-path svn-path-url local-name
 	 max-rev rev-to-fetch res line fetch-unknown)
 
+    (setq full-ref 
+	  (save-match-data
+	    (cond ((null r-ref)
+		   ;; --all
+		   nil)
+		  ((string-match "\\`refs/remotes/" r-ref)
+		   ;; r-ref is fully-named ref
+		   r-ref)
+		  ((string-match "/" r-ref)
+		   ;; svn-path
+		   (setq svn-path r-ref)
+		   nil)
+		  ((eq map-type :fetch)
+		   ;; e.g. cursor was on svn/release1 and r-ref is release2
+		   (concat (file-name-nondirectory local-base) r-ref))
+		  ((eq map-type :branches)
+		   ;; e.g. cursor was on user1/my_stuffs_a and r-ref is my_stuffs_b
+		   (concat local-base r-ref))
+		  (t (error "Cannot determine full-ref from %s" r-ref)))))
+
     (if r-ref
-	(when (null full-ref)
-	  (egg-fetch-unknown-svn-path buffer-to-update svn-remote svn-path local-base)
-	  (setq fetch-unknown t))
-      ;; fetch all
+	(progn
+	  ;; not fetching --all
+	  (if svn-path
+	      ;; r-ref is svn-path, fetch from and svn and map
+	      (setq full-ref (egg-fetch-unknown-svn-path buffer-to-update 
+							 svn-remote svn-path local-base))
+	    ;; r-ref might be a known ref which might need update
+	    ;; or a new ref based on an existing mapping.
+	    (setq svn-path (egg-git-svn-map-full-ref full-ref))
+	    (unless (egg-svn-is-known-ref full-ref)
+	      ;; new ref based on an existing mapping.
+	      ;; how ever, the user might specify a new custom mapping
+	      (setq full-ref (egg-fetch-unknown-svn-path buffer-to-update 
+							 svn-remote svn-path local-base))))
+
+	  (setq local-base (file-name-directory full-ref))
+	  (setq svn-path-url (concat url "/" svn-path))
+	  (setq local-name full-ref))
+      ;; fetching --all
       (setq svn-path-url url)
       (setq local-name "everything"))
 
@@ -767,7 +799,8 @@ output processing function for `egg--do-handle-exit'."
       
     (setq max-rev (string-to-number (egg-git-svn-max-rev svn-name)))
     (when (< max-rev rev-to-fetch)
-      (message "failed to fetch r%d, retry fetching with explicit -r%d" rev-to-fetch rev-to-fetch)
+      (message "failed to fetch r%d, retry fetching with explicit -r%d" 
+	       rev-to-fetch rev-to-fetch)
       (setq res (egg--git-svn-fetch-rev buffer-to-update rev-to-fetch))
       (setq line (plist-get res :line))
       (unless (plist-get res :success)
