@@ -5204,6 +5204,9 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
+	 (remote-info (get-text-property pos :x-info))
+	 (fetch-function (get-text-property pos :x-fetch))
+	 (full-name (get-text-property pos :full-name))
          name remote)
     (unless (eq type :remote)
       (error "Nothing to fetch from here!"))
@@ -5211,9 +5214,11 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
           remote (egg-rbranch-to-remote ref))
     (when (and remote name)
       (message "GIT> fetching %s from %s..." ref remote)
-      (egg-buffer-async-do nil "fetch" remote
-                           (format "refs/heads/%s:refs/remotes/%s"
-                                   name ref)))))
+      (if (functionp fetch-function)
+	  (funcall fetch-function (current-buffer) remote-info full-name)
+	(egg-buffer-async-do nil "fetch" remote
+			     (format "refs/heads/%s:refs/remotes/%s"
+				     name ref))))))
 
 (defun egg-log-buffer-fetch (pos)
   "Fetch some refs from remote at POS."

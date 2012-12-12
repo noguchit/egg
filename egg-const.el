@@ -408,7 +408,8 @@ the index. \\{egg-wdir-diff-section-map}")
     (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
 
     (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
-    
+    (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
+	
     (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
 
