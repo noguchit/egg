@@ -514,6 +514,7 @@ output processing function for `egg--do-handle-exit'."
 					     (concat dest r-ref))
 					    (t (error "Unknown svn-to-git mapping type: %s"
 						      map-type))))))
+	 (l-is-ref (and (stringp l-ref) (egg-git-to-string "show-ref" l-ref)))
 	 git-commit svn-rev res line base-commit)
     (cond ((null svn-branch-url)
 	   (error "Failed to map branch %s on svn remote %s" r-ref svn-name))
@@ -530,7 +531,9 @@ output processing function for `egg--do-handle-exit'."
 				    (propertize svn-rev 'face 'bold)
 				    git-commit))))
 	   (when (egg-svn-make-branch-from buffer-to-update svn-name svn-branch-url svn-rev)
-	     (message "created svn branch %s, please rebasese %s on %s and push again" 
+	     (message (if l-is-ref 
+			  "created svn branch %s, please rebase %s on %s and push again"
+			"new svn branch %s (from %s) -> %s") 
 		      (propertize svn-branch-url 'face 'bold)
 		      (propertize l-ref 'face 'bold)
 		      (propertize r-full-name 'face 'bold)))
@@ -539,7 +542,9 @@ output processing function for `egg--do-handle-exit'."
 	     (setq git-commit (egg-git-to-string "rev-parse" r-full-name))
 	     (setq base-commit (egg-git-to-string "merge-base" l-ref r-full-name))
 	     (not (equal git-commit base-commit)))
-	   (message "please rebase %s on %s before pushing on svn-remote %s"
+	   (message (if l-is-ref 
+			"please rebase %s on %s before pushing on svn-remote %s"
+		      "%s -> %s is not an fast-forward push!")
 		    (propertize l-ref 'face 'bold)
 		    (propertize r-full-name 'face 'bold) 
 		    (propertize svn-name 'face 'bold))

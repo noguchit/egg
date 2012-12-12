@@ -3326,7 +3326,10 @@ POS."
   (interactive "d")
   (cond ((null egg-confirm-undo)
 	 (egg-hunk-section-apply-cmd pos "-p1" "--reverse"))
-	((eq egg-confirm-undo 'prompt)
+	((or (eq egg-confirm-undo 'prompt)
+	     ;; only status buffer can do "show-n-undo"
+	     ;; fallback to prompt
+	     (not (eq major-mode 'egg-status-buffer-mode)))
 	 (if (y-or-n-p "irreversibly remove the hunk under cursor? ")
 	     (egg-hunk-section-apply-cmd pos "-p1" "--reverse")
 	   (message "Too chicken to proceed with undo operation!")))
@@ -5289,37 +5292,103 @@ prompt for a remote repo."
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
 	 (commit (egg-commit-at-point pos))
-         rref tracking remote spec push-function remote-info)
-    (unless ref-at-point
-      (error "Nothing to push here!"))
-    (cond ((eq type :remote)
-	   (error "Refuse to upload remote-tracking ref %s" lref)
+	 type-name rref tracking remote spec push-function delete-function remote-info)
+    
+    (cond ((null commit) 
+	   (error "Nothing to push here!"))
+	  ((null type)
+	   ;; cursor was not on a ref
+	   ;; push the sha1 to remote
+	   (setq lref (egg-short-sha1 commit))
+	   (setq type-name "commit"))
+	  ((eq type :remote)
+	   ;; on a remote tracking branch name
+	   ;; push something to the remote
+	   ;; blank means delete on remote site
+	   (setq remote (egg-rbranch-to-remote lref))
+	   (setq type-name "ref")
 	   (setq lref nil))
-          ((eq type :head)
-           (setq tracking (egg-tracking-target lref :remote))
+	  ((eq type :tag)
+	   (setq type-name "tag"))
+	  ((eq type :head)
+	   (setq type-name "branch")
+	   (when (consp (setq tracking (egg-tracking-target lref :remote)))
+	     (setq rref (nth 0 tracking)
+		   remote (nth 1 tracking))))
+	  (t (error "Internal error: type is %s" type)))
 
+    (cond ((and (null lref) (null remote))
+	   (error "Internal error: lref=%s remote=%s" lref remote))
+	  ((null lref)
+	   (setq lref 
+		 (egg-read-local-ref 
+		  (format "local ref to push to %s (none means deleting the a remote ref):"
+			  (propertize remote 'face 'bold)))))
+	  ((null remote)
+	   (setq remote
+		 (egg-read-remote (format "push %s %s to: " type-name
+					  (propertize lref 'face 'bold))))))
+
+    (unless rref
+      (setq rref (if (equal "" lref)
+		     (read-string (format "delete %s's ref: " (propertize remote 'face 'bold)))
+		   (read-string (format "push %s %s to %s as: " type-name
+					(propertize lref 'face 'bold)
+					(propertize remote 'face 'bold)) lref))))
+
+    (setq remote-info (egg-get-remote-properties remote rref))
+    (setq push-function (plist-get remote-info :x-push))
+    (setq delete-function (plist-get remote-info :x-delete))
+    (setq remote-info (plist-get remote-info :x-info))
+
+
+    (if (equal "" lref)
+	(progn
+	  (message "EGG> deleting %s on %s..." rref remote)
+	  (if (functionp delete-function)
+	      (funcall delete-function (current-buffer) remote-info rref)
+	    (egg-buffer-async-do nil "push" "--delete" remote rref)))
+      (message "GIT> pushing %s to %s on %s..." lref rref remote)
+      (if (functionp push-function)
+	  (funcall push-function (current-buffer) remote-info lref rref)
+	(setq spec (concat lref ":" rref))
+	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))
+
+(defun egg-log-buffer-push-to-remote-old (pos &optional non-ff)
+  "Upload the ref at POS to a remote repository.
+If the ref track a remote tracking branch, then the repo to
+upload to is the repo of the remote tracking branch. Otherwise,
+prompt for a remote repo."
+  (interactive "d\nP")
+  (let* ((ref-at-point (get-text-property pos :ref))
+         (lref (car ref-at-point))
+         (type (cdr ref-at-point))
+	 (commit (egg-commit-at-point pos))
+	 type-name rref tracking remote spec push-function remote-info)
+    (unless commit
+      (error "Nothing to push here!"))
+    (cond ((or (eq type :remote) commit)
+	   (setq lref commit))
+          ((memq type '(:tag :head))
+	   (if (eq type :tag)
+	       (setq type-name "tag")
+	     (setq type-name "branch")
+	     (setq tracking (egg-tracking-target lref :remote)))
+           
            (if (consp tracking)
                (setq rref (nth 0 tracking)
 		     remote (nth 1 tracking))
              (setq remote (egg-read-remote
-                           (format "push branch %s to remote: " (propertize lref 'face 'bold))))
+                           (format "push %s %s to remote: " type-name
+				   (propertize lref 'face 'bold))))
              (setq rref (read-string
-                         (format "push branch %s to %s as: " 
+                         (format "push %s %s to %s as: " type-name
 				 (propertize lref 'face 'bold)
 				 (propertize remote 'face 'bold))
                          lref)))
 	   (setq remote-info (egg-get-remote-properties remote rref))
 	   (setq push-function (plist-get remote-info :x-push))
-	   (setq remote-info (plist-get remote-info :x-info)))
-          ((eq type :tag)
-           (setq remote (egg-read-remote "push to remote: "))
-           (setq rref (read-string
-                       (format "remote tag to push at (on %s): " remote)
-                       lref))
-           (setq lref (read-string
-                       (format "local tag to push at %s/%s (empty mean delete the remote tag) : "
-                               remote rref)
-                       rref))))
+	   (setq remote-info (plist-get remote-info :x-info))))
     (when (and remote rref lref)
       (if (functionp push-function)
 	  (funcall push-function (current-buffer) remote-info lref rref)

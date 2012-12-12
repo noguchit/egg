@@ -463,7 +463,7 @@ the index. \\{egg-wdir-diff-section-map}")
   (let ((map (make-sparse-keymap "Egg:LogRemoteSite")))
     (set-keymap-parent map egg-log-commit-map)
     (define-key map (kbd "D") 'egg-log-buffer-fetch)
-    (define-key map (kbd "U") 'egg-log-buffer-push)
+    (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-remote-site-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-remote-site-menu)
