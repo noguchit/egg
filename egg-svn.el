@@ -179,6 +179,35 @@ Return the output lines as a list of strings."
 				       "svn-remote\\..+\\\.(branches|fetch)")))
 
 
+(defun egg-svn-decode-rev-map (file-name)
+  (with-temp-buffer
+    (insert-file-contents-literally file-name)
+    (goto-char (point-min))
+    (let (mappings record svn-rev git-sha1) 
+      (while (not (eobp))
+	(setq record (decode-coding-string 
+		      (buffer-substring-no-properties (point) (+ (point) 24))
+		      'raw-text-unix))
+	(setq git-sha1 (substring record 4))
+	(setq svn-rev (logior (lsh (aref record 0) 24)
+			      (lsh (aref record 1) 16)
+			      (lsh (aref record 2) 8)
+			      (lsh (aref record 3) 0)))
+	(setq git-sha1 (mapconcat (lambda (val) (format "%02x" val)) git-sha1 ""))
+	(push (list svn-rev git-sha1 (directory-file-name (file-name-directory file-name)))
+	      mappings)
+	(forward-char 24))
+      mappings)))
+
+(defun egg-svn-decode-all-revmap (prefixes)
+  (let* ((default-directory (concat (egg-git-dir) "/svn/"))
+	 (files (apply #'nconc
+		       (mapcar (lambda (prefix)
+				 (file-expand-wildcards (concat "refs/remotes/" prefix "/*/.rev_map.*")))
+			       prefixes))))
+    (apply #'nconc (mapcar #'egg-svn-decode-rev-map files))))
+
+
 (defun egg--do-svn-action (cmd buffer-to-update post-proc-func args)
   "Run svn command CMD with arguments list ARGS.
 Show the output of CMD as feedback of the emacs command.
@@ -235,7 +264,7 @@ output processing function for `egg--do-handle-exit'."
 	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t :next-action 'log)
 		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
 	   (t (egg--git-pp-fatal-result))))
-   (list "fetch" 
+   (list "fetch" "--no-checkout" 
 	 (concat "--ignore-paths=" (egg-git-svn-ignore-paths))
 	 (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
 
@@ -247,7 +276,7 @@ output processing function for `egg--do-handle-exit'."
 	    (or (egg--git-pp-grab-line-matching-backward "^r[0-9]+ =" :success t :next-action 'log)
 		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
 	   (t (egg--git-pp-fatal-result))))
-   (list "fetch" (concat "--ignore-paths=" (egg-git-svn-ignore-paths)))))
+   (list "fetch" "--no-checkout" (concat "--ignore-paths=" (egg-git-svn-ignore-paths)))))
 
 (defun egg--git-svn-dcommit (buffer-to-update branch)
   (egg--do-git-action
@@ -377,7 +406,7 @@ output processing function for `egg--do-handle-exit'."
       
       (when (y-or-n-p (format "proceed to fetch %ssvn revisions%s (this might take %s)? "
 			      (if oldest "" "all ")
-			      (if oldest (format " from %s to HEAD" ""))
+			      (if oldest (format " from r%s to HEAD" oldest) "")
 			      (propertize "weeks" 'face 'bold)))
 
 	(setq last-fetch-func
@@ -433,8 +462,8 @@ output processing function for `egg--do-handle-exit'."
 	    (apply #'propertize name props)
 	  props)))))
 
-(defun egg-svn-add-remote-properies (name prefix)
-  (egg-svn-map-name name nil (concat "refs/remotes/" prefix "/")))
+(defun egg-svn-add-remote-properies (name prefix &optional branch)
+  (egg-svn-map-name name branch (concat "refs/remotes/" prefix "/")))
 
 (defun egg-svn-get-remote-properies (prefix branch)
   (or (and (not (equal prefix "."))
@@ -467,12 +496,15 @@ output processing function for `egg--do-handle-exit'."
 	(r-ref (file-name-nondirectory r-ref))
 	res)
     (when (stringp svn-path)
-      (setq res (if (save-match-data (string-match "@" r-ref)) 
+      (setq res (if (or (save-match-data (string-match "@" r-ref))
+			(not (egg-svn-path-exists-p svn-path))) 
 		    ;; git-svn's metadata only, not on svn repo
 		    (list :success t :next-action 'log)
 		  (egg--svn-delete buffer-to-update (concat "delete " r-ref)
 				   svn-path)))
-      (when (and (plist-get res :success) (stringp local-dir))
+      (when (and (plist-get res :success) 
+		 (stringp local-dir)
+		 (file-directory-p local-dir))
 	(delete-directory local-dir t)))
     res))
 
@@ -549,12 +581,18 @@ output processing function for `egg--do-handle-exit'."
 	      (concat svn-path-prefix "*:" git-svn-prefix "*"))))
 
 (defun egg--git-svn-add-custom-branch-mapping (mapping)
-  (egg--git nil "config" "--add" (egg-git-svn-config-name "branches") mapping))
+  (let* ((key (egg-git-svn-config-name "branches"))
+	 (currents (egg-git-to-lines "config" "--get-all" key)))
+    (unless (member mapping currents)
+      (egg--git nil "config" "--add"  key mapping))))
 
 (defun egg--git-svn-add-direct-mapping (svn-path git-full-ref)
-  (let ((svn-path (directory-file-name svn-path)))
-    (egg--git nil "config" "--add" (egg-git-svn-config-name "fetch")
-	      (concat svn-path ":" git-full-ref))))
+  (let* ((svn-path (directory-file-name svn-path))
+	 (key (egg-git-svn-config-name "fetch"))
+	 (mapping (concat svn-path ":" git-full-ref))
+	 (currents (egg-git-to-lines "config" "--get-all" key)))
+    (unless (member mapping currents)
+      (egg--git nil "config" "--add" key mapping))))
 
 (defun egg-svn-make-branch-from (buffer-to-update svn-repo-name new-url from-url)
   (let ((res (egg--svn-copy nil (concat "create branch " (file-name-nondirectory new-url))
@@ -704,7 +742,7 @@ output processing function for `egg--do-handle-exit'."
 	(setq did-reset nil))
       
       (setq max-rev (string-to-number (egg-git-svn-max-rev svn-name)))
-      (setq rev-to-fetch (string-to-number (egg-svn-path-first-rev svn-path)))
+      (setq rev-to-fetch (string-to-number (egg-svn-path-first-rev svn-path-url)))
       (when (< max-rev rev-to-fetch)
 	(setq res (egg--git-svn-fetch buffer-to-update))
 	(setq line (plist-get res :line))
@@ -740,7 +778,7 @@ output processing function for `egg--do-handle-exit'."
 	 (svn-prefix (nth 2 svn-remote))
 	 (local-base (nth 3 svn-remote))
 	 full-ref short-ref svn-path svn-path-url local-name
-	 max-rev rev-to-fetch res line fetch-unknown)
+	 max-rev rev-to-fetch ref-fetched-rev res line fetch-unknown)
 
     (save-match-data
       (cond ((null r-ref)
@@ -756,6 +794,7 @@ output processing function for `egg--do-handle-exit'."
 	     ((string-match "/" r-ref)
 	      ;; r-ref was branches/user7/something
 	      (setq svn-path r-ref)
+	      (setq full-ref (egg-git-svn-map-svn-path svn-path))
 	      nil)
 
 	     ((eq map-type :fetch)
@@ -763,14 +802,16 @@ output processing function for `egg--do-handle-exit'."
 	      (if (egg-svn-is-known-ref (concat (file-name-directory local-base) r-ref))
 		  (setq full-ref (concat (file-name-directory local-base) r-ref)
 			svn-path (setq svn-path (egg-git-svn-map-full-ref full-ref)))
-		(setq svn-path r-ref)))
+		(setq svn-path r-ref)
+		(setq full-ref (egg-git-svn-map-svn-path svn-path))))
 
 	     ((eq map-type :branches)
 	      ;; cursor was on user1/xxxx and r-ref is bar
 	      (if (egg-svn-is-known-ref (concat local-base r-ref))
 		  (setq full-ref (concat local-base r-ref)
 			svn-path (egg-git-svn-map-full-ref full-ref))
-		(setq svn-path (concat svn-prefix r-ref))))
+		(setq svn-path (concat svn-prefix r-ref))
+		(setq full-ref (egg-git-svn-map-svn-path svn-path))))
 
 	     (t (error "Cannot determine svn path from %s" r-ref))))
 
@@ -782,9 +823,12 @@ output processing function for `egg--do-handle-exit'."
       (setq local-name full-ref))
 
     (setq rev-to-fetch (string-to-number (egg-svn-path-last-rev svn-path-url)))
+    (setq ref-fetched-rev 
+	  (string-to-number (egg-git-to-string "svn" "find-rev" full-ref)))
 
     (setq max-rev (string-to-number (egg-git-svn-max-rev svn-name)))
-    (if (>= max-rev rev-to-fetch)
+    (if (and (>= max-rev rev-to-fetch)
+	     (>= ref-fetched-rev rev-to-fetch))
 	(if fetch-unknown 
 	    (message "%s is now up-to-date, no extra fetching required!" local-name)
 	  (message "%s is already up-to-date, no fetching required!" local-name))
@@ -795,7 +839,10 @@ output processing function for `egg--do-handle-exit'."
 	       max-rev rev-to-fetch line)))
       
     (setq max-rev (string-to-number (egg-git-svn-max-rev svn-name)))
-    (when (< max-rev rev-to-fetch)
+    (setq ref-fetched-rev 
+	  (string-to-number (egg-git-to-string "svn" "find-rev" full-ref)))
+    (when (or (< max-rev rev-to-fetch)
+	      (< ref-fetched-rev rev-to-fetch))
       (message "failed to fetch r%d, retry fetching with explicit -r%d" 
 	       rev-to-fetch rev-to-fetch)
       (setq res (egg--git-svn-fetch-rev buffer-to-update rev-to-fetch))

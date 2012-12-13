@@ -877,13 +877,13 @@ as repo state instead of re-read from disc."
   (completing-read prompt (egg-config-get-all-remote-names) nil t default))
 
 (defvar egg-add-remote-properties nil)
-(defun egg-add-remote-properties (name remote)
+(defun egg-add-remote-properties (name remote &optional branch)
   (or (and (functionp egg-add-remote-properties)
-	   (funcall egg-add-remote-properties name remote))
+	   (funcall egg-add-remote-properties name remote branch))
       (and (consp egg-add-remote-properties)
 	   (let ((name name))
 	     (dolist (func egg-add-remote-properties)
-	       (setq name (funcall func name remote)))
+	       (setq name (funcall func name remote branch)))
 	     name))
       name))
 
@@ -991,7 +991,7 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 					    (apply 'propertize (substring name (length remote))
 						   :full-name full-name
 						   :ref (cons name :remote)
-						   remote-ref-properties)) remote)))
+						   remote-ref-properties)) remote full-name)))
 			    ((assq 7 desc)
 			     ;; stash
 			     (cons full-name
