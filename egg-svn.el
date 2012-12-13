@@ -737,52 +737,49 @@ output processing function for `egg--do-handle-exit'."
 	 (svn-name (car svn-remote))
 	 (map-type (nth 1 svn-remote))
 	 (url (and svn-name (egg-git-svn-url svn-name)))
+	 (svn-prefix (nth 2 svn-remote))
 	 (local-base (nth 3 svn-remote))
 	 full-ref short-ref svn-path svn-path-url local-name
 	 max-rev rev-to-fetch res line fetch-unknown)
 
-    (setq full-ref 
-	  (save-match-data
-	    (cond ((null r-ref)
-		   ;; --all
-		   nil)
-		  ((string-match "\\`refs/remotes/" r-ref)
-		   ;; r-ref is fully-named ref
-		   r-ref)
-		  ((string-match "/" r-ref)
-		   ;; svn-path
-		   (setq svn-path r-ref)
-		   nil)
-		  ((eq map-type :fetch)
-		   ;; e.g. cursor was on svn/release1 and r-ref is release2
-		   (concat (file-name-nondirectory local-base) r-ref))
-		  ((eq map-type :branches)
-		   ;; e.g. cursor was on user1/my_stuffs_a and r-ref is my_stuffs_b
-		   (concat local-base r-ref))
-		  (t (error "Cannot determine full-ref from %s" r-ref)))))
+    (save-match-data
+      (cond ((null r-ref)
+	     ;; --all
+	     (setq svn-path-url url)
+	     (setq local-name "everything"))
 
-    (if r-ref
-	(progn
-	  ;; not fetching --all
-	  (if svn-path
-	      ;; r-ref is svn-path, fetch from and svn and map
-	      (setq full-ref (egg-fetch-unknown-svn-path buffer-to-update 
-							 svn-remote svn-path local-base))
-	    ;; r-ref might be a known ref which might need update
-	    ;; or a new ref based on an existing mapping.
-	    (setq svn-path (egg-git-svn-map-full-ref full-ref))
-	    (unless (egg-svn-is-known-ref full-ref)
-	      ;; new ref based on an existing mapping.
-	      ;; how ever, the user might specify a new custom mapping
-	      (setq full-ref (egg-fetch-unknown-svn-path buffer-to-update 
-							 svn-remote svn-path local-base))))
+	     ((string-match "\\`refs/remotes/" r-ref)
+	      ;; r-ref is fully-named ref
+	      (setq full-ref r-ref)
+	      (setq svn-path (egg-git-svn-map-full-ref full-ref)))
 
-	  (setq local-base (file-name-directory full-ref))
-	  (setq svn-path-url (concat url "/" svn-path))
-	  (setq local-name full-ref))
-      ;; fetching --all
-      (setq svn-path-url url)
-      (setq local-name "everything"))
+	     ((string-match "/" r-ref)
+	      ;; r-ref was branches/user7/something
+	      (setq svn-path r-ref)
+	      nil)
+
+	     ((eq map-type :fetch)
+	      ;; cursor was on svn/xxxx and r-ref is foo	      
+	      (if (egg-svn-is-known-ref (concat (file-name-directory local-base) r-ref))
+		  (setq full-ref (concat (file-name-directory local-base) r-ref)
+			svn-path (setq svn-path (egg-git-svn-map-full-ref full-ref)))
+		(setq svn-path r-ref)))
+
+	     ((eq map-type :branches)
+	      ;; cursor was on user1/xxxx and r-ref is bar
+	      (if (egg-svn-is-known-ref (concat local-base r-ref))
+		  (setq full-ref (concat local-base r-ref)
+			svn-path (egg-git-svn-map-full-ref full-ref))
+		(setq svn-path (concat svn-prefix r-ref))))
+
+	     (t (error "Cannot determine svn path from %s" r-ref))))
+
+    (when r-ref
+      (setq svn-path-url (concat url "/" svn-path))
+      (unless (and full-ref (egg-svn-is-known-ref full-ref))
+	(setq full-ref (egg-fetch-unknown-svn-path buffer-to-update svn-remote svn-path))
+	(setq fetch-unknown t))
+      (setq local-name full-ref))
 
     (setq rev-to-fetch (string-to-number (egg-svn-path-last-rev svn-path-url)))
 
