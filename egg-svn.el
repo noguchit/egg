@@ -347,7 +347,7 @@ output processing function for `egg--do-handle-exit'."
   (egg--do-git-action
    "svn" buffer-to-update
    (lambda (ret-code)
-     (cond ((= ret-code 0)
+     (cond ((memq ret-code '(0 1))
 	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t :next-action 'log)
 		(egg--git-pp-grab-line-matching "^dcommitted " :success t :next-action 'log)
 		(egg--git-pp-grab-line-matching "^Committed " :success t :next-action 'log)
@@ -740,50 +740,67 @@ output processing function for `egg--do-handle-exit'."
 					    (t (error "Unknown svn-to-git mapping type: %s"
 						      map-type))))))
 	 (l-is-ref (and (stringp l-ref) (egg-git-to-string "show-ref" l-ref)))
+	 (pretty-svn (and svn-name (propertize svn-name 'face 'bold)))
+	 (pretty-l-ref (and l-ref (propertize l-ref 'face 'bold)))
+	 (pretty-r-full-name (and r-full-name (propertize r-full-name 'face 'bold)))
+	 (pretty-svn-url (and svn-branch-url (propertize svn-branch-url 'face 'bold)))
 	 git-commit svn-rev res line base-commit)
-    (cond ((null svn-branch-url)
-	   (error "Failed to map branch %s on svn remote %s" r-ref svn-name))
-	  ((not (stringp l-ref))
-	   (error "Can't push local ref: %s" l-ref))
-	  ((and (not (egg-svn-path-exists-p svn-branch-url))
-		(progn 
-		  (setq git-commit (egg-svn-find-last-mapped-rev l-ref))
-		  (setq svn-rev (and git-commit
-				     (egg-pick-from-commit-message git-commit
-								   "^git-svn-id: \\(.+\\) .+$" 1)))
-		  (y-or-n-p (format "create new svn branch %s at %s (%s)? " 
-				    (propertize svn-branch-url 'face 'bold) 
-				    (propertize svn-rev 'face 'bold)
-				    git-commit))))
-	   (when (egg-svn-make-branch-from buffer-to-update svn-name svn-branch-url svn-rev)
-	     (message (if l-is-ref 
-			  "created svn branch %s, please rebase %s on %s and push again"
-			"new svn branch %s (from %s) -> %s") 
-		      (propertize svn-branch-url 'face 'bold)
-		      (propertize l-ref 'face 'bold)
-		      (propertize r-full-name 'face 'bold)))
-	   nil)
-	  ((progn
-	     (setq git-commit (egg-git-to-string "rev-parse" r-full-name))
-	     (setq base-commit (egg-git-to-string "merge-base" l-ref r-full-name))
-	     (not (equal git-commit base-commit)))
-	   (message (if l-is-ref 
-			"please rebase %s on %s before pushing on svn-remote %s"
-		      "%s -> %s is not an fast-forward push!")
-		    (propertize l-ref 'face 'bold)
-		    (propertize r-full-name 'face 'bold) 
-		    (propertize svn-name 'face 'bold))
-	   nil)
-	  ((not (equal (setq res (car (egg-git-lines-matching "Committing to \\(.+\\) \\.\\.\\." 1
-							      "svn" "dcommit" "-n" l-ref)))
-		       svn-branch-url))
-	   (error "Fatal: git-svn would dcommit %s on %s instead of %s!"
-		  l-ref res svn-branch-url))
-	  ((y-or-n-p (format "push %s, %d revision(s), on svn-path %s? "
-			     (propertize l-ref 'face 'bold) 
+
+    (catch 'push-to-svn
+
+      (unless svn-branch-url
+	(message "Failed to map branch %s on svn remote %s" r-ref svn-name)
+	(throw 'push-to-svn nil))
+
+      (unless (stringp l-ref)
+	(message "Can't push local ref: %s" l-ref)
+	(throw 'push-to-svn nil))
+
+      (unless (egg-svn-path-exists-p svn-branch-url)
+	(setq git-commit (egg-svn-find-last-mapped-rev l-ref))
+	(setq svn-rev (and git-commit (egg-pick-from-commit-message git-commit
+								    "^git-svn-id: \\(.+\\) .+$" 1)))
+	(unless (y-or-n-p (format "create new svn branch %s at %s (%s)? " 
+				  pretty-svn-url (propertize svn-rev 'face 'bold) git-commit))
+	  (message "Bailed out before creating new svn branch: %s" pretty-svn-url)
+	  (throw 'push-to-svn nil))
+	(when (egg-svn-make-branch-from buffer-to-update svn-name svn-branch-url svn-rev)
+	  (unless (equal (file-name-nondirectory l-ref) (egg-current-branch))
+	    (message (if l-is-ref 
+			 "created svn branch %s, please rebase %s on %s and push again"
+		       "new svn branch %s (from %s) -> %s") 
+		     pretty-svn-url pretty-l-ref pretty-r-full-name)
+	    (throw 'push-to-svn t))
+	  (unless (y-or-n-p (format "rebase %s on top of %s before pushing to %s? "
+				    pretty-l-ref pretty-r-full-name pretty-svn))
+	    (message "created svn branch %s, please rebase %s on %s and push again" 
+		     pretty-svn-url pretty-l-ref pretty-r-full-name)
+	    (throw 'push-to-svn t))
+	  (unless (egg-do-rebase-head r-full-name nil 'log)
+	    (message "trouble rebasing %s on top of %s! bailed out." pretty-l-ref pretty-r-full-name)
+	    (throw 'push-to-svn nil))))
+
+      (setq git-commit (egg-git-to-string "rev-parse" r-full-name))
+      (setq base-commit (egg-git-to-string "merge-base" l-ref r-full-name))
+      (unless (equal git-commit base-commit)
+	(message (if l-is-ref 
+		     "please rebase %s on %s before pushing on svn-remote %s"
+		   "%s -> %s is not an fast-forward push!")
+		 pretty-l-ref pretty-r-full-name pretty-svn)
+	(throw 'push-to-svn t))
+
+      (unless (equal (setq res (car (egg-git-lines-matching "Committing to \\(.+\\) \\.\\.\\." 1
+							    "svn" "dcommit" "-n" l-ref)))
+		     svn-branch-url)
+	(message "Fatal: git-svn would dcommit %s on %s instead of %s!"
+		 pretty-l-ref (propertize res 'face 'bold) pretty-svn-url)
+	(throw 'push-to-svn nil))
+      
+      (when (y-or-n-p (format "push %s, %d revision(s), on svn-path %s? "
+			      pretty-l-ref  
 			     (length (egg-git-to-lines "rev-list" (concat r-full-name ".." l-ref)))
-			     (propertize svn-branch-url 'face 'bold)))
-	   (egg--git-svn-dcommit buffer-to-update l-ref)))))
+			     pretty-svn-url))
+	(egg--git-svn-dcommit buffer-to-update l-ref)))))
 
 (defun egg-fetch-unknown-svn-path (buffer-to-update svn-name svn-path &optional local-base)
   (let* ((svn-path (directory-file-name svn-path))
