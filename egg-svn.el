@@ -49,26 +49,25 @@ desirable way to invoke GIT."
 
 
 (defcustom egg-svn-profile-alist 
-  '(("Standard" 
+  `(("Standard" 
      :email "myself@y.svn.host"
      :namespace "svn"
      :url "http://my.svn.host/myrepo"
-     :exclude "/(branches|tags)/"
+     :exclude "/tags/"
      :trunk ("trunk" . "refs/remotes/svn/trunk")
-     :one-to-one nil
      :branches (("branches/" . "refs/remotes/svn/"))
      :oldest nil
      )
     ("Large" 
-     :email "myself@y.svn.host"
+     :email ,user-mail-address
      :namespace "svn"
      :url "http://my.svn.host/large_repo"
-     :exclude "/(branches|tags)/"
+     :exclude "/tags/"
      :trunk ("main" . "refs/remotes/svn/main")
-     :one-to-one nil
-     :branches (("branches/release/5.x/" . "refs/remotes/svn/")
-		("branches/privates/user1/" . "refs/remotes/user1/"))
-     :oldest "branches/release/5.0"
+     :branches (("branches/release/12.x/" . "refs/remotes/svn/")
+		(,(concat "branches/private/" user-login-name "/") .
+		 ,(concat "refs/remotes/" user-login-name "/")))
+     :oldest "branches/release/12.3.0"
      ))
   "Profiles to create new git-svn repository."
   :group 'egg
@@ -80,16 +79,12 @@ desirable way to invoke GIT."
 		       (const :tag "----" :url)
 		       (string :tag "URL of repo")
 		       (const :tag "----" :exclude)
-		       (string :tag "Perl Regexp to ignore branches and tags")
+		       (string :tag 
+			       "Perl Regexp to ignore paths on fetch (be very careful with this)")
 		       (const :tag "----" :trunk)
 		       (cons :tag "Trunk mapping"
 			     (string :tag "SVN Trunk Name")
 			     (string :tag "Git Ref Name"))
-		       (const :tag "----" :one-to-one)
-		       (repeat :tag "1-to-1 mappings"
-			       (cons :tag "Fetch"
-				     (string :tag "SVN Branch Path")
-				     (string :tag "Git Full Ref")))
 		       (const :tag "----" :branches)
 		       (repeat :tag "Branch mappings"
 			       (cons :tag "Branch"
@@ -141,17 +136,22 @@ Return the output lines as a list of strings."
   (concat "svn-remote." (or remote (egg-git-svn-remote-name)) "." name))
 
 (defsubst egg-git-svn-url (&optional remote)
-  (egg-git-to-string "config" "--get" (egg-git-svn-config-name "url")))
+  (egg-git-to-string "config" "--get" (egg-git-svn-config-name "url" remote)))
 
 (defsubst egg-git-svn-ignore-paths (&optional remote)
-  (egg-git-to-string "config" "--get" (egg-git-svn-config-name "ignore-paths")))
+  (egg-git-to-string "config" "--get" (egg-git-svn-config-name "ignore-paths" remote)))
 
 (defsubst egg-svn--s2n (string)
   (and string (stringp string) (string-to-number string)))
 
 (defsubst egg-git-svn-max-rev (&optional remote)
   (egg-svn--s2n (egg-git-to-string "config" "--file" (concat (egg-git-dir) "/svn/.metadata")
-				"--get" (egg-git-svn-config-name "branches-maxRev"))))
+				"--get" (egg-git-svn-config-name "branches-maxRev" remote))))
+
+(defsubst egg-git-svn-set-max-rev (svn-rev &optional remote)
+  (egg--git nil "config" "--file" (concat (egg-git-dir) "/svn/.metadata")
+	    "--replace-all" (egg-git-svn-config-name "branches-maxRev" remote)
+	    (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))
 
 (defsubst egg-git-svn-epoch-rev (&optional remote)
   (egg-svn--s2n (car (egg-git-lines-matching "^r\\([0-9]+\\) " 1 "svn" "log" "--reverse" "--limit" "1"))))
@@ -242,7 +242,7 @@ Return the output lines as a list of strings."
     (when (and old-sha
 	       (file-readable-p file) (file-writable-p file)
 	       (>= svn-rev min))
-      (if (<= svn-rev max)
+      (if (> svn-rev max)
 	  0
 	(setq vec-idx (- svn-rev min))
 	(setq rev-info (aref map vec-idx))
@@ -290,8 +290,9 @@ output processing function for `egg--do-handle-exit'."
      (cond ((= ret-code 0) (egg--git-pp-grab-line-matching "Initialized empty Git repository"
 							   :success t :next-action 'status))
 	   (t (egg--git-pp-fatal-result))))
-   (list "init" "-R" svn-remote "-i" svn-trunk-ref svn-url 
-	 (concat "--ignore-paths=" ignore-paths-pcre))
+   (nconc (list "init" "-R" svn-remote "-i" svn-trunk-ref svn-url)
+	  (if ignore-paths-pcre
+	      (list (concat "--ignore-paths=" ignore-paths-pcre))))
    'no-log))
 
 (defun egg--git-svn-create-branch (buffer-to-update log-msg branch-name &optional svn-parent-url)
@@ -322,7 +323,7 @@ output processing function for `egg--do-handle-exit'."
 	   (t (egg--git-pp-fatal-result))))
    (list "reset" (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
 
-(defun egg--git-svn-fetch-rev (buffer-to-update svn-rev)
+(defun egg--git-svn-fetch-rev (buffer-to-update svn-name svn-rev)
   (egg--do-git-action
    "svn" buffer-to-update
    (lambda (ret-code)
@@ -330,10 +331,10 @@ output processing function for `egg--do-handle-exit'."
 	    (or (egg--git-pp-grab-line-matching "^r[0-9]+ =" :success t :next-action 'log)
 		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
 	   (t (egg--git-pp-fatal-result))))
-   (list "fetch" (concat "--ignore-paths=" (egg-git-svn-ignore-paths))
-	 (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev))))))
+   (list "fetch" (concat "-r" (if (stringp svn-rev) svn-rev (number-to-string svn-rev)))
+	 svn-name)))
 
-(defun egg--git-svn-fetch (buffer-to-update)
+(defun egg--git-svn-fetch (buffer-to-update svn-name)
   (egg--do-git-action
    "svn" buffer-to-update
    (lambda (ret-code)
@@ -341,7 +342,7 @@ output processing function for `egg--do-handle-exit'."
 	    (or (egg--git-pp-grab-line-matching-backward "^r[0-9]+ =" :success t :next-action 'log)
 		(egg--git-pp-grab-line-no -1 :success t :next-action 'log)))
 	   (t (egg--git-pp-fatal-result))))
-   (list "fetch" (concat "--ignore-paths=" (egg-git-svn-ignore-paths)))))
+   (list "fetch" svn-name)))
 
 (defun egg--git-svn-dcommit (buffer-to-update branch)
   (egg--do-git-action
@@ -490,8 +491,7 @@ output processing function for `egg--do-handle-exit'."
 		  (goto-char (point-max))
 		  (insert "EGG-SVN: fetching initial revisions:\n")
 		  (insert "GIV-SVN: fetch all\n")
-		  (start-process "egg-svn-fetch" (current-buffer) egg-git-command "svn" "-q"
-				 "fetch" "--ignore-paths" (plist-get profile :exclude))))
+		  (start-process "egg-svn-fetch" (current-buffer) egg-git-command "svn" "-q" "fetch")))
 	(push last-fetch-func todo)
 
 	(when oldest
@@ -501,8 +501,7 @@ output processing function for `egg--do-handle-exit'."
 		  (insert "EGG-SVN: fetching 1st revision:\n")
 		  (insert "GIV-SVN: fetch r" (plist-get profile :oldest) "\n")
 		  (start-process "egg-svn-fetch" (current-buffer) egg-git-command "svn" "-q"
-				 "fetch" "--ignore-paths" (plist-get profile :exclude)
-				 "-r" (plist-get profile :oldest))))
+				 "fetch" "-r" (plist-get profile :oldest))))
 	  (push first-fetch-func todo))
 
 	(plist-put profile :todo todo)
@@ -679,16 +678,17 @@ output processing function for `egg--do-handle-exit'."
 	   (egg--git-svn-rm-custom-direct-mapping ,egg-mapping)))
        ,egg-result)))
 
-(defun egg-git-svn-do-fetch (buffer-to-update svn-path full-ref &optional svn-rev)
+(defun egg-git-svn-do-fetch (buffer-to-update svn-name svn-path full-ref &optional svn-rev)
   (let ((mapping (concat svn-path ":" full-ref)))
     (with-egg-temp-direct-mapping mapping
       (if svn-rev
-	  (egg--git-svn-fetch-rev buffer-to-update svn-rev)
-	(egg--git-svn-fetch buffer-to-update)))))
+	  (egg--git-svn-fetch-rev buffer-to-update svn-name svn-rev)
+	(egg--git-svn-fetch buffer-to-update svn-name)))))
 
-(defun egg-git-svn-do-refetch (buffer-to-update svn-path full-ref svn-rev)
+(defun egg-git-svn-do-refetch (buffer-to-update svn-name svn-path full-ref svn-rev)
   (when (egg-svn-reset-ref-to-rev full-ref svn-rev)
-    (egg-git-svn-do-fetch buffer-to-update svn-path full-ref)))
+    (egg-git-svn-set-max-rev svn-rev svn-name)
+    (egg-git-svn-do-fetch buffer-to-update svn-name svn-path full-ref)))
 
 (defun egg-svn-make-branch-from (buffer-to-update svn-repo-name new-url from-url)
   (let ((res (egg--svn-copy nil (concat "create branch " (file-name-nondirectory new-url))
@@ -705,14 +705,14 @@ output processing function for `egg--do-handle-exit'."
 			  (match-string-no-properties 1 line)
 			(error "Can't parse svn revision number in: \"%s\"" line))))
       (setq new-rev (string-to-number new-rev))
-      (setq res (egg--git-svn-fetch buffer-to-update))
+      (setq res (egg--git-svn-fetch buffer-to-update svn-repo-name))
       (setq line (plist-get res :line))
       (if (not (plist-get res :success))
 	  (error "Failed to do post-copy fetch: %s" line)
 	(setq fetched-rev (egg-git-svn-max-rev svn-repo-name))
 	(if (>= fetched-rev new-rev)
 	    (setq ok t)
-	  (setq res (egg--git-svn-fetch-rev buffer-to-update new-rev))
+	  (setq res (egg--git-svn-fetch-rev buffer-to-update svn-repo-name new-rev))
 	  (setq line (plist-get res :line))
 	  (if (not (plist-get res :success))
 	      (error "Failed to fetch svn revision %s: %s" new-rev line)
@@ -856,7 +856,7 @@ output processing function for `egg--do-handle-exit'."
 	      ;; re-fetch old revisions to catch the branch
 	      (progn
 		(message "unfetch and refetch from r%d..." parent-rev)
-		(setq res (egg-git-svn-do-refetch buffer-to-update 
+		(setq res (egg-git-svn-do-refetch buffer-to-update  svn-name
 						  (car birth)
 						  (egg-git-svn-map-svn-path (car birth))
 						  parent-rev))
@@ -877,7 +877,7 @@ output processing function for `egg--do-handle-exit'."
 	    full-ref
 	  ;; ok, the ref is still unknown by git-svn. try a normal fetch
 	  (message "fetching %s -> %s..." svn-path full-ref)
-	  (setq res (egg-git-svn-do-fetch buffer-to-update svn-path full-ref))
+	  (setq res (egg-git-svn-do-fetch buffer-to-update svn-name svn-path full-ref))
 	  (setq line (plist-get res :line))
 	  (unless (plist-get res :success)
 	    (message "Failed to fetch svn revisions up to r%d: %s" branch-last-rev line)
@@ -885,7 +885,7 @@ output processing function for `egg--do-handle-exit'."
 	  ;; didn't catch the new rev with a regular fetch, try fetch the exact rev
 	  ;; get the max-rev after the previous regular fetch
 	  (message "fetching r%d..." branch-first-rev)
-	  (setq res (egg--git-svn-fetch-rev buffer-to-update branch-first-rev))
+	  (setq res (egg--git-svn-fetch-rev buffer-to-update svn-name branch-first-rev))
 	  (setq line (plist-get res :line))
 	  (unless (plist-get res :success)
 	    (message "Failed to fetch svn r%d: %s" branch-first-rev line)
@@ -967,7 +967,7 @@ output processing function for `egg--do-handle-exit'."
 	  (message "%s is already up-to-date, no fetching required!" local-name)
 	;; regular fetch
 	(message "need %s@%d, fetching..." svn-path-url path-last-rev)
-	(setq res (egg--git-svn-fetch buffer-to-update))
+	(setq res (egg--git-svn-fetch buffer-to-update svn-name))
 	(setq line (plist-get res :line))
 	(unless (plist-get res :success)
 	  (error "Failed to fetch svn revisions from r%d to r%d: %s" max-rev path-last-rev line))
@@ -982,16 +982,17 @@ output processing function for `egg--do-handle-exit'."
 	      (message "git-svn refused to fetch %s@%d!" svn-path-url path-last-rev)
 	    ;; try with temporary mapping
 	    (message "retry fetching %s -> %s..." svn-path full-ref)
-	    (setq res (egg-git-svn-do-fetch buffer-to-update svn-path full-ref))
+	    (setq res (egg-git-svn-do-fetch buffer-to-update svn-name svn-path full-ref))
 	    (setq line (plist-get res :line))
 	    (unless (plist-get res :success)
 	      (error "Failed to fetch %s (%s): %s" svn-path full-ref line))
 	    (setq ref-fetched-rev (egg-git-svn-ref-last-rev full-ref))
 	    (if (>= ref-fetched-rev path-last-rev)
-		(message "%s is now update-to-date (using temporary mapping during fetching)!" local-name)
+		(message "%s is now update-to-date (using temporary mapping during fetching)!" 
+			 local-name)
 	      ;; try with explicit rev -> BAD!!!!
 	      (message "retry fetching r%d..." path-last-rev)
-	      (setq res (egg--git-svn-fetch-rev buffer-to-update path-last-rev))
+	      (setq res (egg--git-svn-fetch-rev buffer-to-update svn-name path-last-rev))
 	      (setq line (plist-get res :line))
 	      (unless (plist-get res :success)
 		(error "Failed to fetch r%d: %s" path-last-rev line))
@@ -999,7 +1000,8 @@ output processing function for `egg--do-handle-exit'."
 	      (if (>= ref-fetched-rev path-last-rev)
 		  (message "managed to (explicitly) fetch r%d, %s is now update-to-date!" 
 			   path-last-rev local-name)
-		(message "Giving up! git-svn refused to fetch %s up to r%d" svn-path path-last-rev)))))))))
+		(message "Giving up! git-svn refused to fetch %s up to r%d" 
+			 svn-path path-last-rev)))))))))
 
 
 
