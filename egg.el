@@ -5683,36 +5683,134 @@ prompt for a remote repo."
                  (egg-text sha1 'font-lock-string-face))
       (egg-generic-display-logs egg-internal-log-buffer-closure init))))
 
+(defun egg-async-xfer-pp (cmd-name remote-re remote-re-no fall-back-remote-name)
+  (save-match-data
+    (let* ((cmd-name (upcase cmd-name))
+	   remote-name xfer-msg remote-msg beg)
+      
+      (when (and remote-re 
+		 (goto-char (point-min))
+		 (re-search-forward remote-re nil t))
+	(setq remote-name (match-string-no-properties 1))
+	(forward-line 1)
+	(skip-chars-forward " ")
+	(setq xfer-msg (buffer-substring-no-properties (point) (line-end-position))))
+
+      (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
+	(setq remote-msg (match-string-no-properties 1)))
+
+      (unless remote-name (setq remote-name fall-back-remote-name))
+
+      (unless (or remote-msg xfer-msg)
+	(setq xfer-msg (cond ((and (goto-char (point-min))
+				   (re-search-forward "^error: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     ((and (goto-char (point-min))
+				   (re-search-forward "^fatal: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     (t
+			      (goto-char (point-min))
+			      (re-search-forward "EGG-GIT-OUTPUT:\n")
+			      (setq beg (point))
+			      (goto-char (point-max))
+			      (if (re-search-forward "^.+" nil t)
+				  (buffer-substring-no-properties (line-beginning-position)
+								  (line-end-position))
+				"*silent*")))))
+
+      (if remote-name
+	  (message "GIT-%s> %s: %s" cmd-name remote-name (if remote-msg remote-msg xfer-msg))
+	(message "GIT-%s> %s" cmd-name (if remote-msg remote-msg xfer-msg))))))
+
+(defun egg-async-fetch-pp (cmd-sexp)
+  (egg-async-xfer-pp (car cmd-sexp) "^From \\(.+\\)$" 1 (nth 1 cmd-sexp)))
+
+(defun egg-async-push-pp (cmd-sexp)
+  (egg-async-xfer-pp (car cmd-sexp) "^To \\(.+\\)$" 1 (nth 1 cmd-sexp)))
+
+(defun egg-async-generic-pp (cmd-sexp)
+  (egg-async-xfer-pp (car cmd-sexp) nil nil (nth 1 cmd-sexp)))
+
+(defun egg-async-unimplemented-pp (cmd-sexp)
+  (egg-async-xfer-pp "internal-error" nil nil nil))
+
+
 (defun egg-log-buffer-redisplay-from-command (buffer)
   ;; in process buffer
   (when (and (processp egg-async-process)
              (equal (current-buffer) (process-buffer egg-async-process)))
-    (or
-     (save-excursion
-       (let ((cmd "GIT>") cmd-sexp cmd-string pos done)
+    (save-excursion
+       (let ((cmd "GIT>") 
+	     cmd-sexp cmd-string pos done)
          (goto-char (point-min))
          (skip-chars-forward "^(")
          (setq cmd-sexp (read (current-buffer)))
-         (when (consp cmd-sexp)
-           (setq cmd-string (car cmd-sexp)
-                 cmd (cond ((string-equal "fetch" cmd-string) "GIT-FETCH>")
-                           ((string-equal "push" cmd-string) "GIT-PUSH>"))))
-         (goto-char (point-min))
-         (save-match-data
-           (cond ((re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
-                  (message "%s %s: %s" cmd
-                           (match-string-no-properties 1)
-                           (match-string-no-properties 2))
-                  (setq done t))))
-         (unless done
-           (goto-char (point-min))
-           (save-match-data
-             (cond ((re-search-forward "^fatal: \\(.+\\)$" nil t)
-                    (message "%s fatal: %s" cmd
-                             (match-string-no-properties 1))
-                    (setq done t)))))))))
+         (if (not (consp cmd-sexp))
+	     (egg-async-unimplemented-pp nil)
+           (setq cmd-string (car cmd-sexp))
+	   (cond ((string-equal "fetch" cmd-string)
+		  (egg-async-fetch-pp cmd-sexp))
+		 ((string-equal "push" cmd-string)
+		  (egg-async-push-pp cmd-sexp))
+		 (t
+		  (egg-async-generic-pp cmd-sexp)))))))
   ;; update log buffer
   (egg-log-buffer-redisplay buffer))
+
+(defun egg-async-fetch-pp-old (cmd-sexp)
+  (save-match-data
+    (let* ((cmd-len (length cmd-sexp))
+	   (spec (nth (1- cmd-len) cmd-sexp))
+	   (remote-name "internal-error")
+	   remote-name fetch-msg remote-msg)
+      
+      (when (progn (goto-char (point-min)) (re-search-forward "^From \\(.+\\)$" nil t))
+	(setq remote-name (match-string-no-properties 1))
+	(forward-line 1)
+	(setq fetch-msg (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+
+      (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
+	(setq remote-msg (match-string-no-properties 1)))
+
+      (unless (or remote-msg fetch-msg)
+	(setq fetch-msg (cond ((and (progn (goto-char (point-min)))
+				   (re-search-forward "^error: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     ((and (progn (goto-char (point-min)))
+				   (re-search-forward "^fatal: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     ((and (progn (goto-char (point-max)))
+				   (re-search-backward ".+" nil t))
+			      (buffer-substring-no-properties (line-beginning-position)
+							      (line-end-position))))))
+
+      (message "GIT-FETCH[%s]> %s: %s" spec remote-name (if remote-msg remote-msg fetch-msg)))))
+
+(defun egg-async-push-pp-old (cmd-sexp)
+  (save-match-data
+    (let* ((cmd-len (length cmd-sexp))
+	   (spec (nth (1- cmd-len) cmd-sexp))
+	   (remote-name "internal-error")
+	   remote-name push-msg remote-msg)
+      
+      (when (progn (goto-char (point-min)) (re-search-forward "^To \\(.+\\)$" nil t))
+	(setq remote-name (match-string-no-properties 1))
+	(forward-line 1)
+	(setq push-msg (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+
+      (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
+	(setq remote-msg (match-string-no-properties 1)))
+
+      (unless (or remote-msg push-msg)
+	(setq push-msg (cond ((progn (goto-char (point-min)) (re-search-forward "^error: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     ((progn (goto-char (point-min)) (re-search-forward "^fatal: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     ((progn (goto-char (point-max)) (re-search-backward ".+" nil t))
+			      (buffer-substring-no-properties (line-beginning-position)
+							      (line-end-position))))))
+
+      (message "GIT-PUSH[%s]> %s: %s" spec remote-name (if remote-msg remote-msg push-msg)))))
 
 (define-egg-buffer log "*%s-log@%s*"
   "Major mode to display the output of git log.\\<egg-log-buffer-mode-map>

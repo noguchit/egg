@@ -619,7 +619,7 @@ output processing function for `egg--do-handle-exit'."
 			 (egg-git-to-lines "config" "--get-all" 
 					   (egg-git-svn-config-name "fetch" svn-name))))
 	 (branches (mapcar (lambda (line)
-			     (nreverse (split-string line "[*:]+" t)))
+			     (nreverse (split-string line "\\(?:{[a-z0-9A-Z_,-]+}\\)?[*:]+" t)))
 			   (egg-git-to-lines "config" "--get-all" 
 					     (egg-git-svn-config-name "branches" svn-name))))
 	 match)
