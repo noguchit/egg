@@ -437,7 +437,6 @@ output processing function for `egg--do-handle-exit'."
 	 (ignore-re (plist-get profile :exclude))
 	 (trunk (car (plist-get profile :trunk)))
 	 (branch-mappings (plist-get profile :branches))
-	 (direct-mappings (plist-get profile :one-to-one))
 	 trunk-ref 
 	 first-fetch-func last-fetch-func todo
 	 tmp)
@@ -464,12 +463,7 @@ output processing function for `egg--do-handle-exit'."
 				    (= (call-process egg-git-command nil t t "config" "--add"
 						     (concat "svn-remote." remote ".branches")
 						     (concat (car svn-ref) "*:" (cdr svn-ref) "*")) 0))
-				  branch-mappings))
-		(memq nil (mapcar (lambda (svn-ref)
-				    (= (call-process egg-git-command nil t t "config" "--add"
-						     (concat "svn-remote." remote ".branches")
-						     (concat (car svn-ref) ":" (cdr svn-ref))) 0))
-				  direct-mappings)))
+				  branch-mappings)))
 	(error "Failed to configure git-svn repo in %s" dir))
 
 
@@ -828,21 +822,32 @@ output processing function for `egg--do-handle-exit'."
 	  (message "Cannot handle remote trackign branch name: %s" full-ref)
 	  (throw 'full-ref nil))
       
+	(setq mapping-config (concat (file-name-directory svn-path) 
+				     "{" (file-name-nondirectory svn-path) "}:"
+				     (file-name-directory full-ref) "*"))
 	(setq mapping-config
-	      (read-string "add svn->git mapping rule: " 
-			   (concat (file-name-directory svn-path) "*:"
-				   (file-name-directory full-ref) "*")))
+	      (or (and (y-or-n-p (concat "add svn->git mapping rule: \"" mapping-config "\" ? "))
+		       mapping-config)
+		  (read-string "add svn->git mapping rule: " 
+			       (concat (file-name-directory svn-path) "*:"
+				       (file-name-directory full-ref) "*"))))
 
-	(if (string-match (concat "\\*:" (file-name-directory full-ref) "\\*\\'")
+	(if (string-match (concat ":" (file-name-directory full-ref) "\\*\\'")
 			  mapping-config)
 	    (egg--git-svn-add-custom-branch-mapping mapping-config)
 	  (message "Cannot handle mapping svn->git mapping: %s" mapping-config)
 	  (throw 'full-ref nil))
 
+	(unless (egg-svn-path-exists-p svn-path-url)
+	  (message "Failed to find svn path: %s" svn-path-url)
+	  (throw 'full-ref nil))
+
+
 	(setq birth (egg--svn-get-birth-info svn-path svn-name))
 	(setq parent-rev (cdr birth))
 	(setq branch-last-rev (egg-svn-path-last-rev svn-path-url))
 	(setq branch-first-rev (egg-svn-path-first-rev svn-path-url))
+
 
 	(when (< parent-rev epoch-rev)
 	  (message "Cannot fetch revision (r%d) older than epoch (r%d)!" parent-rev epoch-rev)
