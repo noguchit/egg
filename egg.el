@@ -5849,9 +5849,9 @@ auto-commit if the merge was successful.
 
 Each ref on the commit line has extra extra keybindings:\\<egg-log-ref-map>
 \\[egg-log-buffer-rm-ref] delete the ref under the cursor.
-\\[egg-log-buffer-push-to-local] update HEAD or BASE using the ref.
-C-u \\[egg-log-buffer-push-to-local] update a local ref using the ref.
-C-u C-u \\[egg-log-buffer-push-to-local] update (non-ff allowed) a local ref using the ref.
+\\[egg-log-buffer-push-to-local] push the ref to HEAD or BASE.
+C-u \\[egg-log-buffer-push-to-local] push the ref to a local ref.
+C-u C-u \\[egg-log-buffer-push-to-local] push the ref to a local ref (non-ff allowed).
 
 Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-local-ref-map>
 \\[egg-log-buffer-push-to-remote] upload to a remote the ref under the cursor.
@@ -6114,7 +6114,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-diff-revs]:diff vs HEAD (or BASE)\n"
     "\\[egg-log-buffer-merge]:merge to HEAD  "
     "\\[egg-log-buffer-rebase]:rebase HEAD  "
-    "\\[egg-log-buffer-rebase-interactive]:rebase HEAD interactively"
+    "\\[egg-log-buffer-rebase-interactive]:rebase marked commits interactively"
     "\n"
     )
    (egg-text "Extra Key Bindings to prepare a (interactive) rebase:" 'egg-help-header-2)
@@ -6131,11 +6131,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    (egg-pretty-help-text
     "\\<egg-log-local-ref-map>"
     "\\[egg-log-buffer-rm-ref]:delete ref  "
-    "\\[egg-log-buffer-push-to-local]:update HEAD (or a local ref) with ref  "
-    "\\[egg-log-buffer-push-head-to-local]:update this ref with HEAD\n"
-    "\\[egg-log-buffer-push-to-remote]:upload to remote  "
+    "\\[egg-log-buffer-push-to-local]:push ref to HEAD (or a local ref)  "
+    "\\[egg-log-buffer-push-head-to-local]:push HEAD to ref\n"
+    "\\[egg-log-buffer-push-to-remote]:push to remote  "
     "\\<egg-log-remote-branch-map>"
-    "\\[egg-log-buffer-fetch-remote-ref]:download this ref from remote\n")
+    "\\[egg-log-buffer-fetch-remote-ref]:fetch from remote\n")
    (egg-text "Extra Key Bindings for a Diff Block:" 'egg-help-header-2)
    "\n"
    (egg-pretty-help-text
