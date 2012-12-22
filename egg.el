@@ -5264,14 +5264,11 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
 (defun egg-log-buffer-fetch ()
   "Fetch something from a remote"
   (interactive)
-  (let* ((remote-name (egg-read-remote "Fetch from remote: "))
-	 (remote (and remote-name 
-		      (not (and (equal "" remote-name)
-				(error "Invalid remote: %s" remote-name)))
-		      (egg-add-remote-properties remote-name remote-name)))
+  (let* ((remote (egg-read-remote "Fetch from remote: "))
 	 (remote-info (get-text-property 0 :x-info remote))
 	 (fetch-function (get-text-property 0 :x-fetch remote)))
-    (when remote
+    (if (or (null remote) (equal "" remote))
+	(error "Invalid remote: %s" remote)
       (egg-log-buffer-do-fetch-from-site remote remote-info fetch-function 'ask))))
 
 (defun egg-log-buffer-push-to-local (pos &optional level)

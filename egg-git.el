@@ -872,10 +872,6 @@ as repo state instead of re-read from disc."
   "Query user for a revision using PROMPT. DEFAULT is the default value."
   (completing-read prompt 'egg-complete-rev nil nil default))
 
-(defsubst egg-read-remote (prompt &optional default)
-  "Query user for a remote using PROMPT. DEFAULT is the default value."
-  (completing-read prompt (egg-config-get-all-remote-names) nil t default))
-
 (defvar egg-add-remote-properties nil)
 (defun egg-add-remote-properties (name remote &optional branch)
   (or (and (functionp egg-add-remote-properties)
@@ -895,6 +891,11 @@ as repo state instead of re-read from disc."
 	 (dolist-done (func egg-get-remote-properties props)
 	   (setq props (funcall func remote branch))))
 	(t nil)))
+
+(defsubst egg-read-remote (prompt &optional default)
+  "Query user for a remote using PROMPT. DEFAULT is the default value."
+  (let ((remote (completing-read prompt (egg-config-get-all-remote-names) nil t default)))
+    (egg-add-remote-properties remote remote)))
 
 (defvar egg-get-all-remotes nil)
 (defun egg-get-all-remotes ()
