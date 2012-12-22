@@ -5220,7 +5220,33 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
 			     (format "refs/heads/%s:refs/remotes/%s"
 				     name ref))))))
 
-(defun egg-log-buffer-fetch (pos)
+(defun egg-log-buffer-do-fetch-from-site (remote-name remote-info fetch-function tag-or-branch)
+  (let* ((pretty-remote (propertize remote-name 'face 'bold))
+	 (fetch-tag (cond ((eq tag-or-branch 'ask)
+			   (y-or-n-p (format "Fetch a tag instead of branch from %s? " pretty-remote)))
+			  (t tag-or-branch)))
+	 (ref (read-string (format "%s to fetch from %s (default all refs): " 
+				   (if fetch-tag "tag" "branch") pretty-remote)
+			   nil nil "--all"))
+	 (pretty-ref (propertize ref 'face 'bold)))
+    
+    (if (equal ref "--all")
+	(progn
+	  (message "GIT> fetching everything from %s..." pretty-remote)
+	  (if (functionp fetch-function)
+	      (funcall fetch-function (current-buffer) remote-info "--all")
+	    (if fetch-tag
+		(egg-buffer-async-do nil "fetch" "--tags" remote-name)
+	      (egg-buffer-async-do nil "fetch" remote-name))))
+      (message "GIT> fetching %s from %s..." pretty-ref pretty-remote)
+      (if (functionp fetch-function)
+	  (funcall fetch-function (current-buffer) remote-info ref)
+	(if fetch-tag
+	    (egg-buffer-async-do nil "fetch" remote-name "tag" ref)
+	    (egg-buffer-async-do nil "fetch" remote-name
+				 (format "%s:refs/remotes/%s/%s" ref remote-name ref)))))))
+
+(defun egg-log-buffer-fetch-site (pos)
   "Fetch some refs from remote at POS."
   (interactive "d")
   (let* ((ref-at-point (get-text-property pos :ref))
@@ -5228,25 +5254,25 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
          (type (cdr ref-at-point))
 	 (remote-info (get-text-property pos :x-info))
 	 (fetch-function (get-text-property pos :x-fetch))
-         site name def remote)
+         remote)
     (unless (eq type :remote)
       (error "No site here to fetch from!"))
     (setq remote (egg-rbranch-to-remote ref))
     (when remote
-      (setq name (read-string (format "fetch from %s (default all): "
-                                      remote) nil nil "--all"))
-      (if (equal name "--all")
-          (progn
-            (message "GIT> fetching everything from %s..." remote)
-            (if (functionp fetch-function)
-		(funcall fetch-function (current-buffer) remote-info "--all")
-	      (egg-buffer-async-do nil "fetch" remote)))
-        (message "GIT> fetching %s from %s..." name remote)
-        (if (functionp fetch-function)
-	    (funcall fetch-function (current-buffer) remote-info name)
-	  (egg-buffer-async-do nil "fetch" remote
-			       (format "refs/heads/%s:refs/remotes/%s/%s"
-				       name remote name)))))))
+      (egg-log-buffer-do-fetch-from-site remote remote-info fetch-function 'ask))))
+
+(defun egg-log-buffer-fetch ()
+  "Fetch something from a remote"
+  (interactive)
+  (let* ((remote-name (egg-read-remote "Fetch from remote: "))
+	 (remote (and remote-name 
+		      (not (and (equal "" remote-name)
+				(error "Invalid remote: %s" remote-name)))
+		      (egg-add-remote-properties remote-name remote-name)))
+	 (remote-info (get-text-property 0 :x-info remote))
+	 (fetch-function (get-text-property 0 :x-fetch remote)))
+    (when remote
+      (egg-log-buffer-do-fetch-from-site remote remote-info fetch-function 'ask))))
 
 (defun egg-log-buffer-push-to-local (pos &optional level)
   "Push commit at POS onto HEAD.
@@ -5683,7 +5709,7 @@ prompt for a remote repo."
                  (egg-text sha1 'font-lock-string-face))
       (egg-generic-display-logs egg-internal-log-buffer-closure init))))
 
-(defun egg-async-xfer-pp (cmd-name remote-re remote-re-no fall-back-remote-name)
+(defun egg-async-xfer-pp (status cmd-name remote-re remote-re-no fall-back-remote-name)
   (save-match-data
     (let* ((cmd-name (upcase cmd-name))
 	   remote-name xfer-msg remote-msg beg)
@@ -5699,7 +5725,7 @@ prompt for a remote repo."
       (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
 	(setq remote-msg (match-string-no-properties 1)))
 
-      (unless remote-name (setq remote-name fall-back-remote-name))
+      ;;(unless remote-name (setq remote-name fall-back-remote-name))
 
       (unless (or remote-msg xfer-msg)
 	(setq xfer-msg (cond ((and (goto-char (point-min))
@@ -5716,23 +5742,30 @@ prompt for a remote repo."
 			      (if (re-search-forward "^.+" nil t)
 				  (buffer-substring-no-properties (line-beginning-position)
 								  (line-end-position))
-				"*silent*")))))
+				;; not a message from remote
+				(setq remote-name nil)
+				(cond ((eq status :finished) "all done")
+				      ((eq status :killed) "dead in action")
+				      ((numberp status) (format "exit with code %d" status))
+				      ((eq status :failed) "fatal failure")
+				      ((eq status :confused) "egg was confused by git")
+				      (t "this message should not be seen (status = %s)" status)))))))
 
       (if remote-name
 	  (message "GIT-%s> %s: %s" cmd-name remote-name (if remote-msg remote-msg xfer-msg))
 	(message "GIT-%s> %s" cmd-name (if remote-msg remote-msg xfer-msg))))))
 
-(defun egg-async-fetch-pp (cmd-sexp)
-  (egg-async-xfer-pp (car cmd-sexp) "^From \\(.+\\)$" 1 (nth 1 cmd-sexp)))
+(defun egg-async-fetch-pp (status cmd-sexp)
+  (egg-async-xfer-pp status (car cmd-sexp) "^From \\(.+\\)$" 1 (nth 1 cmd-sexp)))
 
-(defun egg-async-push-pp (cmd-sexp)
-  (egg-async-xfer-pp (car cmd-sexp) "^To \\(.+\\)$" 1 (nth 1 cmd-sexp)))
+(defun egg-async-push-pp (status cmd-sexp)
+  (egg-async-xfer-pp status (car cmd-sexp) "^To \\(.+\\)$" 1 (nth 1 cmd-sexp)))
 
-(defun egg-async-generic-pp (cmd-sexp)
-  (egg-async-xfer-pp (car cmd-sexp) nil nil (nth 1 cmd-sexp)))
+(defun egg-async-generic-pp (status cmd-sexp)
+  (egg-async-xfer-pp status (car cmd-sexp) nil nil (nth 1 cmd-sexp)))
 
-(defun egg-async-unimplemented-pp (cmd-sexp)
-  (egg-async-xfer-pp "internal-error" nil nil nil))
+(defun egg-async-unimplemented-pp (status cmd-sexp)
+  (egg-async-xfer-pp status "internal-error" nil nil nil))
 
 
 (defun egg-log-buffer-redisplay-from-command (buffer)
@@ -5740,20 +5773,20 @@ prompt for a remote repo."
   (when (and (processp egg-async-process)
              (equal (current-buffer) (process-buffer egg-async-process)))
     (save-excursion
-       (let ((cmd "GIT>") 
+       (let ((status egg-async-exit-status)
 	     cmd-sexp cmd-string pos done)
          (goto-char (point-min))
          (skip-chars-forward "^(")
          (setq cmd-sexp (read (current-buffer)))
          (if (not (consp cmd-sexp))
-	     (egg-async-unimplemented-pp nil)
+	     (egg-async-unimplemented-pp status nil)
            (setq cmd-string (car cmd-sexp))
 	   (cond ((string-equal "fetch" cmd-string)
-		  (egg-async-fetch-pp cmd-sexp))
+		  (egg-async-fetch-pp status cmd-sexp))
 		 ((string-equal "push" cmd-string)
-		  (egg-async-push-pp cmd-sexp))
+		  (egg-async-push-pp status cmd-sexp))
 		 (t
-		  (egg-async-generic-pp cmd-sexp)))))))
+		  (egg-async-generic-pp status cmd-sexp)))))))
   ;; update log buffer
   (egg-log-buffer-redisplay buffer))
 
@@ -5904,7 +5937,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                    :visible '(egg-navigation-at-point)))
     (define-key map [sp9] '("--"))
     (define-key map [rpush] (list 'menu-item "Fetch Refs from Remote"
-                                  'egg-log-buffer-fetch
+                                  'egg-log-buffer-fetch-site
                                   :visible '(egg-remote-at-point)))
     (define-key map [rfetch] (list 'menu-item "Push Refs to Remote"
                                    'egg-log-buffer-push
@@ -7749,7 +7782,7 @@ egg in current buffer.\\<egg-minor-mode-map>
   '((egg-log-buffer-push-to-local egg-ref-or-commit-at "update another branch with %s")
     (egg-log-buffer-ff-pull egg-ref-or-commit-at "update HEAD with %s")
     (egg-log-buffer-push egg-rsite-at "push branches to remote %s")
-    (egg-log-buffer-fetch egg-ref-at "(re)-fetch %s")
+    (egg-log-buffer-fetch-site egg-ref-at "(re)-fetch %s")
     (egg-log-buffer-rm-ref egg-ref-at "remove %s")
     (egg-log-buffer-reflog-ref egg-ref-at "show history (reflog) of %s")
     (egg-log-buffer-unmark egg-commit-at "unmark %s for upcoming rebase")
