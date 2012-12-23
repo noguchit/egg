@@ -6268,11 +6268,15 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 		(concat ref "@{now}"))))
 	 (beg (point)) 
 	 (head-name (egg-branch-or-HEAD))
-	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair)
-    (setq mappings (save-match-data 
-		     (mapcar (lambda (line) 
-			       (split-string line "~" t)) 
-			     mappings)))
+	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair
+	 tmp)
+    (setq tmp (save-match-data (mapcar (lambda (line) 
+					 (split-string line "~" t)) 
+				       mappings)))
+    (setq mappings nil)
+    (dolist (pair tmp)
+      (when (and (stringp (nth 0 pair)) (stringp (nth 1 pair)))
+	(push pair mappings)))
     (save-match-data
       (dotimes (i (length mappings))
 	(setq pair (pop mappings))
