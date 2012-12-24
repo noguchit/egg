@@ -508,7 +508,7 @@ output processing function for `egg--do-handle-exit'."
 (defun egg-svn-map-name (name branch spec)
   (save-match-data
     (let ((mappings (mapcar (lambda (line)
-			      (split-string line "[:* \t]+" t))
+			      (split-string line "\\(?:{[a-zA-Z0-9,_-]+}\\)?[:* \t]+" t))
 			    (egg-git-to-lines "config" "--get-regexp" 
 					      "svn-remote\\..*\\.(branches|fetch)")))
 	  match tmp remote type props)
@@ -631,6 +631,13 @@ output processing function for `egg--do-handle-exit'."
 
 
 (defun egg--git-svn-add-custom-mapping (type mapping)
+  (let* ((key (egg-git-svn-config-name type))
+	 (existings (egg-git-to-string-list "config" "--get-all" key)))
+    (unless (assoc mapping existings)
+      (egg--git nil "config" "--add"  key mapping)
+      mapping)))
+
+(defun egg--git-svn-add-custom-mapping-old (type mapping)
   (let ((key (egg-git-svn-config-name type))
 	(value (regexp-quote mapping)))
     (unless (equal (egg-git-to-string "config" "--get" key value) mapping)
@@ -719,6 +726,60 @@ output processing function for `egg--do-handle-exit'."
 
 
 (defun egg-push-to-svn (buffer-to-update svn-remote l-ref r-ref)
+  (if (string-match "\\`\\(.+\\)/\\([^/]+\\)\\'" r-ref)
+      (save-match-data
+	(egg-push-to-new-svn-prefix buffer-to-update svn-remote l-ref
+				    (match-string-no-properties 1 r-ref)
+				    (match-string-no-properties 2 r-ref)))
+    (egg-do-push-to-svn buffer-to-update svn-remote l-ref r-ref)))
+
+(defun egg-push-to-new-svn-prefix (buffer-to-update svn-remote l-ref prefix r-name)
+  (let* ((svn-name (car svn-remote))
+	 (url (and svn-name (egg-git-svn-url svn-name)))
+	 (dest-url (and url (concat url "/" prefix)))
+	 (svn-path (concat prefix "/" r-name))
+	 (pretty-dest-url (and dest-url (propertize dest-url 'face 'bold)))
+	 (pretty-svn (and svn-name (propertize svn-name 'face 'bold)))
+	 (pretty-svn-path (and svn-path (propertize svn-path 'face 'bold)))
+	 full-ref local-base mapping)
+    (when (catch 'new-svn-prefix
+	    (unless (egg-svn-path-exists-p dest-url)
+	      (unless (y-or-n-p (format "create new svn dir %s? " pretty-dest-url))
+		(throw 'new-svn-prefix nil))
+	      (egg--svn nil "mkdir" dest-url))
+
+	    (setq full-ref 
+		  (or (setq mapping (egg-git-svn-map-svn-path svn-path))
+		      (read-string (format "map %s to: " pretty-svn-path) 
+				   (concat "refs/remotes/" (file-name-nondirectory prefix)
+					   "/" r-name))))
+
+	    (unless (and (stringp full-ref) (string-match "\\`refs/remotes/" full-ref))
+	      (message "Cannot handle remote trackign branch name: %s" full-ref)
+	      (throw 'full-ref nil))
+
+	    (setq local-base (file-name-directory full-ref))
+
+	    (unless mapping
+	      (setq mapping (concat prefix "/{" r-name "}:" local-base "*"))
+	      (setq mapping 
+		    (or (and (y-or-n-p (concat "add svn->git mapping rule: \""
+					       mapping "\" ? "))
+			     mapping)
+			(read-string "add svn->git mapping rule: " 
+				     (concat prefix "/*:" local-base "*"))))
+	      (if (string-match (concat ":" local-base "\\*\\'") mapping)
+		  (egg--git-svn-add-custom-branch-mapping mapping)
+		(message "Cannot handle mapping svn->git mapping: %s" mapping)
+		(throw 'full-ref nil)))
+
+	    full-ref)
+      (egg-do-push-to-svn buffer-to-update
+			  (list svn-name :branches (concat prefix "/")
+				local-base)
+			  l-ref r-name))))
+
+(defun egg-do-push-to-svn (buffer-to-update svn-remote l-ref r-ref)
   (let* ((svn-name (car svn-remote))
 	 (map-type (nth 1 svn-remote))
 	 (dest (nth 2 svn-remote))
