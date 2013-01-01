@@ -5317,7 +5317,7 @@ would be a pull (by default --ff-only)."
       (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
-  "Upload the ref at POS to a remote repository.
+  "Push the ref at POS to a remote repository.
 If the ref track a remote tracking branch, then the repo to
 upload to is the repo of the remote tracking branch. Otherwise,
 prompt for a remote repo."
@@ -5377,14 +5377,13 @@ prompt for a remote repo."
 
 
     (if (equal "" lref)
-	(progn
+	(if (functionp delete-function)
+	    (funcall delete-function (current-buffer) remote-info rref)
 	  (message "EGG> deleting %s on %s..." rref remote)
-	  (if (functionp delete-function)
-	      (funcall delete-function (current-buffer) remote-info rref)
-	    (egg-buffer-async-do nil "push" "--delete" remote rref)))
-      (message "GIT> pushing %s to %s on %s..." lref rref remote)
+	  (egg-buffer-async-do nil "push" "--delete" remote rref))
       (if (functionp push-function)
 	  (funcall push-function (current-buffer) remote-info lref rref)
+	(message "GIT> pushing %s to %s on %s..." lref rref remote)
 	(setq spec (concat lref ":" rref))
 	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))
 
