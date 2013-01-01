@@ -38,8 +38,8 @@
 (defconst egg-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:Buffer")))
     (define-key map (kbd "q") 'egg-quit-buffer)
-    (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
+    (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     (define-key map (kbd "C-c C-h") 'egg-buffer-hide-all)

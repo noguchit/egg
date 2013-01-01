@@ -6135,6 +6135,7 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
     (dolist (pair tmp)
       (when (and (stringp (nth 0 pair)) (stringp (nth 1 pair)))
 	(push pair mappings)))
+    (setq mappings (nreverse mappings))
     (save-match-data
       (dotimes (i (length mappings))
 	(setq pair (pop mappings))
