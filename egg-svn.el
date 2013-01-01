@@ -660,13 +660,6 @@ output processing function for `egg--do-handle-exit'."
       (egg--git nil "config" "--add"  key mapping)
       mapping)))
 
-(defun egg--git-svn-add-custom-mapping-old (type mapping)
-  (let ((key (egg-git-svn-config-name type))
-	(value (regexp-quote mapping)))
-    (unless (equal (egg-git-to-string "config" "--get" key value) mapping)
-      (egg--git nil "config" "--add"  key mapping)
-      mapping)))
-
 (defun egg--git-svn-rm-custom-mapping (type mapping)
   (let ((key (egg-git-svn-config-name type))
 	(value (regexp-quote mapping)))

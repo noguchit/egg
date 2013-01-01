@@ -4587,50 +4587,6 @@ With C-u prefix, unmark all."
     (funcall add-some-func)
     (nreverse done)))
 
-
-(defun egg-log-buffer-get-rebase-marked-alist-old ()
-  (let* ((tbd (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
-					       (egg-log-buffer-squash-mark)
-					       (egg-log-buffer-edit-mark)
-					       (egg-log-buffer-fixup-mark)))
-	 done commit add-func)
-    (setq add-func 
-	  (lambda (commit)
-	    ;;
-	    ;; add the commit to the done list
-	    ;; prepending is ok because it will be reversed at the end
-	    ;;
-	    (push commit done)
-	    (let ((sha1 (egg-marked-commit-sha1 commit))
-		  (second-sha1 (egg-marked-commit-follower commit))
-		  (youngers tbd)
-		  younger younger second)
-	      ;;
-	      ;; Look for younger ones that must be squashed into commit
-	      ;;
-	      (dolist (younger youngers)
-		(when (and (equal (egg-marked-commit-leader younger) sha1)
-			   (not (memq younger done)))
-		  ;;
-		  ;; put add the younger one into done if it wasn't second in command
-		  ;; save the second in commad for later, it must be added after all
-		  ;; the squashed ones.
-		  ;;
-		  (setq tbd (delq younger tbd))
-		  (if (equal (egg-marked-commit-sha1 younger) second-sha1)
-		      (setq second younger)
-		    (funcall add-func younger))))
-	      ;;
-	      ;; Now that all the squashed ones were added, add second-in-command
-	      ;;
-	      (when second
-		(funcall add-func second)))))
-    (while tbd
-      (setq commit (car tbd) tbd (cdr tbd))
-      (unless (memq commit done)
-	(funcall add-func commit)))
-    (nreverse done)))
-
 (defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
   (let ((process-environment (copy-sequence process-environment))
         (repo-state (or repo-state (egg-repo-state :staged :unstaged)))
@@ -5387,48 +5343,6 @@ prompt for a remote repo."
 	(setq spec (concat lref ":" rref))
 	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))
 
-(defun egg-log-buffer-push-to-remote-old (pos &optional non-ff)
-  "Upload the ref at POS to a remote repository.
-If the ref track a remote tracking branch, then the repo to
-upload to is the repo of the remote tracking branch. Otherwise,
-prompt for a remote repo."
-  (interactive "d\nP")
-  (let* ((ref-at-point (get-text-property pos :ref))
-         (lref (car ref-at-point))
-         (type (cdr ref-at-point))
-	 (commit (egg-commit-at-point pos))
-	 type-name rref tracking remote spec push-function remote-info)
-    (unless commit
-      (error "Nothing to push here!"))
-    (cond ((or (eq type :remote) commit)
-	   (setq lref commit))
-          ((memq type '(:tag :head))
-	   (if (eq type :tag)
-	       (setq type-name "tag")
-	     (setq type-name "branch")
-	     (setq tracking (egg-tracking-target lref :remote)))
-           
-           (if (consp tracking)
-               (setq rref (nth 0 tracking)
-		     remote (nth 1 tracking))
-             (setq remote (egg-read-remote
-                           (format "push %s %s to remote: " type-name
-				   (propertize lref 'face 'bold))))
-             (setq rref (read-string
-                         (format "push %s %s to %s as: " type-name
-				 (propertize lref 'face 'bold)
-				 (propertize remote 'face 'bold))
-                         lref)))
-	   (setq remote-info (egg-get-remote-properties remote rref))
-	   (setq push-function (plist-get remote-info :x-push))
-	   (setq remote-info (plist-get remote-info :x-info))))
-    (when (and remote rref lref)
-      (if (functionp push-function)
-	  (funcall push-function (current-buffer) remote-info lref rref)
-	(setq spec (concat lref ":" rref))
-	(message "GIT> pushing %s to %s on %s..." lref rref remote)
-	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))
-
 (defun egg-log-buffer-push (pos)
   "Push some refs to the remote at POS"
   (interactive "d")
@@ -5785,61 +5699,6 @@ prompt for a remote repo."
 		  (egg-async-generic-pp status cmd-sexp)))))))
   ;; update log buffer
   (egg-log-buffer-redisplay buffer))
-
-(defun egg-async-fetch-pp-old (cmd-sexp)
-  (save-match-data
-    (let* ((cmd-len (length cmd-sexp))
-	   (spec (nth (1- cmd-len) cmd-sexp))
-	   (remote-name "internal-error")
-	   remote-name fetch-msg remote-msg)
-      
-      (when (progn (goto-char (point-min)) (re-search-forward "^From \\(.+\\)$" nil t))
-	(setq remote-name (match-string-no-properties 1))
-	(forward-line 1)
-	(setq fetch-msg (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
-
-      (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
-	(setq remote-msg (match-string-no-properties 1)))
-
-      (unless (or remote-msg fetch-msg)
-	(setq fetch-msg (cond ((and (progn (goto-char (point-min)))
-				   (re-search-forward "^error: \\(.+\\)" nil t))
-			      (match-string-no-properties 1))
-			     ((and (progn (goto-char (point-min)))
-				   (re-search-forward "^fatal: \\(.+\\)" nil t))
-			      (match-string-no-properties 1))
-			     ((and (progn (goto-char (point-max)))
-				   (re-search-backward ".+" nil t))
-			      (buffer-substring-no-properties (line-beginning-position)
-							      (line-end-position))))))
-
-      (message "GIT-FETCH[%s]> %s: %s" spec remote-name (if remote-msg remote-msg fetch-msg)))))
-
-(defun egg-async-push-pp-old (cmd-sexp)
-  (save-match-data
-    (let* ((cmd-len (length cmd-sexp))
-	   (spec (nth (1- cmd-len) cmd-sexp))
-	   (remote-name "internal-error")
-	   remote-name push-msg remote-msg)
-      
-      (when (progn (goto-char (point-min)) (re-search-forward "^To \\(.+\\)$" nil t))
-	(setq remote-name (match-string-no-properties 1))
-	(forward-line 1)
-	(setq push-msg (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
-
-      (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
-	(setq remote-msg (match-string-no-properties 1)))
-
-      (unless (or remote-msg push-msg)
-	(setq push-msg (cond ((progn (goto-char (point-min)) (re-search-forward "^error: \\(.+\\)" nil t))
-			      (match-string-no-properties 1))
-			     ((progn (goto-char (point-min)) (re-search-forward "^fatal: \\(.+\\)" nil t))
-			      (match-string-no-properties 1))
-			     ((progn (goto-char (point-max)) (re-search-backward ".+" nil t))
-			      (buffer-substring-no-properties (line-beginning-position)
-							      (line-end-position))))))
-
-      (message "GIT-PUSH[%s]> %s: %s" spec remote-name (if remote-msg remote-msg push-msg)))))
 
 (define-egg-buffer log "*%s-log@%s*"
   "Major mode to display the output of git log.\\<egg-log-buffer-mode-map>
