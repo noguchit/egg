@@ -531,6 +531,10 @@ output processing function for `egg--do-handle-exit'."
 			      (split-string line "\\(?:{[a-zA-Z0-9,_-]+}\\)?[:* \t]+" t))
 			    (egg-git-to-lines "config" "--get-regexp" 
 					      "svn-remote\\..*\\.(branches|fetch)")))
+	  (full-branch (cond ((and branch (string-match "\\`refs/remotes/" branch))
+			      branch)
+			     ((and spec branch)
+			      (concat spec branch))))
 	  match tmp remote type props)
       (setq mappings
 	    (mapcar 
@@ -540,7 +544,8 @@ output processing function for `egg--do-handle-exit'."
 	       (setq type (nth 2 tmp))
 	       (list (nth 2 map) remote (intern (concat ":" type)) (nth 1 map) (nth 2 map)))
 	     mappings))
-      (setq match (or (and branch (assoc branch mappings))
+      (setq match (or (and full-branch (assoc full-branch mappings))
+		      (and branch (assoc branch mappings))
 		      (and spec (assoc spec mappings))))
       (when match
 	(setq props (list :x-delete #'egg-delete-svn-path
@@ -556,7 +561,7 @@ output processing function for `egg--do-handle-exit'."
 
 (defun egg-svn-get-remote-properies (prefix branch)
   (or (and (not (equal prefix "."))
-	   (egg-svn-map-name nil nil (concat "refs/remotes/" prefix "/")))
+	   (egg-svn-map-name nil branch (concat "refs/remotes/" prefix "/")))
       (and (stringp branch) 
 	   (egg-svn-map-name nil branch (file-name-directory branch)))))
 
@@ -822,9 +827,11 @@ output processing function for `egg--do-handle-exit'."
   (let* ((svn-name (car svn-remote))
 	 (map-type (nth 1 svn-remote))
 	 (dest (nth 2 svn-remote))
-	 (local-base (nth 3 svn-remote))
+	 (local-base (cond ((eq map-type :fetch) (file-name-directory (nth 3 svn-remote)))
+			   (t (nth 3 svn-remote))))
 	 (r-ref (and (stringp r-ref) (file-name-nondirectory r-ref)))
-	 (r-full-name (and r-ref (concat local-base r-ref)))
+	 (r-full-name (and r-ref (cond ((eq map-type :fetch) (nth 3 svn-remote))
+				       (t (concat local-base r-ref)))))
 	 (url (and svn-name (egg-git-svn-url svn-name)))
 	 (svn-branch-url (and r-ref url 
 			      (concat url "/" 

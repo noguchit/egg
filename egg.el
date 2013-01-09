@@ -5326,6 +5326,8 @@ prompt for a remote repo."
 					(propertize lref 'face 'bold)
 					(propertize remote 'face 'bold)) lref))))
 
+    ;;(egg-add-remote-properties remote remote rref)
+
     (setq remote-info (egg-get-remote-properties remote rref))
     (setq push-function (plist-get remote-info :x-push))
     (setq delete-function (plist-get remote-info :x-delete))
