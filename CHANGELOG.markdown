@@ -1,6 +1,6 @@
 # Egg (Emacs Got Git).
 
-## bogo-1.0.3
+## 1.0.4
 
 ### features
 - some support for gpg agent. But you should use gpg-2. If you used gpg-1, add "use-agent" in gpg.conf
@@ -77,12 +77,8 @@
 - fixed bug in egg-log-locate-commit, it should work correctly now
 - fixed bug in egg-stash-buffer-pop and egg-stash-buffer-apply. the index should now be
   correctly restored.
-  
 
 ### internal changes
-
-
-
 
 
 ## v1.0.3 (not released)
