@@ -38,8 +38,8 @@
 (defconst egg-buffer-mode-map
   (let ((map (make-sparse-keymap "Egg:Buffer")))
     (define-key map (kbd "q") 'egg-quit-buffer)
-    (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "g") 'egg-buffer-cmd-refresh)
+    (define-key map (kbd "G") 'egg-buffer-cmd-refresh)
     (define-key map (kbd "n") 'egg-buffer-cmd-navigate-next)
     (define-key map (kbd "p") 'egg-buffer-cmd-navigate-prev)
     (define-key map (kbd "C-c C-h") 'egg-buffer-hide-all)
@@ -408,7 +408,8 @@ the index. \\{egg-wdir-diff-section-map}")
     (define-key map (kbd "=") 'egg-log-buffer-diff-revs)
 
     (define-key map (kbd "u") 'egg-log-buffer-push-to-local)
-    
+    (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
+	
     (define-key map [C-down-mouse-2] 'egg-log-popup-commit-line-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-commit-line-menu)
 
@@ -462,8 +463,8 @@ the index. \\{egg-wdir-diff-section-map}")
 (defconst egg-log-remote-site-map
   (let ((map (make-sparse-keymap "Egg:LogRemoteSite")))
     (set-keymap-parent map egg-log-commit-map)
-    (define-key map (kbd "D") 'egg-log-buffer-fetch)
-    (define-key map (kbd "U") 'egg-log-buffer-push)
+    (define-key map (kbd "D") 'egg-log-buffer-fetch-site)
+    (define-key map (kbd "U") 'egg-log-buffer-push-to-remote)
 
     (define-key map [C-down-mouse-2] 'egg-log-popup-remote-site-menu)
     (define-key map [C-mouse-2] 'egg-log-popup-remote-site-menu)
@@ -502,6 +503,7 @@ the index. \\{egg-wdir-diff-section-map}")
     (set-keymap-parent map egg-log-buffer-base-map)
     (define-key map "L" 'egg-log-buffer-reflog-ref)
     (define-key map "/" 'egg-search-changes)
+    (define-key map "D" 'egg-log-buffer-fetch)
     map)  
   "Keymap for the log buffer.\\{egg-log-buffer-mode-map}")
 

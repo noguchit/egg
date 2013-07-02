@@ -1,6 +1,6 @@
 EMACS := emacs -q --no-site-file
 SRCS  := egg-custom.el egg-base.el egg-const.el egg-git.el egg.el \
-	 egg-grep.el egg-key.el egg-diff.el
+	 egg-grep.el egg-key.el egg-diff.el egg-svn.el
 ELCS  := $(patsubst %.el,%.elc,$(SRCS))
 DEPS  := $(patsubst %.el,.%.d,$(SRCS))
 
@@ -33,12 +33,14 @@ doc.clean :
 	$(MAKE) -C doc clean
 
 clean : doc.clean
-	-rm $(ELCS) $(DEPS) $(LOAD_DEPS)
+	-rm $(ELCS) $(DEPS) $(LOAD_DEPS) egg-reload.el
 
 loaddeps : $(LOAD_DEPS)
 
-egg-reload.el : $(LOAD_DEPS)
+egg-reload.el : Makefile $(LOAD_DEPS)
 	@echo Generating $@
-	@cat $^ | tsort | sed -nre 's/^(.+)$$/\(load "\1"\)/p' > $@
+	@cat $(filter-out $<, $^) | tsort | sed -nre 's/^(.+)$$/\(load "\1"\)/p' > $@
+	@echo "(defun egg-reload ()\n  (interactive)" >> $@
+	@echo "  (load \"egg-reload\"))\n" >> $@
 
 -include $(DEPS)

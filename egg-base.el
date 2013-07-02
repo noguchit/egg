@@ -190,7 +190,7 @@ This function searches for and return the 1st match of REGEXP on the
 contents of the file. If indices was not nil, then return the first
 successful submatch in the order in INDICES."
   (with-temp-buffer
-    (insert-file-contents-literally file-name)
+    (insert-file-contents file-name)
     (goto-char (point-min))
     (when (re-search-forward regexp nil t)
       (if (null indices)
@@ -205,7 +205,7 @@ successful submatch in the order in INDICES."
 START-RE is the regexp to match the beginning of a record.
 END-RE is the regexp to match the end of a record."
   (with-temp-buffer
-    (insert-file-contents-literally file-name)
+    (insert-file-contents file-name)
     (goto-char (point-min))
     (let ((beg (point-min))
           (end (point-max))
@@ -240,13 +240,13 @@ E.g: `bar' in `foo/bar'"
 
 (defsubst egg-file-as-string-raw (file-name)
   (with-temp-buffer
-    (insert-file-contents-literally file-name)
+    (insert-file-contents file-name)
     (buffer-string)))
 
 (defsubst egg-file-as-string (file-name)
   "return the contents of file FILE-NAME as a string."
   (with-temp-buffer
-    (insert-file-contents-literally file-name)
+    (insert-file-contents file-name)
     (buffer-substring-no-properties
      (point-min) (if (> (point-max) (point-min))
                      (1- (point-max)) (point-max)))))

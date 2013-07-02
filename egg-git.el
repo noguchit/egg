@@ -109,6 +109,16 @@ is used as input to GIT."
 	(re-search-forward "^\n")
 	(buffer-substring-no-properties (match-end 0) (point-max))))))
 
+(defsubst egg-pick-from-commit-message (rev regex &optional index)
+  "Retrieve the commit message of REV."
+  (save-match-data
+    (with-temp-buffer
+      (when (egg--git t "cat-file" "commit" rev)
+	(goto-char (point-min))
+	(re-search-forward "^\n")
+	(when (re-search-forward regex nil t)
+	  (match-string-no-properties (or index 0)))))))
+
 (defun egg-commit-subject (rev)
   "Retrieve the commit subject of REV."
   (save-match-data
@@ -252,6 +262,10 @@ Return the output lines as a list of strings."
                             matches))))
             (setq lines (cons matches lines)))
           lines)))))
+
+(defsubst egg-git-range-length (young-commitish old-commitish)
+  ;; add one for the base commit which was excluded by the ... notation
+  (1+ (length (egg-git-to-lines "rev-list" (concat old-commitish "..." young-commitish)))))
 
 (defsubst egg-file-git-name (file)
   "return the repo-relative name of FILE."
@@ -420,10 +434,12 @@ if BUF was nil then use current-buffer"
     (set (intern (concat "egg-" egg-git-dir "-HEAD")) " Egg")
     egg-git-dir))
 
-(defsubst egg-work-tree-dir (&optional git-dir)
+(defsubst egg-work-tree-dir (&optional git-dir fall-back)
   (unless git-dir (setq git-dir (egg-git-dir)))
-  (or (get-text-property 0 :work-tree git-dir)
-      (file-name-directory git-dir)))
+  (if git-dir 
+      (or (get-text-property 0 :work-tree git-dir)
+	  (file-name-directory git-dir))
+    fall-back))
 
 (defun egg-file-get-index-buffer ()
   (let* ((git-name (egg-file-git-name (buffer-file-name)))
@@ -487,12 +503,18 @@ if BUF was nil then use current-buffer"
   (or (egg-git-to-string "rev-parse" "--verify" "-q" "HEAD")
       "0000000000000000000000000000000000000000"))
 
-(defun egg-get-all-refs (prefix)
-  (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
-		    (format "refs/heads/%s*" prefix)
-		    (format "refs/tags/%s*" prefix)
-		    (format "refs/remotes/%s*/*" prefix)
-		    (format "refs/remotes/%s*" prefix)))
+(defun egg-get-all-refs (prefix &optional exact)
+  (if exact
+      (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
+			(format "refs/heads/%s" prefix)
+			(format "refs/tags/%s" prefix)
+			(format "refs/remotes/%s" prefix))
+    (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
+		      (format "refs/heads/%s*" prefix)
+		      (format "refs/tags/%s*" prefix)
+		      (format "refs/remotes/%s*/*" prefix)
+		      (format "refs/remotes/%s*" prefix))))
+
 
 (defun egg-get-local-refs (prefix)
   (egg-git-to-lines "for-each-ref" "--format=%(refname:short)" 
@@ -778,7 +800,8 @@ as repo state instead of re-read from disc."
   (egg-config-get-all nil (concat (egg-git-dir) "/config") "remote"))
 
 (defsubst egg-config-get-all-remote-names ()
-  (mapcar 'car (egg-config-get-all-remotes)))
+  (nconc (mapcar 'car (egg-config-get-all-remotes))
+	 (egg-get-all-remotes)))
 
 (defsubst egg-config-get (type attr &optional name)
   (and (egg-git-dir)
@@ -786,12 +809,14 @@ as repo state instead of re-read from disc."
 
 (defun egg-tracking-target (branch &optional mode)
   (let ((remote (egg-config-get "branch" "remote" branch))
-        (rbranch (egg-config-get "branch" "merge" branch)))
-    (when (stringp rbranch)
-      (setq rbranch (egg-rbranch-name rbranch))
+        (rbranch-full (egg-config-get "branch" "merge" branch))
+	rbranch)
+    (when (stringp rbranch-full)
+      (setq rbranch (egg-rbranch-name rbranch-full))
       (cond ((null mode) (concat remote "/" rbranch))
             ((eq :name-only mode) rbranch)
-            (t (cons rbranch remote))))))
+	    ((eq :remote mode) (list rbranch-full remote))
+            (t (list rbranch remote))))))
 
 (defun egg-complete-get-all-refs (prefix &optional matches)
   (if matches
@@ -847,11 +872,38 @@ as repo state instead of re-read from disc."
   "Query user for a revision using PROMPT. DEFAULT is the default value."
   (completing-read prompt 'egg-complete-rev nil nil default))
 
+(defvar egg-add-remote-properties nil)
+(defun egg-add-remote-properties (name remote &optional branch)
+  (or (and (functionp egg-add-remote-properties)
+	   (funcall egg-add-remote-properties name remote branch))
+      (and (consp egg-add-remote-properties)
+	   (let ((name name))
+	     (dolist (func egg-add-remote-properties)
+	       (setq name (funcall func name remote branch)))
+	     name))
+      name))
+
+(defvar egg-get-remote-properties nil)
+(defun egg-get-remote-properties (remote branch)
+  (cond ((functionp egg-get-remote-properties)
+	 (funcall egg-get-remote-properties remote branch))
+	((consp egg-get-remote-properties)
+	 (dolist-done (func egg-get-remote-properties props)
+	   (setq props (funcall func remote branch))))
+	(t nil)))
+
 (defsubst egg-read-remote (prompt &optional default)
   "Query user for a remote using PROMPT. DEFAULT is the default value."
-  (completing-read prompt (egg-config-get-all-remote-names) nil t default))
+  (let ((remote (completing-read prompt (egg-config-get-all-remote-names) nil t default)))
+    (egg-add-remote-properties remote remote)))
 
-
+(defvar egg-get-all-remotes nil)
+(defun egg-get-all-remotes ()
+  (cond ((functionp egg-get-all-remotes)
+	 (funcall egg-get-all-remotes))
+	((consp egg-get-all-remotes)
+	 (apply #'append (mapcar #'funcall egg-get-all-remotes)))
+	(t nil)))
 
 (defun egg-full-ref-decorated-alist (head-properties
                                      tag-properties
@@ -909,7 +961,8 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	  (mapcar (lambda (desc)
 		    (let ((full-name (cdr (assq 1 desc)))
 			  (name (cdr (or (assq 5 desc) (assq 7 desc))))
-			  (remote (cdr (assq 6 desc))))
+			  (remote (cdr (assq 6 desc)))
+			  short-name)
 		      (cond ((assq 2 desc)
 			     ;; head
 			     (cons full-name
@@ -932,17 +985,14 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 			    ((assq 4 desc)
 			     ;; remote
 			     (cons full-name
-				   (concat
-				    (if (stringp remote)
-					(apply 'propertize remote
-					       :ref (cons name :remote)
-					       remote-site-properties)
-				      ;; svn has no remote name
-				      "")
-				    (apply 'propertize (substring name (length remote))
-					   :full-name full-name
-					   :ref (cons name :remote)
-					   remote-ref-properties))))
+				   (egg-add-remote-properties 
+				    (concat (apply 'propertize remote
+						   :ref (cons name :remote)
+						   remote-site-properties)
+					    (apply 'propertize (substring name (length remote))
+						   :full-name full-name
+						   :ref (cons name :remote)
+						   remote-ref-properties)) remote full-name)))
 			    ((assq 7 desc)
 			     ;; stash
 			     (cons full-name
@@ -1070,7 +1120,19 @@ success."
         (accepted-msg (and (integerp exit-code)
                            (format "exited abnormally with code %d"
                                    exit-code)))
-        proc)
+	(command egg-git-command)
+	(proc-name "egg-git")
+        proc tmp)
+
+    (when (setq tmp (plist-get args :program))
+      (setq command tmp)
+      (plist-put args :program nil)
+      (setq args (delq nil (remove :program args))))
+
+    (when (setq tmp (plist-get args :process-name))
+      (setq proc-name tmp)
+      (plist-put args :process-name nil)
+      (setq args (delq nil (remove :process-name args))))
     
     (with-egg-async-buffer
       (setq proc (get-buffer-process (current-buffer)))
@@ -1085,7 +1147,7 @@ success."
       (insert "EGG-GIT-CMD:\n")
       (insert (format "%S\n" args))
       (insert "EGG-GIT-OUTPUT:\n")
-      (setq proc (apply 'start-process "egg-git" (current-buffer) egg-git-command args))
+      (setq proc (apply 'start-process proc-name (current-buffer) command args))
       (setq mode-line-process " git")
       (when (and (consp func-args) (functionp (car func-args)))
 	(process-put proc :callback-func (car func-args))
@@ -1093,7 +1155,7 @@ success."
       (when (stringp accepted-msg)
 	(process-put proc :accepted-msg accepted-msg)
 	(process-put proc :accepted-code exit-code))
-      (process-put proc :cmds (cons egg-git-command args))
+      (process-put proc :cmds (cons command args))
       (set-process-sentinel proc #'egg-process-sentinel))
     proc))
 
@@ -1121,22 +1183,29 @@ exit code ACCEPTED-CODE is considered a success."
 (defvar egg-async-process nil)
 (defvar egg-async-cmds nil)
 (defvar egg-async-exit-msg nil)
+(defvar egg-async-exit-status nil)
 
 (defun egg-process-sentinel (proc msg)
   (let ((exit-code (process-get proc :accepted-code))
         (accepted-msg (process-get proc :accepted-msg))
         (callback-func (process-get proc :callback-func))
         (callback-args (process-get proc :callback-args))
-        (cmds (process-get proc :cmds)))
+        (cmds (process-get proc :cmds))
+	status)
     (cond ((string= msg "finished\n")
-           (message "EGG: git finished."))
+           (message "EGG: git finished.")
+	   (setq status :finished))
           ((string= msg "killed\n")
-           (message "EGG: git was killed."))
+           (message "EGG: git was killed.")
+	   (setq status :killed))
           ((and accepted-msg (string-match accepted-msg msg))
-           (message "EGG: git exited with code: %d." exit-code))
+           (message "EGG: git exited with code: %d." exit-code)
+	   (setq status exit-code))
           ((string-match "exited abnormally" msg)
-           (message "EGG: git failed."))
-          (t (message "EGG: git is weird!")))
+           (message "EGG: git failed.")
+	   (setq status :failed))
+          (t (message "EGG: git is weird!")
+	     (setq status :confused)))
     (with-current-buffer (process-buffer proc)
       (setq mode-line-process nil)
       (widen)
@@ -1148,7 +1217,8 @@ exit code ACCEPTED-CODE is considered a success."
       (if (functionp callback-func)
           (let ((egg-async-process proc)
                 (egg-async-cmds cmds)
-                (egg-async-exit-msg msg))
+                (egg-async-exit-msg msg)
+		(egg-async-exit-status status))
             (apply callback-func callback-args))))))
 
 
@@ -1233,7 +1303,7 @@ erase the buffer's contents if ERASE was non-nil."
   (let ((buffer (get-buffer-create (concat " *egg-output:" (egg-git-dir) "*")))
 	(default-directory default-directory))
     (with-current-buffer buffer
-      (setq default-directory (egg-work-tree-dir))
+      (setq default-directory (egg-work-tree-dir default-directory))
       (widen)
       (if erase (erase-buffer)))
     buffer))
@@ -1243,7 +1313,7 @@ erase the buffer's contents if ERASE was non-nil."
 See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))  
   `(with-current-buffer (egg--do-output)
-     (setq default-directory (egg-work-tree-dir))
+     (setq default-directory (egg-work-tree-dir default-directory))
      (unwind-protect
 	 (progn ,@body)
        )))
@@ -1254,18 +1324,19 @@ See also `with-temp-file' and `with-output-to-string'."
   (declare (indent 0) (debug t))  
   `(with-current-buffer (egg--do-output t)
      (let ((process-environment (egg--git-check-index)))
-       (setq default-directory (egg-work-tree-dir))
+       (setq default-directory (egg-work-tree-dir default-directory))
        (unwind-protect
 	   (progn ,@body)
 	 ))))
 
-(defun egg--do (stdin program args)
+(defun egg--do (stdin program args &optional no-log)
   "Run PROGRAM with ARGS synchronously using STDIN as starndard input.
 ARGS should be a list of arguments for PROGRAM."
   (let ((buf (current-buffer))
 	ret)
-    (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
-		 (if stdin " <REGION\n" "\n"))
+    (unless no-log
+      (egg-cmd-log "RUN:" program " " (mapconcat 'identity args " ")
+		   (if stdin " <REGION\n" "\n")))
     (with-clean-egg--do-buffer
       (cond ((stringp stdin)
 	     (insert stdin))
@@ -1277,14 +1348,15 @@ ARGS should be a list of arguments for PROGRAM."
 		    (apply 'call-process-region (point-min) (point-max)
 			   program t t nil args)
 		  (apply 'call-process program nil t nil args)))
-      (egg-cmd-log-whole-buffer (current-buffer))
-      (egg-cmd-log (format "RET:%d\n" ret))
+      (unless no-log
+	(egg-cmd-log-whole-buffer (current-buffer))
+	(egg-cmd-log (format "RET:%d\n" ret)))
       (cons ret (current-buffer)))))
 
-(defun egg--do-git (stdin cmd args)
+(defun egg--do-git (stdin cmd args &optional no-log)
   "Run git command CMD with ARGS synchronously, using STDIN as starndard input.
 ARGS should be a list of arguments for the git command CMD."
-  (egg--do stdin "git" (cons cmd args)))
+  (egg--do stdin egg-git-command (cons cmd args) no-log))
 
 (defun egg--do-handle-exit (exit-info post-proc-func &optional buffer-to-update)
   "Handle the exit code and the output of a synchronous action.
@@ -1340,22 +1412,22 @@ used as the returned value of this function."
     (unless ok (ding))
     output-info))
 
-(defun egg--do-git-action (cmd buffer-to-update post-proc-func args)
+(defun egg--do-git-action (cmd buffer-to-update post-proc-func args &optional no-log)
   "Run git command CMD with arguments list ARGS.
 Show the output of CMD as feedback of the emacs command.
 Update the buffer BUFFER-TO-UPDATE and use POST-PROC-FUNC as the
 output processing function for `egg--do-handle-exit'."
   (egg--do-show-output (concat "GIT-" (upcase cmd))
-		       (egg--do-handle-exit (egg--do-git nil cmd args)
+		       (egg--do-handle-exit (egg--do-git nil cmd args no-log)
 					    post-proc-func buffer-to-update)))
 
-(defun egg--do-git-action-stdin (cmd stdin buffer-to-update post-proc-func args)
+(defun egg--do-git-action-stdin (cmd stdin buffer-to-update post-proc-func args &optional no-log)
   "Run git command CMD with arguments list ARGS and STDIN as standard input.
 Show the output of CMD as feedback of the emacs command.
 Update the buffer BUFFER-TO-UPDATE and use POST-PROC-FUNC as the
 output processing function for `egg--do-handle-exit'."
   (egg--do-show-output (concat "GIT-" (upcase cmd))
-		       (egg--do-handle-exit (egg--do-git stdin cmd args)
+		       (egg--do-handle-exit (egg--do-git stdin cmd args no-log)
 					    post-proc-func buffer-to-update)))
 
 
@@ -1400,6 +1472,24 @@ structure instead of the matching line."
 	   (save-match-data
 	     (goto-char (point-min))
 	     (when (re-search-forward regex nil t)
+	       (goto-char (match-beginning 0))
+	       (buffer-substring-no-properties 
+		(line-beginning-position)
+		(line-end-position)))))))
+    (when (stringp matched-line)
+      (nconc (list :line (if (stringp replacement) replacement matched-line))
+	     extras))))
+
+(defun egg--git-pp-grab-line-matching-backward (regex &optional replacement &rest extras)
+  "If REGEX matched a line in the current buffer, return it in a form suitable
+for `egg--do-show-output'. If REPLACEMENT was provided, use it in the returned
+structure instead of the matching line."
+  (let* ((case-fold-search nil)
+	 (matched-line 
+	 (when (stringp regex)
+	   (save-match-data
+	     (goto-char (point-max))
+	     (when (re-search-backward regex nil t)
 	       (goto-char (match-beginning 0))
 	       (buffer-substring-no-properties 
 		(line-beginning-position)
@@ -2085,24 +2175,34 @@ See documentation of `egg--git-action-cmd-doc' for the return structure."
   (egg--git t "stash" "list"))
 
 (defun egg-run-git-log (ref &optional git-log-extra-options paths)
-  (egg--git-args 
-   t (nconc (list "--no-pager" "log"
-		  "--pretty=oneline"
-		  "--decorate=full"
-		  "--no-color")
-	    (cond ((null ref)
-		   (and egg-log-all-max-len
-			(list (format "--max-count=%d" egg-log-all-max-len))))
-		  ((or (stringp ref) (consp ref))
-		   (and egg-log-HEAD-max-len
-			(list (format "--max-count=%d" egg-log-HEAD-max-len))))
-		  (t (error "Invalid ref: %s" ref)))
-	    git-log-extra-options
-	    ;; (when (and paths (null (cdr paths)))
-	    ;;   (list "--follow"))
-	    (cond ((null ref) (list "--all"))
-		  ((stringp ref) (list ref))
-		  ((consp ref) ref))
-	    (when paths (cons "--" paths)))))
+  (let (max-count-option max-count)
+    (setq max-count-option 
+	  (cond ((null ref)
+		 (and egg-log-all-max-len
+		      (list (format "--max-count=%d" egg-log-all-max-len))))
+		((and egg-log-HEAD-max-len
+		      (consp ref) 
+		      (eq (car ref) :locate)
+		      (= (length (cdr ref)) 2))
+		 (setq max-count (max (egg-git-range-length (nth 1 ref) (nth 2 ref))
+				      egg-log-HEAD-max-len))
+		 (setq ref (cdr ref))	;; remove :locate
+		 (list (format "--max-count=%d" max-count)))
+		((and (or (stringp ref) (consp ref)) egg-log-HEAD-max-len)
+		 (list (format "--max-count=%d" egg-log-HEAD-max-len)))
+		(t (error "Invalid ref: %s" ref))))
+    (egg--git-args 
+     t (nconc (list "--no-pager" "log"
+		    "--pretty=oneline"
+		    "--decorate=full"
+		    "--no-color")
+	      max-count-option
+	      git-log-extra-options
+	      ;; (when (and paths (null (cdr paths)))
+	      ;;   (list "--follow"))
+	      (cond ((null ref) (list "--all"))
+		    ((stringp ref) (list ref))
+		    ((consp ref) ref))
+	      (when paths (cons "--" paths))))))
 
 (provide 'egg-git)

@@ -964,21 +964,37 @@ not called"
   (interactive (list (car (get-text-property (point) :diff))))
   (find-file file))
 
-(defun egg-staged-diff-section-cmd-visit-index (file)
-  (interactive (list (car (get-text-property (point) :diff))))
-  (egg-buffer-pop-to-file file ":0"))
+(defun egg-staged-diff-section-cmd-visit-index (file &optional use-wdir-file)
+  "Visit the index of FILE.
+With C-u prefix, visit the work-tree's file instead."
+  (interactive (list (car (get-text-property (point) :diff))
+		     current-prefix-arg))
+  (if use-wdir-file
+      (find-file file)
+    (egg-buffer-pop-to-file file ":0")))
 
-(defun egg-staged-diff-section-cmd-visit-index-other-window (file)
-  (interactive (list (car (get-text-property (point) :diff))))
-  (egg-buffer-pop-to-file file ":0" t))
+(defun egg-staged-diff-section-cmd-visit-index-other-window (file &optional use-wdir-file)
+  (interactive (list (car (get-text-property (point) :diff))
+		     current-prefix-arg))
+  (if use-wdir-file
+      (find-file-other-window file)
+    (egg-buffer-pop-to-file file ":0" t)))
 
-(defun egg-staged-hunk-cmd-visit-index-other-window (file hunk-header hunk-beg &rest ignored)
-  (interactive (egg-hunk-info-at (point)))
-  (egg-log-pop-to-file file ":0" t nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
+(defun egg-staged-hunk-cmd-visit-index-other-window (use-wdir-file file hunk-header hunk-beg &rest ignored)
+  (interactive (cons current-prefix-arg (egg-hunk-info-at (point))))
+  (egg-buffer-pop-to-file file 
+			  (unless use-wdir-file ":0")
+			  t
+			  use-wdir-file
+			  (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
-(defun egg-staged-hunk-cmd-visit-index (file hunk-header hunk-beg &rest ignored)
-  (interactive (egg-hunk-info-at (point)))
-  (egg-log-pop-to-file file ":0" nil nil (egg-hunk-compute-line-no hunk-header hunk-beg)))
+(defun egg-staged-hunk-cmd-visit-index (use-wdir-file file hunk-header hunk-beg &rest ignored)
+  (interactive (cons current-prefix-arg (egg-hunk-info-at (point))))
+  (egg-buffer-pop-to-file file 
+			  (unless use-wdir-file ":0")
+			  nil
+			  use-wdir-file
+			  (egg-hunk-compute-line-no hunk-header hunk-beg)))
 
 (defun egg-diff-section-cmd-visit-file-other-window (file)
   "Visit file FILE in other window."
@@ -1062,9 +1078,11 @@ HUNK-BEG is the starting position of the current hunk."
 (defun egg-unmerged-conflict-checkout-side (pos)
   "Checkout one side of the conflict at POS."
   (interactive "d")
-  (let* ((side (get-text-property pos :conflict-side))
-	 (head (get-text-property pos :conflict-head))
+  (let* ((side (or (get-text-property pos :conflict-side) "theirs"))
+	 (head (or (get-text-property pos :conflict-head) "ours"))
 	 (file (car (get-text-property pos :diff))))
+    (unless (memq :unmerged (assoc file egg-status-buffer-changed-files-status))
+      (error "Not an unmerged file: %s" file))
     (when (y-or-n-p (format "use %s's contents for unmerged file %s? " head file))
       (when (egg-status-buffer-handle-result 
 	     (egg--git-co-files-cmd (current-buffer) file (concat "--" (symbol-name side))))
@@ -1607,6 +1625,9 @@ rebase session."
 	(egg-sb-undo-wdir-back-to-HEAD t t 'status)
       (egg-status-buffer-handle-result
        (egg--git-apply-cmd (current-buffer) patch (list "--reverse"))))))
+
+(defun egg-sb-interactive-stash-wip ()
+  (message "TBD"))
 
 (defun egg-sb-insert-repo-section ()
   "Insert the repo section into the status buffer."
@@ -2509,7 +2530,7 @@ If INIT was not nil, then perform 1st-time initializations as well."
          pos)
 
       (set (make-local-variable 'egg-status-buffer-changed-files-status)
-          (egg--get-status-code))
+	   (egg--get-status-code))
       ;; Emacs tries to be too smart, if we erase and re-fill the buffer
       ;; that is currently being displayed in the other window,
       ;; it remembers it, and no matter where we move the point, it will
@@ -3305,7 +3326,10 @@ POS."
   (interactive "d")
   (cond ((null egg-confirm-undo)
 	 (egg-hunk-section-apply-cmd pos "-p1" "--reverse"))
-	((eq egg-confirm-undo 'prompt)
+	((or (eq egg-confirm-undo 'prompt)
+	     ;; only status buffer can do "show-n-undo"
+	     ;; fallback to prompt
+	     (not (eq major-mode 'egg-status-buffer-mode)))
 	 (if (y-or-n-p "irreversibly remove the hunk under cursor? ")
 	     (egg-hunk-section-apply-cmd pos "-p1" "--reverse")
 	   (message "Too chicken to proceed with undo operation!")))
@@ -4488,7 +4512,8 @@ With C-u prefix, unmark all."
   (let ((pos (point-min))
         marker subject alist)
     (save-excursion
-      (while (setq pos (next-single-property-change (1+ pos) :mark))
+      (while (and (< pos (point-max))
+		  (setq pos (next-single-property-change (1+ pos) :mark)))
 	(when (or (null types) (memq (get-text-property pos :mark) types))
 	  (goto-char pos)
 	  (setq marker (point-marker))
@@ -4560,50 +4585,6 @@ With C-u prefix, unmark all."
 	      (when tbd
 		(funcall add-some-func)))))
     (funcall add-some-func)
-    (nreverse done)))
-
-
-(defun egg-log-buffer-get-rebase-marked-alist-old ()
-  (let* ((tbd (egg-log-buffer-get-marked-alist (egg-log-buffer-pick-mark) 
-					       (egg-log-buffer-squash-mark)
-					       (egg-log-buffer-edit-mark)
-					       (egg-log-buffer-fixup-mark)))
-	 done commit add-func)
-    (setq add-func 
-	  (lambda (commit)
-	    ;;
-	    ;; add the commit to the done list
-	    ;; prepending is ok because it will be reversed at the end
-	    ;;
-	    (push commit done)
-	    (let ((sha1 (egg-marked-commit-sha1 commit))
-		  (second-sha1 (egg-marked-commit-follower commit))
-		  (youngers tbd)
-		  younger younger second)
-	      ;;
-	      ;; Look for younger ones that must be squashed into commit
-	      ;;
-	      (dolist (younger youngers)
-		(when (and (equal (egg-marked-commit-leader younger) sha1)
-			   (not (memq younger done)))
-		  ;;
-		  ;; put add the younger one into done if it wasn't second in command
-		  ;; save the second in commad for later, it must be added after all
-		  ;; the squashed ones.
-		  ;;
-		  (setq tbd (delq younger tbd))
-		  (if (equal (egg-marked-commit-sha1 younger) second-sha1)
-		      (setq second younger)
-		    (funcall add-func younger))))
-	      ;;
-	      ;; Now that all the squashed ones were added, add second-in-command
-	      ;;
-	      (when second
-		(funcall add-func second)))))
-    (while tbd
-      (setq commit (car tbd) tbd (cdr tbd))
-      (unless (memq commit done)
-	(funcall add-func commit)))
     (nreverse done)))
 
 (defun egg-setup-rebase-interactive (rebase-dir upstream onto repo-state commit-alist)
@@ -5054,37 +5035,40 @@ With C-u C-u prefix, prompt for the git reset mode to perform."
 (defun egg-log-buffer-rm-ref (pos &optional force)
   "Remove the ref at POS."
   (interactive "d\nP")
-  (let ((refs (egg-references-at-point pos))
-        (candidate (egg-ref-at-point pos))
-	(full-name (get-text-property pos :full-name))
-        victim parts delete-on-remote remote-site name-at-remote
-	remote-ok)
-    (if (invoked-interactively-p)
-	(message "interactive")
-      (message "non interactive"))
-    (unless candidate (setq candidate (last refs)))
-    (setq candidate (completing-read "remove reference: " refs nil nil candidate))
-    (setq victim (egg-git-to-string "show-ref" candidate))
-    (unless (stringp victim) (error "No such ref: %s!!!" candidate))
-    (save-match-data
-      (setq victim (nth 1 (split-string victim " " t)))
-      (setq parts (and (stringp victim) (split-string victim "/" t))))
-    
-    (unless (equal (car parts) "refs") (error "Invalid ref: %s" victim))
-    
-    (setq remote-site (and (equal (nth 1 parts) "remotes") (nth 2 parts)))
-    (setq name-at-remote (and remote-site (mapconcat 'identity (nthcdr 3 parts) "/")))
-    (setq delete-on-remote (and remote-site
-				(y-or-n-p (format "delete %s on %s too? "
-						  name-at-remote remote-site))))
-    (setq remote-ok 
-	  (if delete-on-remote (egg--buffer-handle-result
-				(egg--git-push-cmd (current-buffer) "--delete" 
-						   remote-site name-at-remote))
-	    t))
-    (when remote-ok
-      (egg-log-buffer-handle-result
-       (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))
+  (let ((victim (get-text-property pos :full-name))
+	(remote-info (get-text-property pos :x-info))
+	(delete-on-remote-func (get-text-property pos :x-delete))
+	parts delete-on-remote remote-site name-at-remote
+	remote-ok pretty)
+
+    (when (stringp victim)
+      (setq pretty (propertize victim 'face 'bold)))
+
+    (cond ((null victim)
+	   (message "No ref to remove here!"))
+	  ((not (y-or-n-p (format "remove ref %s? " pretty)))
+	   (message "Canceled removal of %s" pretty))
+	  ((null (egg-git-to-string "show-ref" victim))
+	   (message "Ref %s vanished!" pretty))
+	  (t
+	   (setq parts (save-match-data (split-string victim "/" t)))
+	   (setq remote-site (and (equal (nth 1 parts) "remotes") (nth 2 parts)))
+	   (setq name-at-remote (and remote-site (mapconcat 'identity (nthcdr 3 parts) "/")))
+	   (setq delete-on-remote (and remote-site
+				       (y-or-n-p (format "delete %s on %s too? "
+							 (propertize name-at-remote 'face 'bold) 
+							 (propertize remote-site 'face 'bold)))))
+	   (setq remote-ok
+		 (if delete-on-remote
+		     (egg--buffer-handle-result
+		      (if (and delete-on-remote-func remote-info)
+			 (funcall delete-on-remote-func (current-buffer) remote-info name-at-remote)
+		       (egg--git-push-cmd (current-buffer) "--delete" remote-site name-at-remote)))
+		   t))
+
+	   (when remote-ok
+	     (egg-log-buffer-handle-result
+	      (egg--git-push-cmd (current-buffer) "--delete" "." victim)))))))
 
 (defun egg-log-buffer-do-pick-partial-cherry (rev head-name files &optional 
 						  revert prompt cancel-msg)
@@ -5176,6 +5160,9 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
+	 (remote-info (get-text-property pos :x-info))
+	 (fetch-function (get-text-property pos :x-fetch))
+	 (full-name (get-text-property pos :full-name))
          name remote)
     (unless (eq type :remote)
       (error "Nothing to fetch from here!"))
@@ -5183,31 +5170,62 @@ With C-u prefix, will not auto-commit but let the user re-compose the message."
           remote (egg-rbranch-to-remote ref))
     (when (and remote name)
       (message "GIT> fetching %s from %s..." ref remote)
-      (egg-buffer-async-do nil "fetch" remote
-                           (format "refs/heads/%s:refs/remotes/%s"
-                                   name ref)))))
+      (if (functionp fetch-function)
+	  (funcall fetch-function (current-buffer) remote-info full-name)
+	(egg-buffer-async-do nil "fetch" remote
+			     (format "refs/heads/%s:refs/remotes/%s"
+				     name ref))))))
 
-(defun egg-log-buffer-fetch (pos)
+(defun egg-log-buffer-do-fetch-from-site (remote-name remote-info fetch-function tag-or-branch)
+  (let* ((pretty-remote (propertize remote-name 'face 'bold))
+	 (fetch-tag (cond ((eq tag-or-branch 'ask)
+			   (y-or-n-p (format "Fetch a tag instead of branch from %s? " pretty-remote)))
+			  (t tag-or-branch)))
+	 (ref (read-string (format "%s to fetch from %s (default all refs): " 
+				   (if fetch-tag "tag" "branch") pretty-remote)
+			   nil nil "--all"))
+	 (pretty-ref (propertize ref 'face 'bold)))
+    
+    (if (equal ref "--all")
+	(progn
+	  (message "GIT> fetching everything from %s..." pretty-remote)
+	  (if (functionp fetch-function)
+	      (funcall fetch-function (current-buffer) remote-info "--all")
+	    (if fetch-tag
+		(egg-buffer-async-do nil "fetch" "--tags" remote-name)
+	      (egg-buffer-async-do nil "fetch" remote-name))))
+      (message "GIT> fetching %s from %s..." pretty-ref pretty-remote)
+      (if (functionp fetch-function)
+	  (funcall fetch-function (current-buffer) remote-info ref)
+	(if fetch-tag
+	    (egg-buffer-async-do nil "fetch" remote-name "tag" ref)
+	    (egg-buffer-async-do nil "fetch" remote-name
+				 (format "%s:refs/remotes/%s/%s" ref remote-name ref)))))))
+
+(defun egg-log-buffer-fetch-site (pos)
   "Fetch some refs from remote at POS."
   (interactive "d")
   (let* ((ref-at-point (get-text-property pos :ref))
          (ref (car ref-at-point))
          (type (cdr ref-at-point))
-         site name def remote)
+	 (remote-info (get-text-property pos :x-info))
+	 (fetch-function (get-text-property pos :x-fetch))
+         remote)
     (unless (eq type :remote)
       (error "No site here to fetch from!"))
     (setq remote (egg-rbranch-to-remote ref))
     (when remote
-      (setq name (read-string (format "fetch from %s (default all): "
-                                      remote) nil nil "--all"))
-      (if (equal name "--all")
-          (progn
-            (message "GIT> fetching everything from %s..." remote)
-            (egg-buffer-async-do nil "fetch" remote))
-        (message "GIT> fetching %s from %s..." name remote)
-        (egg-buffer-async-do nil "fetch" remote
-                             (format "refs/heads/%s:refs/remotes/%s/%s"
-                                     name remote name))))))
+      (egg-log-buffer-do-fetch-from-site remote remote-info fetch-function 'ask))))
+
+(defun egg-log-buffer-fetch ()
+  "Fetch something from a remote"
+  (interactive)
+  (let* ((remote (egg-read-remote "Fetch from remote: "))
+	 (remote-info (get-text-property 0 :x-info remote))
+	 (fetch-function (get-text-property 0 :x-fetch remote)))
+    (if (or (null remote) (equal "" remote))
+	(error "Invalid remote: %s" remote)
+      (egg-log-buffer-do-fetch-from-site remote remote-info fetch-function 'ask))))
 
 (defun egg-log-buffer-push-to-local (pos &optional level)
   "Push commit at POS onto HEAD.
@@ -5255,7 +5273,7 @@ would be a pull (by default --ff-only)."
       (message "local push cancelled!"))))
 
 (defun egg-log-buffer-push-to-remote (pos &optional non-ff)
-  "Upload the ref at POS to a remote repository.
+  "Push the ref at POS to a remote repository.
 If the ref track a remote tracking branch, then the repo to
 upload to is the repo of the remote tracking branch. Otherwise,
 prompt for a remote repo."
@@ -5263,41 +5281,69 @@ prompt for a remote repo."
   (let* ((ref-at-point (get-text-property pos :ref))
          (lref (car ref-at-point))
          (type (cdr ref-at-point))
-         rref tracking remote spec)
-    (unless ref-at-point
-      (error "Nothing to push here!"))
-    (cond ((eq type :remote)		;; delete a remote head
-           (setq rref (file-name-nondirectory lref))
-           (setq remote (directory-file-name
-                         (file-name-directory lref)))
-           (setq lref ""))
-          ((eq type :head)
-           (setq tracking (egg-tracking-target lref :remote))
-           (if (consp tracking)
-               (setq rref (car tracking) remote (cdr tracking))
-             (setq remote (egg-read-remote
-                           (format "push branch %s to remote: " lref)))
-             (setq rref (read-string
-                         (format "push branch %s to %s as: " lref remote)
-                         lref))))
-          ((eq type :tag)
-           (setq remote (egg-read-remote "push to remote: "))
-           (setq rref (read-string
-                       (format "remote tag to push at (on %s): " remote)
-                       lref))
-           (setq lref (read-string
-                       (format "local tag to push at %s/%s (empty mean delete the remote tag) : "
-                               remote rref)
-                       rref))))
-    (unless (> (length lref) 0)
-      (unless (y-or-n-p (format "delete %s/%s? " remote rref))
-        (message "cancel removal of %s/%s" remote rref)
-        (setq remote nil rref nil lref nil)))
-    (when (and remote rref lref)
-      (setq spec (concat lref ":" rref))
-      (message "GIT> pushing %s to %s on %s..." lref rref remote)
-      (egg-buffer-async-do nil "push" (if non-ff "-vf" "-v")
-                           remote spec))))
+	 (commit (egg-commit-at-point pos))
+	 type-name rref tracking remote spec push-function delete-function remote-info)
+    
+    (cond ((null commit) 
+	   (error "Nothing to push here!"))
+	  ((null type)
+	   ;; cursor was not on a ref
+	   ;; push the sha1 to remote
+	   (setq lref (egg-short-sha1 commit))
+	   (setq type-name "commit"))
+	  ((eq type :remote)
+	   ;; on a remote tracking branch name
+	   ;; push something to the remote
+	   ;; blank means delete on remote site
+	   (setq remote (egg-rbranch-to-remote lref))
+	   (setq type-name "ref")
+	   (setq lref nil))
+	  ((eq type :tag)
+	   (setq type-name "tag"))
+	  ((eq type :head)
+	   (setq type-name "branch")
+	   (when (consp (setq tracking (egg-tracking-target lref :remote)))
+	     (setq rref (nth 0 tracking)
+		   remote (nth 1 tracking))))
+	  (t (error "Internal error: type is %s" type)))
+
+    (cond ((and (null lref) (null remote))
+	   (error "Internal error: lref=%s remote=%s" lref remote))
+	  ((null lref)
+	   (setq lref 
+		 (egg-read-local-ref 
+		  (format "local ref to push to %s (none means deleting the a remote ref):"
+			  (propertize remote 'face 'bold)))))
+	  ((null remote)
+	   (setq remote
+		 (egg-read-remote (format "push %s %s to: " type-name
+					  (propertize lref 'face 'bold))))))
+
+    (unless rref
+      (setq rref (if (equal "" lref)
+		     (read-string (format "delete %s's ref: " (propertize remote 'face 'bold)))
+		   (read-string (format "push %s %s to %s as: " type-name
+					(propertize lref 'face 'bold)
+					(propertize remote 'face 'bold)) lref))))
+
+    ;;(egg-add-remote-properties remote remote rref)
+
+    (setq remote-info (egg-get-remote-properties remote rref))
+    (setq push-function (plist-get remote-info :x-push))
+    (setq delete-function (plist-get remote-info :x-delete))
+    (setq remote-info (plist-get remote-info :x-info))
+
+
+    (if (equal "" lref)
+	(if (functionp delete-function)
+	    (funcall delete-function (current-buffer) remote-info rref)
+	  (message "EGG> deleting %s on %s..." rref remote)
+	  (egg-buffer-async-do nil "push" "--delete" remote rref))
+      (if (functionp push-function)
+	  (funcall push-function (current-buffer) remote-info lref rref)
+	(message "GIT> pushing %s to %s on %s..." lref rref remote)
+	(setq spec (concat lref ":" rref))
+	(egg-buffer-async-do nil "push" (if non-ff "-vf" "-v") remote spec)))))
 
 (defun egg-log-buffer-push (pos)
   "Push some refs to the remote at POS"
@@ -5575,34 +5621,84 @@ prompt for a remote repo."
                  (egg-text sha1 'font-lock-string-face))
       (egg-generic-display-logs egg-internal-log-buffer-closure init))))
 
+(defun egg-async-xfer-pp (status cmd-name remote-re remote-re-no fall-back-remote-name)
+  (save-match-data
+    (let* ((cmd-name (upcase cmd-name))
+	   remote-name xfer-msg remote-msg beg)
+      
+      (when (and remote-re 
+		 (goto-char (point-min))
+		 (re-search-forward remote-re nil t))
+	(setq remote-name (match-string-no-properties 1))
+	(forward-line 1)
+	(skip-chars-forward " ")
+	(setq xfer-msg (buffer-substring-no-properties (point) (line-end-position))))
+
+      (when (progn (goto-char (point-min)) (re-search-forward "^remote: \\(.+\\)$" nil t))
+	(setq remote-msg (match-string-no-properties 1)))
+
+      ;;(unless remote-name (setq remote-name fall-back-remote-name))
+
+      (unless (or remote-msg xfer-msg)
+	(setq xfer-msg (cond ((and (goto-char (point-min))
+				   (re-search-forward "^error: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     ((and (goto-char (point-min))
+				   (re-search-forward "^fatal: \\(.+\\)" nil t))
+			      (match-string-no-properties 1))
+			     (t
+			      (goto-char (point-min))
+			      (re-search-forward "EGG-GIT-OUTPUT:\n")
+			      (setq beg (point))
+			      (goto-char (point-max))
+			      (if (re-search-forward "^.+" nil t)
+				  (buffer-substring-no-properties (line-beginning-position)
+								  (line-end-position))
+				;; not a message from remote
+				(setq remote-name nil)
+				(cond ((eq status :finished) "all done")
+				      ((eq status :killed) "dead in action")
+				      ((numberp status) (format "exit with code %d" status))
+				      ((eq status :failed) "fatal failure")
+				      ((eq status :confused) "egg was confused by git")
+				      (t "this message should not be seen (status = %s)" status)))))))
+
+      (if remote-name
+	  (message "GIT-%s> %s: %s" cmd-name remote-name (if remote-msg remote-msg xfer-msg))
+	(message "GIT-%s> %s" cmd-name (if remote-msg remote-msg xfer-msg))))))
+
+(defun egg-async-fetch-pp (status cmd-sexp)
+  (egg-async-xfer-pp status (car cmd-sexp) "^From \\(.+\\)$" 1 (nth 1 cmd-sexp)))
+
+(defun egg-async-push-pp (status cmd-sexp)
+  (egg-async-xfer-pp status (car cmd-sexp) "^To \\(.+\\)$" 1 (nth 1 cmd-sexp)))
+
+(defun egg-async-generic-pp (status cmd-sexp)
+  (egg-async-xfer-pp status (car cmd-sexp) nil nil (nth 1 cmd-sexp)))
+
+(defun egg-async-unimplemented-pp (status cmd-sexp)
+  (egg-async-xfer-pp status "internal-error" nil nil nil))
+
+
 (defun egg-log-buffer-redisplay-from-command (buffer)
   ;; in process buffer
   (when (and (processp egg-async-process)
              (equal (current-buffer) (process-buffer egg-async-process)))
-    (or
-     (save-excursion
-       (let ((cmd "GIT>") cmd-sexp cmd-string pos done)
+    (save-excursion
+       (let ((status egg-async-exit-status)
+	     cmd-sexp cmd-string pos done)
          (goto-char (point-min))
          (skip-chars-forward "^(")
          (setq cmd-sexp (read (current-buffer)))
-         (when (consp cmd-sexp)
-           (setq cmd-string (car cmd-sexp)
-                 cmd (cond ((string-equal "fetch" cmd-string) "GIT-FETCH>")
-                           ((string-equal "push" cmd-string) "GIT-PUSH>"))))
-         (goto-char (point-min))
-         (save-match-data
-           (cond ((re-search-forward "^\\(?:From\\|To\\) \\(.+\\)\n\\(.+\\)$" nil t)
-                  (message "%s %s: %s" cmd
-                           (match-string-no-properties 1)
-                           (match-string-no-properties 2))
-                  (setq done t))))
-         (unless done
-           (goto-char (point-min))
-           (save-match-data
-             (cond ((re-search-forward "^fatal: \\(.+\\)$" nil t)
-                    (message "%s fatal: %s" cmd
-                             (match-string-no-properties 1))
-                    (setq done t)))))))))
+         (if (not (consp cmd-sexp))
+	     (egg-async-unimplemented-pp status nil)
+           (setq cmd-string (car cmd-sexp))
+	   (cond ((string-equal "fetch" cmd-string)
+		  (egg-async-fetch-pp status cmd-sexp))
+		 ((string-equal "push" cmd-string)
+		  (egg-async-push-pp status cmd-sexp))
+		 (t
+		  (egg-async-generic-pp status cmd-sexp)))))))
   ;; update log buffer
   (egg-log-buffer-redisplay buffer))
 
@@ -5643,9 +5739,9 @@ auto-commit if the merge was successful.
 
 Each ref on the commit line has extra extra keybindings:\\<egg-log-ref-map>
 \\[egg-log-buffer-rm-ref] delete the ref under the cursor.
-\\[egg-log-buffer-push-to-local] update HEAD or BASE using the ref.
-C-u \\[egg-log-buffer-push-to-local] update a local ref using the ref.
-C-u C-u \\[egg-log-buffer-push-to-local] update (non-ff allowed) a local ref using the ref.
+\\[egg-log-buffer-push-to-local] push the ref to HEAD or BASE.
+C-u \\[egg-log-buffer-push-to-local] push the ref to a local ref.
+C-u C-u \\[egg-log-buffer-push-to-local] push the ref to a local ref (non-ff allowed).
 
 Each local ref on the commit line has extra extra extra keybindings:\\<egg-log-local-ref-map>
 \\[egg-log-buffer-push-to-remote] upload to a remote the ref under the cursor.
@@ -5698,7 +5794,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                    :visible '(egg-navigation-at-point)))
     (define-key map [sp9] '("--"))
     (define-key map [rpush] (list 'menu-item "Fetch Refs from Remote"
-                                  'egg-log-buffer-fetch
+                                  'egg-log-buffer-fetch-site
                                   :visible '(egg-remote-at-point)))
     (define-key map [rfetch] (list 'menu-item "Push Refs to Remote"
                                    'egg-log-buffer-push
@@ -5908,7 +6004,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-diff-revs]:diff vs HEAD (or BASE)\n"
     "\\[egg-log-buffer-merge]:merge to HEAD  "
     "\\[egg-log-buffer-rebase]:rebase HEAD  "
-    "\\[egg-log-buffer-rebase-interactive]:rebase HEAD interactively"
+    "\\[egg-log-buffer-rebase-interactive]:rebase marked commits interactively"
     "\n"
     )
    (egg-text "Extra Key Bindings to prepare a (interactive) rebase:" 'egg-help-header-2)
@@ -5925,11 +6021,11 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
    (egg-pretty-help-text
     "\\<egg-log-local-ref-map>"
     "\\[egg-log-buffer-rm-ref]:delete ref  "
-    "\\[egg-log-buffer-push-to-local]:update HEAD (or a local ref) with ref  "
-    "\\[egg-log-buffer-push-head-to-local]:update this ref with HEAD\n"
-    "\\[egg-log-buffer-push-to-remote]:upload to remote  "
+    "\\[egg-log-buffer-push-to-local]:push ref to HEAD (or a local ref)  "
+    "\\[egg-log-buffer-push-head-to-local]:push HEAD to ref\n"
+    "\\[egg-log-buffer-push-to-remote]:push to remote  "
     "\\<egg-log-remote-branch-map>"
-    "\\[egg-log-buffer-fetch-remote-ref]:download this ref from remote\n")
+    "\\[egg-log-buffer-fetch-remote-ref]:fetch from remote\n")
    (egg-text "Extra Key Bindings for a Diff Block:" 'egg-help-header-2)
    "\n"
    (egg-pretty-help-text
@@ -6032,11 +6128,16 @@ A ready made PICKAXE info can be provided by the caller when called non-interact
 		(concat ref "@{now}"))))
 	 (beg (point)) 
 	 (head-name (egg-branch-or-HEAD))
-	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair)
-    (setq mappings (save-match-data 
-		     (mapcar (lambda (line) 
-			       (split-string line "~" t)) 
-			     mappings)))
+	 sha1-list sha1-reflog-alist sha1 reflog-time time reflog dup pair
+	 tmp)
+    (setq tmp (save-match-data (mapcar (lambda (line) 
+					 (split-string line "~" t)) 
+				       mappings)))
+    (setq mappings nil)
+    (dolist (pair tmp)
+      (when (and (stringp (nth 0 pair)) (stringp (nth 1 pair)))
+	(push pair mappings)))
+    (setq mappings (nreverse mappings))
     (save-match-data
       (dotimes (i (length mappings))
 	(setq pair (pop mappings))
@@ -6354,7 +6455,7 @@ if ALL is not-nil, then do not restrict the commits to the current branch's DAG.
                          (egg-text short-sha1 'egg-term))
                  :closure
                  `(lambda ()
-		    (egg-insert-logs-with-full-decoration (list ,head-name ,sha1)))))
+		    (egg-insert-logs-with-full-decoration (list :locate ,head-name ,sha1)))))
       (egg-log-buffer-redisplay buf)
       (setq pos (point-min))
       (while (and pos
@@ -7543,7 +7644,7 @@ egg in current buffer.\\<egg-minor-mode-map>
   '((egg-log-buffer-push-to-local egg-ref-or-commit-at "update another branch with %s")
     (egg-log-buffer-ff-pull egg-ref-or-commit-at "update HEAD with %s")
     (egg-log-buffer-push egg-rsite-at "push branches to remote %s")
-    (egg-log-buffer-fetch egg-ref-at "(re)-fetch %s")
+    (egg-log-buffer-fetch-site egg-ref-at "(re)-fetch %s")
     (egg-log-buffer-rm-ref egg-ref-at "remove %s")
     (egg-log-buffer-reflog-ref egg-ref-at "show history (reflog) of %s")
     (egg-log-buffer-unmark egg-commit-at "unmark %s for upcoming rebase")
