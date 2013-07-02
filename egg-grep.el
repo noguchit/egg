@@ -26,7 +26,7 @@
 (require 'egg)
 (require 'compile)
 (require 'grep)
-(require 'cl)
+(eval-when-compile (require 'cl))
 
 (defvar egg-grep-saved-find-file-func nil)
 
