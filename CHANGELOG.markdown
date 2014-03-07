@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## 1.0.5
+- support git 1.9
+
 ## 1.0.4
 
 ### features
