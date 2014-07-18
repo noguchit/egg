@@ -70,7 +70,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.0.5")
+(defconst egg-version "1.0.6")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
