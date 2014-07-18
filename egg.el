@@ -7596,11 +7596,11 @@ egg in current buffer.\\<egg-minor-mode-map>
 (defun egg-minor-mode-find-file-hook ()
   (when (egg-is-in-git)
     (save-match-data
-      (if (not (string-match "\\`git version 1.\\(7\\|8\\|9\\)."
+      (if (not (string-match "\\`git version \\(1.\\(7\\|8\\|9\\)\\|2.0\\)."
 			     (shell-command-to-string
 			      (concat egg-git-command " --version"))))
 	  (progn
-	    (message "can't find git version 1.7 or 1.8")
+	    (message "can't find supported git")
 	    (remove-hook 'find-file-hook #'egg-minor-mode-find-file-hook)
 	    (message "disabled egg-minor-mode!"))
 	(or (assq 'egg-minor-mode minor-mode-alist)
