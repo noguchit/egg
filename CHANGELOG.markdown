@@ -1,5 +1,9 @@
 # Egg (Emacs Got Git).
 
+## 1.0.7
+- support git 2.1.x
+
+
 ## 1.0.6
 - support git 2.0.x
 

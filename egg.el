@@ -4,7 +4,7 @@
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2009  Tim Moore
 ;; Copyright (C) 2010  Alexander Prusov
-;; Copyright (C) 2011-12 byplayer
+;; Copyright (C) 2011-2014 byplayer
 ;;
 ;; Author: Bogolisk <bogolisk@gmail.com>
 ;; Created: 19 Aug 2008
@@ -70,7 +70,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.0.6")
+(defconst egg-version "1.0.7")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
@@ -7596,23 +7596,23 @@ egg in current buffer.\\<egg-minor-mode-map>
 (defun egg-minor-mode-find-file-hook ()
   (when (egg-is-in-git)
     (save-match-data
-      (if (not (string-match "\\`git version \\(1.\\(7\\|8\\|9\\)\\|2.0\\)."
-			     (shell-command-to-string
-			      (concat egg-git-command " --version"))))
-	  (progn
-	    (message "can't find supported git")
-	    (remove-hook 'find-file-hook #'egg-minor-mode-find-file-hook)
-	    (message "disabled egg-minor-mode!"))
-	(or (assq 'egg-minor-mode minor-mode-alist)
-	    (setq minor-mode-alist
-		  (cons '(egg-minor-mode egg-minor-mode-name) minor-mode-alist)))
-	(setcdr (or (assq 'egg-minor-mode minor-mode-map-alist)
-		    (car (setq minor-mode-map-alist
-			       (cons (list 'egg-minor-mode)
-				     minor-mode-map-alist))))
-		egg-minor-mode-map)
-	(make-local-variable 'egg-minor-mode)
-	(egg-minor-mode 1)))))
+      (if (not (string-match "\\`git version \\(1.\\(7\\|8\\|9\\)\\|2.0\\|2.1\\)."
+                             (shell-command-to-string
+                              (concat egg-git-command " --version"))))
+          (progn
+            (message "can't find supported git")
+            (remove-hook 'find-file-hook #'egg-minor-mode-find-file-hook)
+            (message "disabled egg-minor-mode!"))
+        (or (assq 'egg-minor-mode minor-mode-alist)
+            (setq minor-mode-alist
+                  (cons '(egg-minor-mode egg-minor-mode-name) minor-mode-alist)))
+        (setcdr (or (assq 'egg-minor-mode minor-mode-map-alist)
+                    (car (setq minor-mode-map-alist
+                               (cons (list 'egg-minor-mode)
+                                     minor-mode-map-alist))))
+                egg-minor-mode-map)
+        (make-local-variable 'egg-minor-mode)
+        (egg-minor-mode 1)))))
 
 ;;;###autoload
 (add-hook 'find-file-hook 'egg-git-dir)
