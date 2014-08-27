@@ -677,10 +677,14 @@ if EXTRAS contains :error-if-not-git then error-out if not a git repo.
 	    
 	    ((eq req :name)
              (setq state
-                   (nconc (list :name (egg-git-to-string "config" "user.name")) state)))
+                   (nconc (list :name (or (egg-git-to-string "config" "user.name")
+                                          (capitalize (user-login-name))))
+                          state)))
 	    ((eq req :email)
              (setq state
-                   (nconc (list :email (egg-git-to-string "config" "user.email")) state)))))
+                   (nconc (list :email (or (egg-git-to-string "config" "user.email")
+                                           (concat (user-login-name) "@" (system-name))))
+                          state)))))
     ;; update mode-line
     (egg-set-mode-info state)
     state))
