@@ -7596,7 +7596,7 @@ egg in current buffer.\\<egg-minor-mode-map>
 (defun egg-minor-mode-find-file-hook ()
   (when (egg-is-in-git)
     (save-match-data
-      (if (not (string-match "\\`git version \\(1.\\(7\\|8\\|9\\)\\|2.0\\|2.1\\)."
+      (if (not (string-match "\\`git version \\(1.\\(7\\|8\\|9\\)\\|2.0\\|2.1\\|2.2\\)."
                              (shell-command-to-string
                               (concat egg-git-command " --version"))))
           (progn
