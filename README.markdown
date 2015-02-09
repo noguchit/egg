@@ -2,6 +2,8 @@
 
 ## Intro
 
+[![MELPA](http://melpa.org/packages/egg-badge.svg)](http://melpa.org/#/egg)
+
 Egg is an Emacs interface to git. It's a suite composed of a
 minor-mode and various special-buffers presenting different UIs to
 help the user performing many git operations.
