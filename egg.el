@@ -70,7 +70,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.0.8")
+(defconst egg-version "1.0.9")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
@@ -7596,7 +7596,7 @@ egg in current buffer.\\<egg-minor-mode-map>
 (defun egg-minor-mode-find-file-hook ()
   (when (egg-is-in-git)
     (save-match-data
-      (if (not (string-match "\\`git version \\(1.\\(7\\|8\\|9\\)\\|2.0\\|2.1\\|2.2\\)."
+      (if (not (string-match "\\`git version \\(1.[7-9]\\|2.[0-9]+\\)."
                              (shell-command-to-string
                               (concat egg-git-command " --version"))))
           (progn
