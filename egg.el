@@ -4068,7 +4068,8 @@ Jump to line LINE if it's not nil."
       (goto-char pos)
       (while (> (skip-chars-forward "^ ,:" dec-ref-end) 0)
 	(setq ref-full-name (buffer-substring-no-properties pos (point)))
-	(forward-char 2)
+	(when (looking-at " *-> *\\|, *\\|: *\\| +")
+          (goto-char (match-end 0)))
 	(setq pos (point))
 	(unless (or 
 		 ;; (equal ref-full-name "HEAD") 
@@ -4151,9 +4152,12 @@ REMOTE-SITE-MAP is used as local keymap for the name of a remote site."
 	  (setq graph-len (if (= beg sha-beg) 0 (- sha-beg beg 1))
 		sha1 (buffer-substring-no-properties sha-beg sha-end)
 		subject-beg (if (or (/= (char-after subject-beg) ?\()
-				    (not (member (buffer-substring-no-properties 
-						  subject-beg (+ subject-beg 6))
-						 '("(refs/" "(tag: " "(HEAD," "(HEAD)"))))
+				    (and (not (member (buffer-substring-no-properties 
+						       subject-beg (+ subject-beg 6))
+						      '("(refs/" "(tag: " "(HEAD," "(HEAD)")))
+					 (not (member (buffer-substring-no-properties 
+						       subject-beg (+ subject-beg 8))
+						      '("(HEAD ->")))))
 				subject-beg
 			      (setq refs-start (1+ subject-beg))
 			      (goto-char subject-beg)
