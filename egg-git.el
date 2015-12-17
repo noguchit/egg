@@ -926,17 +926,27 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	      (group "refs/"
 		     (or (seq (or (group "heads") 
 				  (group "tags") 
-				  (group "remotes"))
+				  (seq (group "remotes") 
+                                       "/"
+                                       (group (one-or-more (not (any ?\n blank ?^ ?/))))))
 			      "/"
-			      (group (optional (seq (group (one-or-more 
-							    (not (any ?\n blank ?^ ?/))))
-						    "/")) 
-				     (one-or-more (not (any ?\n blank ?^ ?/)))))
+			      (group (one-or-more (not (any ?\n blank ?^)))))
 			 (group "stash")))
 	      (optional (group "^{}"))
 	      line-end))
-	 (refs-desc-list
+	 (from-regexp-list
          (egg-git-lines-matching-multi ref-re
+          ;; 1: full-name
+          ;; 2: head
+          ;; 3: tag
+          ;; 4: remote
+          ;; 5: remote-host
+          ;; 6: short-name
+          ;; 7: stash
+          ;; 8: is annotated tag
+          '(1 2 3 4 5 6 7) "show-ref" "-d"))
+         (refs-desc-list
+          ;; Convert to canonical form:
           ;; 1: full-name
           ;; 2: head
           ;; 3: tag
@@ -945,7 +955,35 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; 6: remote-host
           ;; 7: stash
           ;; 8: is annotated tag
-          '(1 2 3 4 5 6 7) "show-ref" "-d"))
+          (let (result)
+            (dolist (line from-regexp-list)
+              (let  (
+                     (full-name        (cdr (assq 1 line)))
+                     (head             (cdr (assq 2 line)))
+                     (tag              (cdr (assq 3 line)))
+                     (remote           (cdr (assq 4 line)))
+                     (remote-host      (cdr (assq 5 line)))
+                     (short-name       (cdr (assq 6 line)))
+                     (stash            (cdr (assq 7 line)))
+                     (is-annotated-tag (cdr (assq 8 line)))
+                     (new-line nil)
+                     )
+                (when (stringp full-name) (setq new-line (cons (cons 1 full-name) new-line)))
+                (when (stringp head) (setq new-line (cons (cons 2 head) new-line)))
+                (when (stringp tag) (setq new-line (cons (cons 3 tag) new-line)))
+                (when (stringp remote) (setq new-line (cons (cons 4 remote) new-line)))
+                (when (or (stringp remote-host) (stringp short-name))
+                  (setq new-line (cons (cons 5 
+                                             (concat remote-host (and (stringp remote-host) (stringp short-name) "/") short-name))
+                                       new-line)))
+                (when (stringp remote-host) (setq new-line (cons (cons 6 remote-host) new-line)))
+                (when (stringp stash) (setq new-line (cons (cons 7 stash) new-line)))
+                (when (stringp is-annotated-tag) (setq new-line (cons (cons 8 is-annotated-tag) new-line)))
+                (setq result (cons new-line result))
+                )
+              )
+            result)
+          )
 	(symbolic-HEAD (egg-get-symbolic-HEAD))
         annotated-tags refs)
     ;; remove the annotated tags from the list
