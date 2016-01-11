@@ -926,17 +926,27 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
 	      (group "refs/"
 		     (or (seq (or (group "heads") 
 				  (group "tags") 
-				  (group "remotes"))
+				  (seq (group "remotes") 
+                                       "/"
+                                       (group (one-or-more (not (any ?\n blank ?^ ?/))))))
 			      "/"
-			      (group (optional (seq (group (one-or-more 
-							    (not (any ?\n blank ?^ ?/))))
-						    "/")) 
-				     (one-or-more (not (any ?\n blank ?^ ?/)))))
+			      (group (one-or-more (not (any ?\n blank ?^)))))
 			 (group "stash")))
 	      (optional (group "^{}"))
 	      line-end))
-	 (refs-desc-list
+	 (from-regexp-list
          (egg-git-lines-matching-multi ref-re
+          ;; 1: full-name
+          ;; 2: head
+          ;; 3: tag
+          ;; 4: remote
+          ;; 5: remote-host
+          ;; 6: short-name
+          ;; 7: stash
+          ;; 8: is annotated tag
+          '(1 2 3 4 5 6 7) "show-ref" "-d"))
+         (refs-desc-list
+          ;; Convert to canonical form:
           ;; 1: full-name
           ;; 2: head
           ;; 3: tag
@@ -945,7 +955,38 @@ REMOTE-REF-PROPERTIES and REMOTE-SITE-PROPERTIES."
           ;; 6: remote-host
           ;; 7: stash
           ;; 8: is annotated tag
-          '(1 2 3 4 5 6 7) "show-ref" "-d"))
+          (let (result)
+            (dolist (old-record from-regexp-list)
+              (let* (
+                     (full-name        (cdr (assq 1 old-record)))
+                     (head             (cdr (assq 2 old-record)))
+                     (tag              (cdr (assq 3 old-record)))
+                     (remote           (cdr (assq 4 old-record)))
+                     (remote-host      (cdr (assq 5 old-record)))
+                     (short-name       (cdr (assq 6 old-record)))
+                     (stash            (cdr (assq 7 old-record)))
+                     (is-annotated-tag (cdr (assq 8 old-record)))
+                     new-record
+                     (cond-add-to-new-record-func (lambda (value nth)
+                                                    (when (stringp value)
+                                                      (setq new-record (cons (cons nth value) new-record)))))
+                     )
+                (funcall cond-add-to-new-record-func full-name 1) 
+                (funcall cond-add-to-new-record-func head 2) 
+                (funcall cond-add-to-new-record-func tag 3) 
+                (funcall cond-add-to-new-record-func remote 4) 
+                (when (or (stringp remote-host) (stringp short-name))
+                  (setq new-record (cons (cons 5 
+                                               (concat remote-host (and (stringp remote-host) (stringp short-name) "/") short-name))
+                                         new-record)))
+                (funcall cond-add-to-new-record-func remote-host 6) 
+                (funcall cond-add-to-new-record-func stash 7) 
+                (funcall cond-add-to-new-record-func is-annotated-tag 8) 
+                (setq result (cons new-record result))
+                )
+              )
+            result)
+          )
 	(symbolic-HEAD (egg-get-symbolic-HEAD))
         annotated-tags refs)
     ;; remove the annotated tags from the list
