@@ -4,11 +4,11 @@
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2009  Tim Moore
 ;; Copyright (C) 2010  Alexander Prusov
-;; Copyright (C) 2011-2014 byplayer
+;; Copyright (C) 2011-2016 byplayer
 ;;
 ;; Author: Bogolisk <bogolisk@gmail.com>
 ;; Created: 19 Aug 2008
-;; Version: 1.0.2
+;; Version: 1.1.0
 ;; Keywords: git, version control, release management
 ;;
 ;; Special Thanks to
@@ -16,6 +16,7 @@
 ;;   Christian Köstlin
 ;;   Max Mikhanosha
 ;;   Aleksandar Simic
+;;   Maksim Golubev
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -70,7 +71,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.0.9")
+(defconst egg-version "1.1.0")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))

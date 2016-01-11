@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## 1.1.0
+- support 2.5.x thanks Maksim Golubev !
+
 ## 1.0.9
 - support git 2.x
 
