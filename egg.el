@@ -17,6 +17,7 @@
 ;;   Max Mikhanosha
 ;;   Aleksandar Simic
 ;;   Maksim Golubev
+;;   Felix S Klock II
 ;;
 ;; Egg is free software; you can redistribute it and/or modify it
 ;; under the terms of the GNU General Public License as published by
@@ -71,7 +72,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.1.0")
+(defconst egg-version "1.1.1")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
