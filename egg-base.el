@@ -59,8 +59,6 @@
 (require 'egg-custom)
 (require 'ediff)
 
-(autoload 'edmacro-subseq "edmacro" "Return the subsequence of SEQ from START to END.")
-
 ;;;========================================================
 ;;; simple routines
 ;;;========================================================
@@ -80,8 +78,16 @@ if DONE then stops the loop and return DONE.
 	 (setq ,temp (cdr ,temp)))
        ,(nth 2 spec))))
 
-;; avoid cl
-(defsubst subseq (seq start &optional end) (edmacro-subseq seq start end))
+;; We would like to remove uses of 'cl
+;;   (https://github.com/byplayer/egg/issues/50)
+;; but the 'edmacro package has been removed from emacs
+;;   (https://github.com/byplayer/egg/issues/58)
+;; so we resort to requiring 'cl for now.
+(defsubst subseq (seq start &optional end)
+  (require 'cl)
+  (if end
+      (cl-subseq seq start end)
+    (cl-subseq seq start)))
 
 (defun egg-find-if (predicate seq)
   (dolist-done (item seq found)
