@@ -208,6 +208,7 @@ the index. \\{egg-wdir-diff-section-map}")
     (define-key map (kbd "l") 'egg-log)
     (define-key map (kbd "S") 'egg-stage-all-files)
     (define-key map (kbd "U") 'egg-unstage-all-files)
+    (define-key map (kbd "SPC") 'egg-section-cmd-toggle-hide-show)
     map)
   "Basic keymap for the status buffer.\\{egg-status-base-map}")
 
