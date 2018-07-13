@@ -8,7 +8,7 @@
 ;;
 ;; Author: Bogolisk <bogolisk@gmail.com>
 ;; Created: 19 Aug 2008
-;; Version: 1.1.0
+;; Version: 1.1.2
 ;; Keywords: git, version control, release management
 ;;
 ;; Special Thanks to
@@ -72,7 +72,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.1.1")
+(defconst egg-version "1.1.2")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
