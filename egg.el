@@ -5543,13 +5543,14 @@ prompt for a remote repo."
   (interactive "d")
   (let* ((next (next-single-property-change pos :diff))
          (sha1 (and next (get-text-property next :commit)))
-	 (pickaxe-args (and egg-internal-log-buffer-closure 
-			(plist-get egg-internal-log-buffer-closure :pickaxe-args)))
-	 (pickaxed-paths (and egg-internal-log-buffer-closure 
-			(plist-get egg-internal-log-buffer-closure :paths)))
-	 (highlight (and egg-internal-log-buffer-closure 
-			 (plist-get egg-internal-log-buffer-closure :highlight))))
-    (unless (equal (get-text-property pos :commit) sha1)
+         (pickaxe-args (and egg-internal-log-buffer-closure
+                            (plist-get egg-internal-log-buffer-closure :pickaxe-args)))
+         (pickaxed-paths (and egg-internal-log-buffer-closure
+                              (plist-get egg-internal-log-buffer-closure :paths)))
+         (highlight (and egg-internal-log-buffer-closure
+                         (plist-get egg-internal-log-buffer-closure :highlight))))
+    (if (equal (get-text-property pos :commit) sha1)
+        (call-interactively #'egg-section-cmd-toggle-hide-show)
       (egg-log-buffer-do-insert-commit pos pickaxe-args highlight pickaxed-paths))))
 
 (defun egg-log-show-marked-commits (marked-list)
