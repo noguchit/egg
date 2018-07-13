@@ -4,11 +4,11 @@
 ;; Copyright (C) 2008  Marius Vollmer
 ;; Copyright (C) 2009  Tim Moore
 ;; Copyright (C) 2010  Alexander Prusov
-;; Copyright (C) 2011-2016 byplayer
+;; Copyright (C) 2011-2018 byplayer
 ;;
 ;; Author: Bogolisk <bogolisk@gmail.com>
 ;; Created: 19 Aug 2008
-;; Version: 1.1.2
+;; Version: 1.1.3
 ;; Keywords: git, version control, release management
 ;;
 ;; Special Thanks to
@@ -72,7 +72,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.1.2")
+(defconst egg-version "1.1.3")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
