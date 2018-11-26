@@ -7526,6 +7526,8 @@ With C-u prefix, ask for confirmation before executing the next-action."
   (define-key map (kbd "?") 'egg-search-changes)
   (define-key map (kbd "=") 'egg-file-diff)
   (define-key map (kbd "~") 'egg-file-version-other-window)
+  (define-key map (kbd "P") 'egg-push-upstream)
+  (define-key map (kbd "j") 'egg-pull-upstream)
   )
 
 (defconst egg-minor-mode-menu (make-sparse-keymap "Egg (Git)"))
