@@ -1,5 +1,8 @@
 # Egg (Emacs Got Git).
 
+## 1.1.4
+- add push to the upstream on history buffer
+
 ## 1.1.1
 - egg's attempting to autoload 'edmacro thanks Felix S Klock II
 

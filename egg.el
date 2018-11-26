@@ -8,7 +8,7 @@
 ;;
 ;; Author: Bogolisk <bogolisk@gmail.com>
 ;; Created: 19 Aug 2008
-;; Version: 1.1.3
+;; Version: 1.1.4
 ;; Keywords: git, version control, release management
 ;;
 ;; Special Thanks to
@@ -72,7 +72,7 @@
 (require 'diff-mode)
 (require 'rx)
 
-(defconst egg-version "1.1.3")
+(defconst egg-version "1.1.4")
 
 (defconst egg-basic-map
   (let ((map (make-sparse-keymap "Egg:Basic")))
@@ -5981,7 +5981,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                         egg-section-cmd-toggle-hide-show-children
                                         :enable (egg-navigation-at-point)))
   (define-key menu [prev] '(menu-item "Goto Previous Ref" egg-log-buffer-prev-ref))
-  (define-key menu [next] '(menu-item "Goto Next Ref" egg-log-buffer-next-ref)))
+  (define-key menu [next] '(menu-item "Goto Next Ref" egg-log-buffer-next-ref))
+  (define-key menu [Push] '(menu-item "Push To The Upstream" egg-push-upstream)))
 
 (defconst egg-log-buffer-help-text
   (concat
@@ -5992,6 +5993,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-next-ref]:next thing  "
     "\\[egg-log-buffer-prev-ref]:previous thing  "
     "\\[egg-search-changes]:search history  "
+    "\\[egg-push-upstream]:push to the upstream  "
     "\\[egg-status]:show repo's status  "
     "\\[egg-buffer-cmd-refresh]:redisplay  "
     "\\[egg-quit-buffer]:quit\n")
@@ -7720,6 +7722,11 @@ egg in current buffer.\\<egg-minor-mode-map>
                      (format "%s - %s\n" key-str (format fmt name))))
                ""))
            keymap "")))))
+
+(defun egg-push-upstream (called-interactively select &optional caller)
+  "Push local branch to the upstream"
+  (interactive "p\nP")
+  (egg--git-push-cmd (current-buffer)))
 
 ;;;========================================================
 ;;; auto-update
