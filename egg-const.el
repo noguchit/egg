@@ -498,6 +498,7 @@ the index. \\{egg-wdir-diff-section-map}")
     (define-key map "s" 'egg-status)
     (define-key map "p" 'egg-log-buffer-prev-ref)
     (define-key map "P" 'egg-push-upstream)
+    (define-key map "l" 'egg-pull-upstream)
     map))
 
 (defconst egg-log-buffer-mode-map

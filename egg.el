@@ -5982,7 +5982,8 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
                                         :enable (egg-navigation-at-point)))
   (define-key menu [prev] '(menu-item "Goto Previous Ref" egg-log-buffer-prev-ref))
   (define-key menu [next] '(menu-item "Goto Next Ref" egg-log-buffer-next-ref))
-  (define-key menu [Push] '(menu-item "Push To The Upstream" egg-push-upstream)))
+  (define-key menu [Push] '(menu-item "Push To The Upstream" egg-push-upstream))
+  (define-key menu [Pull] '(menu-item "Pull From The Upstream" egg-pull-upstream)))
 
 (defconst egg-log-buffer-help-text
   (concat
@@ -5994,6 +5995,7 @@ Each remote ref on the commit line has extra extra extra keybindings:\\<egg-log-
     "\\[egg-log-buffer-prev-ref]:previous thing  "
     "\\[egg-search-changes]:search history  "
     "\\[egg-push-upstream]:push to the upstream  "
+    "\\[egg-pull-upstream]:pull from the upstream  "
     "\\[egg-status]:show repo's status  "
     "\\[egg-buffer-cmd-refresh]:redisplay  "
     "\\[egg-quit-buffer]:quit\n")
