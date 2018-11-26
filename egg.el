@@ -7726,7 +7726,17 @@ egg in current buffer.\\<egg-minor-mode-map>
 (defun egg-push-upstream (called-interactively select &optional caller)
   "Push local branch to the upstream"
   (interactive "p\nP")
-  (egg--git-push-cmd (current-buffer)))
+  (progn
+    (message "GIT> pushing...")
+    (egg--git-push-cmd (current-buffer))))
+
+(defun egg-pull-upstream (called-interactively select &optional caller)
+  "Pull remote branch to the local"
+  (interactive "p\nP")
+  (progn
+    (message "GIT> pulling...")
+    (egg-buffer-async-do nil "pull")))
+
 
 ;;;========================================================
 ;;; auto-update
