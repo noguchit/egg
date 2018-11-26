@@ -7533,6 +7533,8 @@ With C-u prefix, ask for confirmation before executing the next-action."
   (cons "Egg (Git)" egg-minor-mode-menu))
 
 (let ((menu egg-minor-mode-menu))
+  (define-key menu [Pull] '(menu-item "Pull From The Upstream" egg-pull-upstream))
+  (define-key menu [push] '(menu-item "Push To The Upstream" egg-push-upstream))
   (define-key menu [reflog] '(menu-item "View RefLog" egg-reflog))
   (define-key menu [log] '(menu-item "View Project History" egg-log))
   (define-key menu [status] '(menu-item "View Project Status" egg-status))
